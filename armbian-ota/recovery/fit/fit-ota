@@ -50,15 +50,59 @@ stop_heartbeat() {
     fi
 }
 
+# ===== tar extract helper with fallback and stderr logging =====
+extract_tar_with_fallback() {
+    archive="$1"
+    target="$2"
+    label="$3"
+    err_file="${LOGDIR}/${label}.tar.stderr.log"
+    rc=0
+
+    rm -f "${err_file}" 2>/dev/null || true
+
+    log "${label}: run tar --xattrs --acls --numeric-owner -xpf ${archive} -C ${target}"
+    if tar --xattrs --acls --numeric-owner -xpf "${archive}" -C "${target}" 2>"${err_file}"; then
+        log "${label}: metadata extract succeeded"
+        rm -f "${err_file}" 2>/dev/null || true
+        return 0
+    fi
+    rc=$?
+
+    log "WARN: ${label} metadata extract failed (rc=${rc}), retrying with plain tar -xzf"
+    if [ -s "${err_file}" ]; then
+        tail -n 40 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "${label} metadata stderr: ${l}"; done
+    fi
+
+    rm -f "${err_file}" 2>/dev/null || true
+    if tar -xzf "${archive}" -C "${target}" 2>"${err_file}"; then
+        log "${label}: plain extract succeeded"
+        rm -f "${err_file}" 2>/dev/null || true
+        return 0
+    fi
+
+    rc=$?
+    log "ERROR: ${label} extract failed in both modes (plain rc=${rc})"
+    if [ -s "${err_file}" ]; then
+        tail -n 80 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "${label} stderr: ${l}"; done
+    fi
+    rm -f "${err_file}" 2>/dev/null || true
+    return 1
+}
+
 
 [ -f /scripts/functions ] && . /scripts/functions
+[ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
 
 # default fallback devices (if detection fails)
 ROOT_DEV=""
 ROOT_MNT="/mnt/root"
+USERDATA_MNT="/mnt/userdata"
 
 OTA_DIR="${ROOT_MNT}/ota_work"
 ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
+PRESERVE_LIST="${ROOT_MNT}/etc/armbian-ota/back-list.txt"
+PRESERVE_TAR="${OTA_DIR}/ota-preserve.tar"
+PRESERVE_TMP_LIST="${LOGDIR}/fit-ota-preserve.list"
 
 log "init-premount fit-ota hook start"
 log "LOGFILE=${LOGFILE}"
@@ -194,6 +238,110 @@ get_luks_uuid_for_root() {
     blkid -t TYPE=crypto_LUKS -s UUID -o value 2>/dev/null | head -n1
 }
 
+# ===== helper: preserve selected files across FIT OTA =====
+prepare_preserve_list() {
+    raw=""
+    line=""
+    rel=""
+    target=""
+
+    rm -f "${PRESERVE_TMP_LIST}" 2>/dev/null || true
+    [ -f "${PRESERVE_LIST}" ] || {
+        log "preserve list not found: ${PRESERVE_LIST}, skip preserve step"
+        return 1
+    }
+
+    while IFS= read -r raw || [ -n "${raw}" ]; do
+        line="$(echo "${raw}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        case "${line}" in
+            ""|\#*) continue ;;
+        esac
+        case "${line}" in
+            /*) ;;
+            *)
+                log "preserve: skip non-absolute path: ${line}"
+                continue
+                ;;
+        esac
+        case "${line}" in
+            "/"|"/."|"/.."|*"../"*|*"/.."|*"*"*|*"?"*|*"["*|*"]"*)
+                log "preserve: skip unsafe pattern: ${line}"
+                continue
+                ;;
+        esac
+
+        rel="${line#/}"
+        [ -n "${rel}" ] || continue
+        target="${ROOT_MNT}/${rel}"
+        if [ -e "${target}" ] || [ -L "${target}" ]; then
+            printf '%s\n' "${rel}" >> "${PRESERVE_TMP_LIST}"
+        else
+            log "preserve: path not found, skip: ${line}"
+        fi
+    done < "${PRESERVE_LIST}"
+
+    [ -s "${PRESERVE_TMP_LIST}" ] || {
+        log "preserve: no valid entries found in ${PRESERVE_LIST}"
+        rm -f "${PRESERVE_TMP_LIST}" 2>/dev/null || true
+        return 1
+    }
+    return 0
+}
+
+backup_preserved_files() {
+    err_file="${LOGDIR}/fit-preserve.backup.stderr.log"
+    rc=0
+    rm -f "${PRESERVE_TAR}" "${err_file}" 2>/dev/null || true
+
+    prepare_preserve_list || return 0
+    log "preserve: backing up whitelisted files to ${PRESERVE_TAR}"
+
+    if tar --xattrs --acls --numeric-owner -cpf "${PRESERVE_TAR}" -C "${ROOT_MNT}" -T "${PRESERVE_TMP_LIST}" 2>"${err_file}"; then
+        log "preserve: backup completed (metadata mode)"
+        rm -f "${err_file}" 2>/dev/null || true
+        return 0
+    fi
+    rc=$?
+    log "preserve: metadata backup failed rc=${rc}, retry plain tar mode"
+    if [ -s "${err_file}" ]; then
+        tail -n 40 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "preserve backup stderr: ${l}"; done
+    fi
+
+    rm -f "${err_file}" 2>/dev/null || true
+    if tar -cpf "${PRESERVE_TAR}" -C "${ROOT_MNT}" -T "${PRESERVE_TMP_LIST}" 2>"${err_file}"; then
+        log "preserve: backup completed (plain mode)"
+        rm -f "${err_file}" 2>/dev/null || true
+        return 0
+    fi
+
+    rc=$?
+    log "WARN: preserve backup failed rc=${rc}, continue without preserve"
+    if [ -s "${err_file}" ]; then
+        tail -n 60 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "preserve backup stderr: ${l}"; done
+    fi
+    rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" "${err_file}" 2>/dev/null || true
+    return 0
+}
+
+restore_preserved_files() {
+    if [ ! -f "${PRESERVE_TAR}" ]; then
+        log "preserve: no backup archive found, skip restore"
+        return 0
+    fi
+
+    log "preserve: restoring whitelisted files from ${PRESERVE_TAR}"
+    start_heartbeat "restoring preserved files"
+    if ! extract_tar_with_fallback "${PRESERVE_TAR}" "${ROOT_MNT}" "fit-preserve"; then
+        stop_heartbeat
+        log "WARN: preserve restore failed, continue OTA"
+        rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" 2>/dev/null || true
+        return 0
+    fi
+    stop_heartbeat
+    rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" 2>/dev/null || true
+    log "preserve: restore completed"
+}
+
 # ===== check OTA trigger =====
 if ! check_ota_trigger; then
     log "No OTA update required"
@@ -244,6 +392,16 @@ fi
 
 log "found rootfs OTA payload, proceeding with rootfs OTA"
 
+# initialize /userdata/.persist before cleaning old rootfs
+if command -v ota_persist_init_userdata >/dev/null 2>&1; then
+    ota_persist_init_userdata "${ROOT_MNT}" "${USERDATA_MNT}"
+else
+    log "persist helper not available, skip userdata persist initialization"
+fi
+
+# preserve whitelist paths before cleaning old rootfs
+backup_preserved_files
+
 # ===== 2) clean rootfs (except ota_work) =====
 log "cleaning ${ROOT_MNT} (except ota_work)..."
 start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
@@ -271,7 +429,7 @@ stop_heartbeat
 # ===== 3) extract rootfs.tar.gz =====
 log "extracting ${ROOTFS_TAR} -> ${ROOT_MNT} ..."
 start_heartbeat "extracting rootfs.tar.gz to ${ROOT_MNT}"
-if ! tar  -xzf "${ROOTFS_TAR}" -C "${ROOT_MNT}"; then
+if ! extract_tar_with_fallback "${ROOTFS_TAR}" "${ROOT_MNT}" "rootfs"; then
     stop_heartbeat
     log "ERROR: extract rootfs.tar.gz failed, abort OTA"
     umount "${ROOT_MNT}" 2>/dev/null || true
@@ -283,6 +441,24 @@ fi
 stop_heartbeat
 
 sync
+restore_preserved_files
+
+if rm -f "${ROOT_MNT}/root/.not_logged_in_yet" 2>/dev/null; then
+    log "removed ${ROOT_MNT}/root/.not_logged_in_yet to avoid first-login re-trigger"
+fi
+
+for ov in \
+    "${ROOT_MNT}/etc/systemd/system/getty@.service.d/override.conf" \
+    "${ROOT_MNT}/etc/systemd/system/serial-getty@.service.d/override.conf"
+do
+    if [ -f "${ov}" ]; then
+        if grep -Eq -- 'autologin|--autologin' "${ov}" 2>/dev/null; then
+            rm -f "${ov}" 2>/dev/null && log "removed stale autologin override: ${ov}"
+        else
+            log "keep non-autologin override: ${ov}"
+        fi
+    fi
+done
 
 # ===== 4) fix UUIDs in new rootfs /etc/fstab + /etc/crypttab =====
 FSTAB="${ROOT_MNT}/etc/fstab"

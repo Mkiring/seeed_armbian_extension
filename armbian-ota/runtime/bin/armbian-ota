@@ -2,18 +2,27 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ -f "${SCRIPT_DIR}/common.sh" ]; then
-    OTA_RUNTIME_DIR="${SCRIPT_DIR}"
+if [ -f "${SCRIPT_DIR}/../lib/common.sh" ]; then
+    OTA_RUNTIME_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
+    OTA_SOURCE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 elif [ -f /usr/share/armbian-ota/common.sh ]; then
     OTA_RUNTIME_DIR="/usr/share/armbian-ota"
+    OTA_SOURCE_ROOT=""
 else
     echo "ERROR: Cannot find OTA runtime libraries" >&2
     exit 1
 fi
 
 export OTA_RUNTIME_DIR
+export OTA_SOURCE_ROOT
 
 . "${OTA_RUNTIME_DIR}/common.sh"
+if [ -f "${OTA_RUNTIME_DIR}/persist.sh" ]; then
+    . "${OTA_RUNTIME_DIR}/persist.sh"
+fi
+if [ -f "${OTA_RUNTIME_DIR}/preserve.sh" ]; then
+    . "${OTA_RUNTIME_DIR}/preserve.sh"
+fi
 
 HAS_AB_BACKEND=0
 HAS_RECOVERY_BACKEND=0
@@ -21,10 +30,16 @@ HAS_RECOVERY_BACKEND=0
 if [ -f "${OTA_RUNTIME_DIR}/backend-ab.sh" ]; then
     . "${OTA_RUNTIME_DIR}/backend-ab.sh"
     HAS_AB_BACKEND=1
+elif [ -n "${OTA_SOURCE_ROOT}" ] && [ -f "${OTA_SOURCE_ROOT}/ab/runtime/backend.sh" ]; then
+    . "${OTA_SOURCE_ROOT}/ab/runtime/backend.sh"
+    HAS_AB_BACKEND=1
 fi
 
 if [ -f "${OTA_RUNTIME_DIR}/backend-recovery.sh" ]; then
     . "${OTA_RUNTIME_DIR}/backend-recovery.sh"
+    HAS_RECOVERY_BACKEND=1
+elif [ -n "${OTA_SOURCE_ROOT}" ] && [ -f "${OTA_SOURCE_ROOT}/recovery/runtime/backend.sh" ]; then
+    . "${OTA_SOURCE_ROOT}/recovery/runtime/backend.sh"
     HAS_RECOVERY_BACKEND=1
 fi
 

@@ -3,8 +3,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/../../runtime/common.sh" ]; then
-    . "${SCRIPT_DIR}/../../runtime/common.sh"
+if [ -f "${SCRIPT_DIR}/../../runtime/lib/common.sh" ]; then
+    . "${SCRIPT_DIR}/../../runtime/lib/common.sh"
 elif [ -f /usr/share/armbian-ota/common.sh ]; then
     . /usr/share/armbian-ota/common.sh
 else

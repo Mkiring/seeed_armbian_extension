@@ -49,3 +49,8 @@ fi
 if [ -x /usr/bin/awk ]; then
     copy_exec /usr/bin/awk /usr/bin
 fi
+
+if [ -f /usr/share/armbian-ota/persist.sh ]; then
+    mkdir -p "${DESTDIR}/usr/share/armbian-ota"
+    cp -p /usr/share/armbian-ota/persist.sh "${DESTDIR}/usr/share/armbian-ota/persist.sh"
+fi

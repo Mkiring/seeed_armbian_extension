@@ -239,7 +239,9 @@ installed_recovery_asset_dir() {
     dir="$(runtime_dir)"
     if [ -d "${dir}/recovery" ]; then
         echo "${dir}/recovery"
+    elif [ -n "${OTA_SOURCE_ROOT:-}" ] && [ -d "${OTA_SOURCE_ROOT}/recovery" ]; then
+        echo "${OTA_SOURCE_ROOT}/recovery"
     else
-        echo "${dir}/../recovery_ota"
+        echo "${dir}/../recovery"
     fi
 }

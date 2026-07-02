@@ -363,7 +363,7 @@ ab_update_target_partition() {
     local target_boot_label="$3"
     local target_slot target_root_dev target_boot_dev root_mnt boot_mnt
     local target_root_uuid target_boot_uuid existing_root_uuid existing_boot_uuid
-    local fstab arm_env crypttab
+    local fstab arm_env crypttab preserve_list
     local target_root_type target_root_mount_dev target_root_luks_uuid
     local security_dev key_file luks_mapper luks_opened
 
@@ -444,6 +444,20 @@ ab_update_target_partition() {
         rm -rf "${root_mnt}"
         error_exit "Failed to extract rootfs payload"
     }
+
+    if command -v ota_persist_init_userdata >/dev/null 2>&1; then
+        ota_persist_init_userdata "/" "/mnt/armbian-ota-userdata"
+    else
+        log_warn "persist helper not available, skip userdata persist initialization"
+    fi
+
+    if command -v ota_preserve_apply_list >/dev/null 2>&1; then
+        preserve_list="/etc/armbian-ota/back-list.txt"
+        [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/back-list.txt"
+        ota_preserve_apply_list "/" "${root_mnt}" "${preserve_list}"
+    else
+        log_warn "preserve helper not available, skip local config preserve"
+    fi
 
     if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
         boot_mnt="$(mktemp -d)"

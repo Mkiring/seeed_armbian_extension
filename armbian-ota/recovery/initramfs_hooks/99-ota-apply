@@ -103,6 +103,7 @@ extract_tar_with_fallback() {
 set -x
 
 [ -f /scripts/functions ] && . /scripts/functions
+[ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
 
 # default fallback devices (if detection fails)
 ROOT_DEV=""
@@ -110,6 +111,7 @@ BOOT_DEV=""
 
 ROOT_MNT="/mnt/root"
 BOOT_MNT="/mnt/boot"
+USERDATA_MNT="/mnt/userdata"
 STATE_DIR="${ROOT_MNT}/var/lib/armbian-ota"
 STATE_FILE="${STATE_DIR}/state.env"
 
@@ -362,6 +364,13 @@ if [ -f "${BOOT_TAR}" ]; then
 fi
 
 log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}"
+
+# initialize /userdata/.persist before cleaning old rootfs
+if command -v ota_persist_init_userdata >/dev/null 2>&1; then
+    ota_persist_init_userdata "${ROOT_MNT}" "${USERDATA_MNT}"
+else
+    log "persist helper not available, skip userdata persist initialization"
+fi
 
 # preserve whitelist paths before cleaning old rootfs
 backup_preserved_files
