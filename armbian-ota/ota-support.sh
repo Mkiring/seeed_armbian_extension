@@ -3,8 +3,9 @@ function pre_update_initramfs__301_config_fit_ota_script(){
     if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]; then
         display_alert "ota config" "Installing FIT OTA support into initramfs" "info"
         local root_dir="${MOUNT}"
+        local ota_ext_dir="${SRC}/extensions/armbian-ota"
         # Copy 99-copy-tools hook file
-        local hook_src="${SRC}/extensions/armbian-ota/armbian_ota_tools/99-copy-tools"
+        local hook_src="${ota_ext_dir}/recovery/initramfs_hooks/99-copy-tools"
         local hook_dst="${root_dir}/etc/initramfs-tools/hooks/zz-copy-tools"
 
         if [[ -f "${hook_src}" ]]; then
@@ -21,7 +22,7 @@ function pre_update_initramfs__301_config_fit_ota_script(){
         # Copy fit-ota.sh script to initramfs
         display_alert "ota config" "Installing fit-ota script" "info"
         # Copy fit-ota.sh script
-        local ota_src="${SRC}/extensions/armbian-ota/armbian_ota_tools/fit-ota"
+        local ota_src="${ota_ext_dir}/recovery/fit/fit-ota"
         local ota_dst="${root_dir}/etc/initramfs-tools/scripts/init-premount/1-fit-ota"
 
         if [[ -f "${ota_src}" ]]; then
@@ -33,6 +34,20 @@ function pre_update_initramfs__301_config_fit_ota_script(){
             display_alert "ota config" "fit-ota script installation completed" "info"
         else
             display_alert "ota config" "fit-ota.sh source file not found: ${ota_src}" "warn"
+        fi
+
+        local persist_src="${ota_ext_dir}/runtime/lib/persist.sh"
+        local persist_dst="${root_dir}/usr/share/armbian-ota/persist.sh"
+        if [[ -f "${persist_src}" ]]; then
+            mkdir -p "$(dirname "${persist_dst}")"
+            cp "${persist_src}" "${persist_dst}" || {
+                display_alert "ota config" "Failed to copy persist.sh" "err"
+                return 1
+            }
+            chmod +x "${persist_dst}"
+            display_alert "ota config" "persist helper installation completed" "info"
+        else
+            display_alert "ota config" "persist helper source file not found: ${persist_src}" "warn"
         fi
     fi
 
@@ -485,8 +500,8 @@ EOF
     local ota_ext_dir
     ota_ext_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local runtime_src="${ota_ext_dir}/runtime"
-    local ab_src="${ota_ext_dir}/ab_ota"
-    local recovery_src="${ota_ext_dir}/recovery_ota"
+    local ab_src="${ota_ext_dir}/ab"
+    local recovery_src="${ota_ext_dir}/recovery"
     local payload_tools_dir="${ota_temp_dir}/ota_tools"
 
     mkdir -p "${payload_tools_dir}"
@@ -503,17 +518,18 @@ EOF
     fi
 
     if [[ -d "${ab_src}" ]]; then
-        mkdir -p "${payload_tools_dir}/ab_ota"
-        cp -a "${ab_src}/userspace" "${payload_tools_dir}/ab_ota/" 2>/dev/null || true
-        cp -a "${ab_src}/systemd" "${payload_tools_dir}/ab_ota/" 2>/dev/null || true
+        mkdir -p "${payload_tools_dir}/ab"
+        cp -a "${ab_src}/lib" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${ab_src}/runtime" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${ab_src}/systemd" "${payload_tools_dir}/ab/" 2>/dev/null || true
     fi
 
     if [[ -d "${recovery_src}" ]]; then
-        mkdir -p "${payload_tools_dir}/recovery_ota"
-        cp -a "${recovery_src}/armbian-ota-manager" "${payload_tools_dir}/recovery_ota/" 2>/dev/null || true
-        cp -a "${recovery_src}/start_prepare_ota.sh" "${payload_tools_dir}/recovery_ota/" 2>/dev/null || true
-        cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery_ota/" 2>/dev/null || true
-        cp -a "${recovery_src}/fit" "${payload_tools_dir}/recovery_ota/" 2>/dev/null || true
+        mkdir -p "${payload_tools_dir}/recovery"
+        cp -a "${recovery_src}/bin" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${recovery_src}/runtime" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${recovery_src}/fit" "${payload_tools_dir}/recovery/" 2>/dev/null || true
     fi
 
     cat > "${payload_tools_dir}/README_INSTALL.txt" << 'EOF'
@@ -530,12 +546,24 @@ In those cases, you only need to copy the OTA package and run `armbian-ota start
 Typical usage:
 1) If your firmware does not include OTA runtime, copy ota_tools/ to target board.
 2) Install runtime CLI and libraries manually (as root), for example:
-   cp -a runtime/armbian-ota /usr/sbin/armbian-ota
+   cp -a runtime/bin/armbian-ota /usr/sbin/armbian-ota
+   cp -a runtime/bin/armbian-ota-manager /usr/sbin/armbian-ota-manager
    chmod +x /usr/sbin/armbian-ota
+   chmod +x /usr/sbin/armbian-ota-manager
    mkdir -p /usr/share/armbian-ota
-   cp -a runtime/common.sh runtime/backend-*.sh /usr/share/armbian-ota/
+   cp -a runtime/lib/common.sh /usr/share/armbian-ota/common.sh
+   cp -a runtime/lib/persist.sh /usr/share/armbian-ota/persist.sh
+   cp -a runtime/lib/preserve.sh /usr/share/armbian-ota/preserve.sh
+   mkdir -p /etc/armbian-ota
+   if [ -f /etc/armbian-ota/back-list.txt ]; then
+       cp -a runtime/policy/back-list.txt /etc/armbian-ota/back-list.txt.default
+   else
+       cp -a runtime/policy/back-list.txt /etc/armbian-ota/back-list.txt
+   fi
+   cp -a ab/runtime/backend.sh /usr/share/armbian-ota/backend-ab.sh
+   cp -a recovery/runtime/backend.sh /usr/share/armbian-ota/backend-recovery.sh
    mkdir -p /usr/share/armbian-ota/recovery
-   cp -a recovery_ota /usr/share/armbian-ota/recovery/
+   cp -a recovery/. /usr/share/armbian-ota/recovery/
 
 3) Trigger OTA:
    armbian-ota start --mode=ab <ota-package.tar.gz>
@@ -746,7 +774,9 @@ function pre_umount_final_image__894_install_ota_runtime() {
     local ota_ext_dir
     ota_ext_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local runtime_src="${ota_ext_dir}/runtime"
-    local recovery_src="${ota_ext_dir}/recovery_ota"
+    local ab_src="${ota_ext_dir}/ab"
+    local recovery_src="${ota_ext_dir}/recovery"
+    local default_back_list="${runtime_src}/policy/back-list.txt"
 
     if [[ ! -d "${runtime_src}" ]]; then
         display_alert "OTA runtime" "runtime source dir missing: ${runtime_src}" "warn"
@@ -756,22 +786,47 @@ function pre_umount_final_image__894_install_ota_runtime() {
     display_alert "OTA runtime" "Installing OTA runtime into rootfs" "info"
     mkdir -p "${root_dir}/usr/sbin" "${root_dir}/usr/share/armbian-ota"
 
-    cp "${runtime_src}/armbian-ota" "${root_dir}/usr/sbin/armbian-ota" || {
+    cp "${runtime_src}/bin/armbian-ota" "${root_dir}/usr/sbin/armbian-ota" || {
         display_alert "OTA runtime" "Failed to install armbian-ota CLI" "err"
         return 1
     }
-    cp "${runtime_src}/common.sh" "${root_dir}/usr/share/armbian-ota/common.sh" || {
+    cp "${runtime_src}/bin/armbian-ota-manager" "${root_dir}/usr/sbin/armbian-ota-manager" || {
+        display_alert "OTA runtime" "Failed to install armbian-ota-manager wrapper" "err"
+        return 1
+    }
+    cp "${runtime_src}/lib/common.sh" "${root_dir}/usr/share/armbian-ota/common.sh" || {
         display_alert "OTA runtime" "Failed to install common.sh" "err"
         return 1
     }
+    cp "${runtime_src}/lib/persist.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" || {
+        display_alert "OTA runtime" "Failed to install persist.sh" "err"
+        return 1
+    }
+    cp "${runtime_src}/lib/preserve.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh" || {
+        display_alert "OTA runtime" "Failed to install preserve.sh" "err"
+        return 1
+    }
+
+    if [[ -f "${default_back_list}" ]]; then
+        mkdir -p "${root_dir}/etc/armbian-ota"
+        if [[ -f "${root_dir}/etc/armbian-ota/back-list.txt" ]]; then
+            cp "${default_back_list}" "${root_dir}/etc/armbian-ota/back-list.txt.default" || {
+                display_alert "OTA runtime" "Failed to install default back-list.txt.default" "warn"
+            }
+        else
+            cp "${default_back_list}" "${root_dir}/etc/armbian-ota/back-list.txt" || {
+                display_alert "OTA runtime" "Failed to install default back-list.txt" "warn"
+            }
+        fi
+    fi
 
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        cp "${runtime_src}/backend-ab.sh" "${root_dir}/usr/share/armbian-ota/backend-ab.sh" || {
+        cp "${ab_src}/runtime/backend.sh" "${root_dir}/usr/share/armbian-ota/backend-ab.sh" || {
             display_alert "OTA runtime" "Failed to install backend-ab.sh" "err"
             return 1
         }
     else
-        cp "${runtime_src}/backend-recovery.sh" "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" || {
+        cp "${recovery_src}/runtime/backend.sh" "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" || {
             display_alert "OTA runtime" "Failed to install backend-recovery.sh" "err"
             return 1
         }
@@ -781,21 +836,100 @@ function pre_umount_final_image__894_install_ota_runtime() {
                 display_alert "OTA runtime" "Failed to install recovery runtime assets" "err"
                 return 1
             }
-
-            if [[ -f "${recovery_src}/back-list.txt" ]]; then
-                mkdir -p "${root_dir}/etc/armbian-ota"
-                cp "${recovery_src}/back-list.txt" "${root_dir}/etc/armbian-ota/back-list.txt" || {
-                    display_alert "OTA runtime" "Failed to install default recovery back-list.txt" "warn"
-                }
-            fi
         fi
     fi
 
-    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/share/armbian-ota/common.sh"
+    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/sbin/armbian-ota-manager" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-ab.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-ab.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-recovery.sh"
 
     return 0
+}
+
+function ota_configure_persist_fstab() {
+    local root_dir="$1"
+    local fstab="${root_dir}/etc/fstab"
+
+    [[ -f "${fstab}" ]] || {
+        display_alert "OTA persist" "fstab not found, skip persist bind mounts" "warn"
+        return 0
+    }
+
+    mkdir -p "${root_dir}/userdata" "${root_dir}/home"
+
+    sed -i '/^# BEGIN armbian-ota persist$/,/^# END armbian-ota persist$/d' "${fstab}"
+    cat >> "${fstab}" <<'EOF'
+
+# BEGIN armbian-ota persist
+LABEL=armbi_usrdata                    /userdata       ext4  defaults,noatime,nofail,x-systemd.device-timeout=10s                  0  2
+/userdata/.persist/etc/passwd          /etc/passwd     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+/userdata/.persist/etc/shadow          /etc/shadow     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+/userdata/.persist/etc/group           /etc/group      none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+/userdata/.persist/etc/gshadow         /etc/gshadow    none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+/userdata/.persist/etc/subuid          /etc/subuid     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+/userdata/.persist/etc/subgid          /etc/subgid     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+/userdata/.persist/home                /home           none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+# END armbian-ota persist
+EOF
+
+    display_alert "OTA persist" "Configured /userdata/.persist bind mounts in fstab" "info"
+}
+
+function ota_init_userdata_persist() {
+    local root_dir="$1"
+
+    [[ "${AB_PART_OTA}" == "yes" ]] || return 0
+    [[ -n "${AB_USERDATA_PART_INDEX}" ]] || return 0
+    [[ -b "${LOOP}p${AB_USERDATA_PART_INDEX}" ]] || {
+        display_alert "OTA persist" "userdata partition not found, skip persist initialization" "warn"
+        return 0
+    }
+
+    local userdata_dev="${LOOP}p${AB_USERDATA_PART_INDEX}"
+    local userdata_mnt
+    userdata_mnt="$(mktemp -d)"
+
+    if ! mount "${userdata_dev}" "${userdata_mnt}"; then
+        display_alert "OTA persist" "Failed to mount userdata for persist initialization" "warn"
+        rm -rf "${userdata_mnt}"
+        return 0
+    fi
+
+    local persist="${userdata_mnt}/.persist"
+    mkdir -p "${persist}/etc" "${persist}/home"
+
+    local account_file
+    for account_file in passwd shadow group gshadow subuid subgid; do
+        if [[ -f "${root_dir}/etc/${account_file}" && ! -e "${persist}/etc/${account_file}" ]]; then
+            cp -a "${root_dir}/etc/${account_file}" "${persist}/etc/${account_file}" || \
+                display_alert "OTA persist" "Failed to initialize ${account_file}" "warn"
+        fi
+    done
+
+    if [[ -d "${root_dir}/home" && -z "$(find "${persist}/home" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+        cp -a "${root_dir}/home/." "${persist}/home/" 2>/dev/null || \
+            display_alert "OTA persist" "Failed to initialize /home persist data" "warn"
+    fi
+
+    chmod 755 "${persist}" "${persist}/etc" "${persist}/home" 2>/dev/null || true
+    chmod 644 "${persist}/etc/passwd" "${persist}/etc/group" "${persist}/etc/subuid" "${persist}/etc/subgid" 2>/dev/null || true
+    chmod 600 "${persist}/etc/shadow" "${persist}/etc/gshadow" 2>/dev/null || true
+
+    sync
+    umount "${userdata_mnt}" || display_alert "OTA persist" "Failed to unmount userdata after persist initialization" "warn"
+    rm -rf "${userdata_mnt}"
+
+    display_alert "OTA persist" "Initialized /userdata/.persist account files and home data" "info"
+}
+
+function pre_umount_final_image__897_configure_ota_persist() {
+    if [[ "${OTA_ENABLE}" != "yes" ]]; then
+        return 0
+    fi
+
+    local root_dir="${MOUNT}"
+    ota_configure_persist_fstab "${root_dir}"
+    ota_init_userdata_persist "${root_dir}"
 }
 
 function rk_ab_autodecrypt_nonsecure_mode_enabled() {
@@ -1001,11 +1135,11 @@ function pre_umount_final_image__896_install_resize_userdata_service() {
 
     mkdir -p "${root_dir}/etc/systemd/system" "${root_dir}/usr/lib/armbian"
 
-    cp "${ota_ext_dir}/ab_ota/systemd/armbian-resize-userdata.service" "${root_dir}/etc/systemd/system/" || {
+    cp "${ota_ext_dir}/ab/systemd/armbian-resize-userdata.service" "${root_dir}/etc/systemd/system/" || {
         display_alert "A/B partition OTA" "Failed to copy armbian-resize-userdata.service" "err"
         return 1
     }
-    cp "${ota_ext_dir}/ab_ota/userspace/armbian-resize-userdata" "${root_dir}/usr/lib/armbian/" || {
+    cp "${ota_ext_dir}/ab/lib/armbian-resize-userdata" "${root_dir}/usr/lib/armbian/" || {
         display_alert "A/B partition OTA" "Failed to copy armbian-resize-userdata script" "err"
         return 1
     }
@@ -1019,7 +1153,7 @@ function pre_umount_final_image__896_install_resize_userdata_service() {
 }
 
 # Function to install AB OTA manager and related tools
-function pre_umount_final_image__895_install_ab_ota_tools() {
+function pre_umount_final_image__895_install_ab_tools() {
     if [[ "${OTA_ENABLE}" != "yes" ]]; then
         return 0
     fi
@@ -1032,17 +1166,13 @@ function pre_umount_final_image__895_install_ab_ota_tools() {
 
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
         display_alert "A/B partition OTA" "Installing AB OTA userspace tools" "info"
-        local ab_ota_src="${ota_ext_dir}/ab_ota"
+        local ab_src="${ota_ext_dir}/ab"
 
-        cp "${ab_ota_src}/userspace/armbian-ota-manager" "${root_dir}/usr/sbin/armbian-ota-manager" || {
-            display_alert "A/B partition OTA" "Failed to install armbian-ota-manager wrapper" "err"
-            return 1
-        }
-        cp "${ab_ota_src}/userspace/armbian-ota-health-check" "${root_dir}/usr/lib/armbian/armbian-ota-health-check" || {
+        cp "${ab_src}/lib/armbian-ota-health-check" "${root_dir}/usr/lib/armbian/armbian-ota-health-check" || {
             display_alert "A/B partition OTA" "Failed to install armbian-ota-health-check" "err"
             return 1
         }
-        cp "${ab_ota_src}/userspace/armbian-ota-init-uboot" "${root_dir}/usr/lib/armbian/armbian-ota-init-uboot" || {
+        cp "${ab_src}/lib/armbian-ota-init-uboot" "${root_dir}/usr/lib/armbian/armbian-ota-init-uboot" || {
             display_alert "A/B partition OTA" "Failed to install armbian-ota-init-uboot" "err"
             return 1
         }
@@ -1056,7 +1186,7 @@ function pre_umount_final_image__895_install_ab_ota_tools() {
         )
         local svc
         for svc in "${services[@]}"; do
-            cp "${ab_ota_src}/systemd/${svc}" "${root_dir}/etc/systemd/system/${svc}" || {
+            cp "${ab_src}/systemd/${svc}" "${root_dir}/etc/systemd/system/${svc}" || {
                 display_alert "A/B partition OTA" "Failed to install ${svc}" "warn"
             }
         done
@@ -1066,13 +1196,9 @@ function pre_umount_final_image__895_install_ab_ota_tools() {
         chroot "${root_dir}" systemctl enable armbian-ota-mark-success.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-mark-success.service" "warn"
     else
         display_alert "Recovery OTA" "Installing recovery OTA userspace tools" "info"
-        local recovery_src="${ota_ext_dir}/recovery_ota"
+        local recovery_src="${ota_ext_dir}/recovery"
 
-        cp "${recovery_src}/armbian-ota-manager" "${root_dir}/usr/sbin/armbian-ota-manager" || {
-            display_alert "Recovery OTA" "Failed to install armbian-ota-manager wrapper" "err"
-            return 1
-        }
-        cp "${recovery_src}/start_prepare_ota.sh" "${root_dir}/usr/sbin/start_prepare_ota.sh" || {
+        cp "${recovery_src}/bin/start_prepare_ota.sh" "${root_dir}/usr/sbin/start_prepare_ota.sh" || {
             display_alert "Recovery OTA" "Failed to install start_prepare_ota.sh wrapper" "err"
             return 1
         }

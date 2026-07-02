@@ -16,43 +16,40 @@ Payload still includes `ota_tools/` as a fallback/offline bundle.
 extensions/armbian-ota/
 ├── ota-support.sh                          # Main entry point
 │
-├── recovery_ota/                           # Recovery OTA mode
+├── recovery/                           # Recovery OTA mode
+│   ├── runtime/
+│   │   └── backend.sh                      # Recovery OTA backend
+│   ├── bin/
+│   │   └── start_prepare_ota.sh            # Compatibility wrapper
 │   ├── initramfs_hooks/
 │   │   ├── 99-copy-tools                   # Initramfs hook for recovery OTA
 │   │   └── 99-ota-apply                    # Recovery OTA apply script
 │   ├── fit/
 │   │   └── fit-ota                         # FIT image OTA support
-│   └── start_prepare_ota.sh                # Compatibility wrapper
 │
 ├── runtime/                                # Unified OTA runtime
-│   ├── armbian-ota                         # Unified CLI entrypoint
-│   ├── backend-ab.sh                       # AB OTA backend
-│   ├── backend-recovery.sh                 # Recovery OTA backend
-│   └── common.sh                           # Shared runtime helpers
+│   ├── bin/
+│   │   ├── armbian-ota                     # Unified CLI entrypoint
+│   │   └── armbian-ota-manager             # Unified compatibility wrapper
+│   ├── lib/
+│   │   ├── common.sh                       # Shared runtime helpers
+│   │   ├── persist.sh                      # Shared userdata persistence helper
+│   │   └── preserve.sh                     # Shared local config preserve helper
+│   └── policy/
+│       └── back-list.txt                   # Default local config preserve list
 │
-├── ab_ota/                                 # AB Partition OTA mode
-│   ├── initramfs_hooks/
-│   │   ├── 99-copy-ab-ota-tools            # Initramfs hook for AB OTA
-│   │   └── ab-ota-apply                    # AB OTA apply script
-│   ├── userspace/
-│   │   ├── armbian-ota-manager             # Compatibility wrapper
+├── ab/                                 # AB Partition OTA mode
+│   ├── runtime/
+│   │   └── backend.sh                      # AB OTA backend
+│   ├── lib/
 │   │   ├── armbian-ota-health-check        # First boot health check
-│   │   └── lib/common.sh                   # Common functions
+│   │   ├── armbian-ota-init-uboot          # U-Boot environment initializer
+│   │   └── armbian-resize-userdata         # Resize shared userdata partition
 │   ├── systemd/
 │   │   ├── armbian-ota-firstboot.service   # Health check service
 │   │   ├── armbian-ota-mark-success.service # Mark success service
-│   │   └── armbian-ota-rollback.service    # Rollback service
-│   └── configs/                            # Configuration templates
-│
-├── common/                                 # Shared utilities
-│   └── lib/
-│       ├── logger.sh                       # Logging functions
-│       ├── partition.sh                    # Partition operations
-│       └── verify.sh                       # SHA256 verification
-│
-└── systemd/                                # Shared systemd services
-    ├── armbian-resize-userdata
-    └── armbian-resize-userdata.service
+│   │   ├── armbian-ota-rollback.service    # Rollback service
+│   │   └── armbian-resize-userdata.service # Resize shared userdata partition
 ```
 
 ## Recovery OTA Mode
@@ -103,6 +100,32 @@ AB_PART_OTA=yes
 | nvme0n1p3 | armbi_roota | Root slot A |
 | nvme0n1p4 | armbi_rootb | Root slot B |
 | nvme0n1p5 | armbi_usrdata | User data (shared) |
+
+### Persistent Data
+
+OTA images configure `armbi_usrdata` as `/userdata` and keep cross-slot data
+under `/userdata/.persist`. The default persistent bind mounts are:
+
+| Source | Target |
+|--------|--------|
+| `/userdata/.persist/etc/passwd` | `/etc/passwd` |
+| `/userdata/.persist/etc/shadow` | `/etc/shadow` |
+| `/userdata/.persist/etc/group` | `/etc/group` |
+| `/userdata/.persist/etc/gshadow` | `/etc/gshadow` |
+| `/userdata/.persist/etc/subuid` | `/etc/subuid` |
+| `/userdata/.persist/etc/subgid` | `/etc/subgid` |
+| `/userdata/.persist/home` | `/home` |
+
+Both AB OTA and Recovery OTA use the shared `persist.sh` helper to initialize
+these files from the currently active rootfs before switching or cleaning the
+target rootfs, if the userdata partition exists and `.persist` has not been
+populated yet.
+
+Local device configuration is preserved with `/etc/armbian-ota/back-list.txt`;
+the default source file is `runtime/policy/back-list.txt`. Recovery OTA backs up those
+paths before cleaning the current rootfs and restores them after extraction. AB
+OTA applies the same list by copying those paths from the currently running
+slot into the newly staged target slot before boot switching.
 
 ### U-Boot Environment Variables
 
@@ -216,9 +239,9 @@ fw_setenv ota_in_progress 0
 
 ### Adding New Features
 
-1. For Recovery OTA: Modify files in `recovery_ota/`
-2. For AB OTA: Modify files in `ab_ota/`
-3. For shared functionality: Use `common/lib/`
+1. For Recovery OTA: Modify files in `recovery/`
+2. For AB OTA: Modify files in `ab/`
+3. For shared functionality: Use `runtime/`
 
 ### Function Naming Convention
 
