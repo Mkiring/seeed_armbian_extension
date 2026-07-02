@@ -21,8 +21,8 @@ BUILD_UBOOT_ONLY="no"
 BUILD_MINIMAL="no"
 BUILD_DESKTOP="yes"
 
-# Feature flags (all off by default; profiles enable what they need)
-OTA_ENABLE="no"
+# Feature flags. Empty OTA_ENABLE means "honor board config default".
+OTA_ENABLE=""
 AB_PART_OTA="no"
 CRYPTROOT_ENABLE="no"
 RK_AUTO_DECRYP="no"
@@ -41,21 +41,19 @@ VALID_TIERS="minimal mid full"
 # ── Usage ───────────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [profile] [options]
+Usage: $(basename "$0") [profile ...] [options]
 
-Profiles (feature sets, default: plain desktop build):
-  recovery-ota  Recovery OTA + encryption + auto-decrypt
-  ab-ota        A/B dual-partition OTA + encryption + auto-decrypt
+Profiles (feature switches, can be combined; default: plain desktop build):
+  recovery      Recovery OTA
+  ab            A/B dual-partition OTA
   secure-boot   Secure U-Boot + encryption + auto-decrypt
   optee         OP-TEE boot + encryption + auto-decrypt
-  max           All features: A/B OTA + encryption + secure boot + OP-TEE
 
 Options:
   Build mode:
   --kernel                    Build kernel only (skip u-boot, rootfs, image)
   --uboot                     Build u-boot only (skip kernel, rootfs, image)
   --minimal                   Build minimal system (no desktop)
-  --no-usbplug                Skip usbplug recompile (use rkbin blob; old SPI flash only)
 
   Build config:
   -b, --board BOARD           Board name (default: recomputer-rk3576-devkit)
@@ -69,7 +67,7 @@ Options:
                               Options: minimal, mid, full
 
   Utilities:
-  -k, --kernel-config         Interactive kernel config
+  --no-usbplug                Skip usbplug recompile (use rkbin blob; old SPI flash only)
   -c, --clear-kernel-cache    Clear kernel deb/worktree cache before build
   -r, --clear-rootfs-cache    Clear rootfs cache before build
   -n, --dry-run               Show build config without running compile.sh
@@ -80,9 +78,10 @@ Examples:
   $(basename "$0") -d xfce -R noble             # XFCE on Ubuntu noble
   $(basename "$0") --minimal                    # No desktop, minimal system
   $(basename "$0") --kernel -c                  # Kernel only, clear cache
-  $(basename "$0") recovery-ota                 # Recovery OTA + encryption
-  $(basename "$0") max -d xfce                  # All features with XFCE
-  $(basename "$0") ab-ota -b recomputer-rk3588-devkit
+  $(basename "$0") recovery                     # Recovery OTA only
+  $(basename "$0") recovery secure-boot         # Recovery OTA + secure boot
+  $(basename "$0") ab secure-boot -d xfce       # A/B OTA + secure boot with XFCE
+  $(basename "$0") ab -b recomputer-rk3588-devkit
 EOF
     exit 0
 }
@@ -104,41 +103,34 @@ validate_option() {
     fi
 }
 
+clear_uboot_cache() {
+    echo "Clearing U-Boot artifact cache for $BOARD..."
+    rm -f output/debs/linux-u-boot-${BOARD}-*.deb
+    rm -f output/packages-hashed/u-boot-${BOARD}-*.tar 2>/dev/null
+    echo "U-Boot cache cleared."
+}
+
 # ── Profile application ─────────────────────────────────────────────────────
 apply_profile() {
     local profile="${1:-}"
     [[ -z "$profile" ]] && return 0
     case "$profile" in
-        recovery-ota)
+        recovery)
             OTA_ENABLE="yes"
             AB_PART_OTA="no"
-            CRYPTROOT_ENABLE="yes"
-            RK_AUTO_DECRYP="yes"
             ;;
-        ab-ota)
+        ab)
             OTA_ENABLE="yes"
             AB_PART_OTA="yes"
-            CRYPTROOT_ENABLE="yes"
-            RK_AUTO_DECRYP="yes"
             ;;
         secure-boot)
-            OTA_ENABLE="yes"
             CRYPTROOT_ENABLE="yes"
             RK_AUTO_DECRYP="yes"
             RK_SECURE_UBOOT_ENABLE="yes"
             ;;
         optee)
-            OTA_ENABLE="yes"
             CRYPTROOT_ENABLE="yes"
             RK_AUTO_DECRYP="yes"
-            RK_OPTEE_BOOT_ENABLE="yes"
-            ;;
-        max)
-            OTA_ENABLE="yes"
-            AB_PART_OTA="yes"
-            CRYPTROOT_ENABLE="yes"
-            RK_AUTO_DECRYP="yes"
-            RK_SECURE_UBOOT_ENABLE="yes"
             RK_OPTEE_BOOT_ENABLE="yes"
             ;;
         *)
@@ -147,11 +139,56 @@ apply_profile() {
     esac
 }
 
+append_security_args() {
+    local require_passphrase="${1:-no}"
+
+    if [[ "$CRYPTROOT_ENABLE" == "yes" ]]; then
+        if [[ "$require_passphrase" == "yes" ]]; then
+            [[ -z "$CRYPTROOT_PASSPHRASE" ]] && die "CRYPTROOT_PASSPHRASE is required for encrypted builds. Set it in environment."
+            BUILD_CMD+=(CRYPTROOT_ENABLE=yes CRYPTROOT_PASSPHRASE="$CRYPTROOT_PASSPHRASE")
+        else
+            BUILD_CMD+=(CRYPTROOT_ENABLE=yes)
+        fi
+    fi
+    [[ "$RK_AUTO_DECRYP" == "yes" ]] && BUILD_CMD+=(RK_AUTO_DECRYP=yes)
+    [[ "$RK_SECURE_UBOOT_ENABLE" == "yes" ]] && BUILD_CMD+=(RK_SECURE_UBOOT_ENABLE=yes)
+    [[ "$RK_OPTEE_BOOT_ENABLE" == "yes" ]] && BUILD_CMD+=(RK_OPTEE_BOOT_ENABLE=yes)
+    return 0
+}
+
+profile_count() {
+    local wanted="$1" count=0 profile
+    for profile in "${PROFILES[@]}"; do
+        [[ "$profile" == "$wanted" ]] && count=$((count + 1))
+    done
+    echo "$count"
+}
+
+profile_is_selected() {
+    local wanted="$1" profile
+    for profile in "${PROFILES[@]}"; do
+        [[ "$profile" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
+validate_profile_name() {
+    case "$1" in
+        recovery|ab|secure-boot|optee)
+            return 0
+            ;;
+        *)
+            die "Unknown profile '$1'. Run '$(basename "$0") --help' for available profiles."
+            ;;
+    esac
+}
+
 # ── Parse arguments ─────────────────────────────────────────────────────────
-PROFILE=""
+PROFILES=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        # Build mode
         --kernel)
             BUILD_KERNEL_ONLY="yes"
             BUILD_DESKTOP="no"
@@ -167,10 +204,12 @@ while [[ $# -gt 0 ]]; do
             BUILD_DESKTOP="no"
             shift
             ;;
+        # Feature toggles
         --no-usbplug)
             RK_COMPILE_USBPLUG="no"
             shift
             ;;
+        # Build config
         -b|--board)
             [[ $# -lt 2 ]] && die "Option '$1' requires a value."
             validate_option "board" "$2" "$VALID_BOARDS"
@@ -194,10 +233,7 @@ while [[ $# -gt 0 ]]; do
             DESKTOP_TIER="$2"
             shift 2
             ;;
-        -k|--kernel-config)
-            KERNEL_CONFIGURE="yes"
-            shift
-            ;;
+        # Cache and utilities
         -c|--clear-kernel-cache)
             CLEAR_KERNEL_CACHE="yes"
             shift
@@ -217,13 +253,14 @@ while [[ $# -gt 0 ]]; do
             die "Unknown option '$1'. Run '$(basename "$0") --help' for usage."
             ;;
         *)
-            if [[ -n "$PROFILE" ]]; then
-                die "Multiple profiles specified: '$PROFILE' and '$1'. Only one profile is allowed."
-            fi
-            PROFILE="$1"
+            PROFILES+=("$1")
             shift
             ;;
     esac
+done
+
+for profile in "${PROFILES[@]}"; do
+    validate_profile_name "$profile"
 done
 
 # Resolve build mode conflicts
@@ -233,19 +270,46 @@ fi
 if [[ "$BUILD_KERNEL_ONLY" == "yes" && "$BUILD_UBOOT_ONLY" == "yes" ]]; then
     die "--kernel and --uboot are mutually exclusive."
 fi
-if [[ "$BUILD_KERNEL_ONLY" == "yes" && -n "$PROFILE" ]]; then
-    warn "--kernel mode ignores profile '$PROFILE' (kernel only build)."
-    PROFILE=""
+if [[ "$BUILD_UBOOT_ONLY" == "yes" && "$BUILD_MINIMAL" == "yes" ]]; then
+    die "--uboot and --minimal are mutually exclusive."
+fi
+if [[ "$BUILD_KERNEL_ONLY" == "yes" && "${#PROFILES[@]}" -gt 0 ]]; then
+    warn "--kernel mode ignores profiles '${PROFILES[*]}' (kernel only build)."
+    PROFILES=()
 fi
 if [[ "$BUILD_DESKTOP" != "yes" && ( "$DESKTOP_ENVIRONMENT" != "gnome" || "$DESKTOP_TIER" != "mid" ) ]]; then
     warn "-d/--desktop and -t/--tier have no effect without desktop mode."
 fi
 
-apply_profile "$PROFILE"
+for profile in "${PROFILES[@]}"; do
+    [[ "$(profile_count "$profile")" -gt 1 ]] && die "Profile '$profile' was specified more than once."
+done
+if profile_is_selected "recovery" && profile_is_selected "ab"; then
+    die "Profiles 'recovery' and 'ab' are mutually exclusive."
+fi
+if profile_is_selected "secure-boot" && profile_is_selected "optee"; then
+    die "Profiles 'secure-boot' and 'optee' overlap; use 'secure-boot' for full secure boot or 'optee' for OP-TEE without full secure boot."
+fi
+
+for profile in "${PROFILES[@]}"; do
+    if [[ "$BUILD_UBOOT_ONLY" == "yes" ]]; then
+        case "$profile" in
+            recovery|ab)
+                warn "--uboot mode ignores OTA profile '$profile'."
+                continue
+                ;;
+        esac
+    fi
+    apply_profile "$profile"
+done
 
 # Clear uppercase proxy vars to prevent chroot apt/wget from using proxy (avoids SSL 502).
 # Lowercase http_proxy/https_proxy from ~/.bashrc are inherited by Docker.
 unset HTTP_PROXY HTTPS_PROXY 2>/dev/null || true
+
+# ── Pre-flight checks ───────────────────────────────────────────────────────
+cd "$SCRIPT_DIR"
+[[ -f compile.sh ]] || die "compile.sh not found in $SCRIPT_DIR"
 
 # ── Cache management ────────────────────────────────────────────────────────
 if [[ "$CLEAR_KERNEL_CACHE" == "yes" ]]; then
@@ -264,18 +328,11 @@ fi
 
 # RK_COMPILE_USBPLUG requires uboot_custom_postprocess to actually run, but
 # U-Boot is an Armbian artifact: cache hit skips postprocess entirely, so
-# usbplug/spi_nor.img would not be regenerated. Force U-Boot rebuild by
-# clearing the board's U-Boot deb cache unless --no-usbplug is given.
+# usbplug/spi_nor.img would not be regenerated.
 if [[ "$RK_COMPILE_USBPLUG" == "yes" ]]; then
-    echo "Clearing U-Boot artifact cache for $BOARD (RK_COMPILE_USBPLUG requires postprocess)..."
-    rm -f output/debs/linux-u-boot-${BOARD}-*.deb
-    rm -f output/packages-hashed/u-boot-${BOARD}-*.tar 2>/dev/null
-    echo "U-Boot cache cleared."
+    echo "RK_COMPILE_USBPLUG requires postprocess; forcing U-Boot cache clear."
+    clear_uboot_cache
 fi
-
-# ── Pre-flight checks ───────────────────────────────────────────────────────
-cd "$SCRIPT_DIR"
-[[ -f compile.sh ]] || die "compile.sh not found in $SCRIPT_DIR"
 
 # ── Print summary ───────────────────────────────────────────────────────────
 echo "==========================================="
@@ -290,12 +347,14 @@ else
 fi
 echo " Board          : $BOARD"
 echo " Release        : $RELEASE"
-if [[ "$BUILD_DESKTOP" == "yes" ]]; then
+if [[ "$BUILD_DESKTOP" == "yes" && "$BUILD_KERNEL_ONLY" != "yes" && "$BUILD_UBOOT_ONLY" != "yes" ]]; then
     echo " Desktop        : $DESKTOP_ENVIRONMENT ($DESKTOP_TIER)"
 fi
-if [[ "$OTA_ENABLE" == "yes" || "$CRYPTROOT_ENABLE" == "yes" ]]; then
-    echo " OTA            : $OTA_ENABLE"
-    echo " A/B OTA        : $AB_PART_OTA"
+if [[ -n "$OTA_ENABLE" || "$CRYPTROOT_ENABLE" == "yes" ]]; then
+    if [[ "$BUILD_KERNEL_ONLY" != "yes" && "$BUILD_UBOOT_ONLY" != "yes" ]]; then
+        echo " OTA            : ${OTA_ENABLE:-board default}"
+        echo " A/B OTA        : $AB_PART_OTA"
+    fi
     echo " Encryption     : $CRYPTROOT_ENABLE"
     echo " Secure Boot    : $RK_SECURE_UBOOT_ENABLE"
     echo " OP-TEE         : $RK_OPTEE_BOOT_ENABLE"
@@ -326,6 +385,7 @@ elif [[ "$BUILD_UBOOT_ONLY" == "yes" ]]; then
         ENABLE_SEEED_RK_EXTENSION="$ENABLE_SEEED_RK_EXTENSION"
         KERNEL_CONFIGURE="$KERNEL_CONFIGURE"
     )
+    append_security_args no
     [[ "$RK_COMPILE_USBPLUG" == "yes" ]] && BUILD_CMD+=(RK_COMPILE_USBPLUG=yes)
 else
     BUILD_CMD=(./compile.sh)
@@ -337,7 +397,6 @@ else
         BUILD_DESKTOP="$BUILD_DESKTOP"
         KERNEL_CONFIGURE="$KERNEL_CONFIGURE"
         ENABLE_SEEED_RK_EXTENSION="$ENABLE_SEEED_RK_EXTENSION"
-        OTA_ENABLE="$OTA_ENABLE"
     )
 
     if [[ "$BUILD_DESKTOP" == "yes" ]]; then
@@ -347,14 +406,9 @@ else
         )
     fi
 
+    [[ -n "$OTA_ENABLE" ]] && BUILD_CMD+=(OTA_ENABLE="$OTA_ENABLE")
     [[ "$AB_PART_OTA" == "yes" ]] && BUILD_CMD+=(AB_PART_OTA=yes)
-    [[ "$CRYPTROOT_ENABLE" == "yes" ]] && {
-        [[ -z "$CRYPTROOT_PASSPHRASE" ]] && die "CRYPTROOT_PASSPHRASE is required for encrypted builds. Set it in environment."
-        BUILD_CMD+=(CRYPTROOT_ENABLE=yes CRYPTROOT_PASSPHRASE="$CRYPTROOT_PASSPHRASE")
-    }
-    [[ "$RK_AUTO_DECRYP" == "yes" ]] && BUILD_CMD+=(RK_AUTO_DECRYP=yes)
-    [[ "$RK_SECURE_UBOOT_ENABLE" == "yes" ]] && BUILD_CMD+=(RK_SECURE_UBOOT_ENABLE=yes)
-    [[ "$RK_OPTEE_BOOT_ENABLE" == "yes" ]] && BUILD_CMD+=(RK_OPTEE_BOOT_ENABLE=yes)
+    append_security_args yes
     [[ "$RK_COMPILE_USBPLUG" == "yes" ]] && BUILD_CMD+=(RK_COMPILE_USBPLUG=yes)
 fi
 
