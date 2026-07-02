@@ -547,9 +547,7 @@ Typical usage:
 1) If your firmware does not include OTA runtime, copy ota_tools/ to target board.
 2) Install runtime CLI and libraries manually (as root), for example:
    cp -a runtime/bin/armbian-ota /usr/sbin/armbian-ota
-   cp -a runtime/bin/armbian-ota-manager /usr/sbin/armbian-ota-manager
    chmod +x /usr/sbin/armbian-ota
-   chmod +x /usr/sbin/armbian-ota-manager
    mkdir -p /usr/share/armbian-ota
    cp -a runtime/lib/common.sh /usr/share/armbian-ota/common.sh
    cp -a runtime/lib/persist.sh /usr/share/armbian-ota/persist.sh
@@ -790,10 +788,6 @@ function pre_umount_final_image__894_install_ota_runtime() {
         display_alert "OTA runtime" "Failed to install armbian-ota CLI" "err"
         return 1
     }
-    cp "${runtime_src}/bin/armbian-ota-manager" "${root_dir}/usr/sbin/armbian-ota-manager" || {
-        display_alert "OTA runtime" "Failed to install armbian-ota-manager wrapper" "err"
-        return 1
-    }
     cp "${runtime_src}/lib/common.sh" "${root_dir}/usr/share/armbian-ota/common.sh" || {
         display_alert "OTA runtime" "Failed to install common.sh" "err"
         return 1
@@ -839,7 +833,7 @@ function pre_umount_final_image__894_install_ota_runtime() {
         fi
     fi
 
-    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/sbin/armbian-ota-manager" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
+    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-ab.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-ab.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-recovery.sh"
 
@@ -1176,7 +1170,7 @@ function pre_umount_final_image__895_install_ab_tools() {
             display_alert "A/B partition OTA" "Failed to install armbian-ota-init-uboot" "err"
             return 1
         }
-        chmod +x "${root_dir}/usr/sbin/armbian-ota-manager" "${root_dir}/usr/lib/armbian/armbian-ota-health-check" "${root_dir}/usr/lib/armbian/armbian-ota-init-uboot"
+        chmod +x "${root_dir}/usr/lib/armbian/armbian-ota-health-check" "${root_dir}/usr/lib/armbian/armbian-ota-init-uboot"
 
         local services=(
             "armbian-ota-init-uboot.service"
@@ -1202,7 +1196,7 @@ function pre_umount_final_image__895_install_ab_tools() {
             display_alert "Recovery OTA" "Failed to install start_prepare_ota.sh wrapper" "err"
             return 1
         }
-        chmod +x "${root_dir}/usr/sbin/armbian-ota-manager" "${root_dir}/usr/sbin/start_prepare_ota.sh"
+        chmod +x "${root_dir}/usr/sbin/start_prepare_ota.sh"
     fi
 
     return 0

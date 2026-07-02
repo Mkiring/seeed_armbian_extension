@@ -29,8 +29,7 @@ extensions/armbian-ota/
 │
 ├── runtime/                                # Unified OTA runtime
 │   ├── bin/
-│   │   ├── armbian-ota                     # Unified CLI entrypoint
-│   │   └── armbian-ota-manager             # Unified compatibility wrapper
+│   │   └── armbian-ota                     # Unified CLI entrypoint
 │   ├── lib/
 │   │   ├── common.sh                       # Shared runtime helpers
 │   │   ├── persist.sh                      # Shared userdata persistence helper
