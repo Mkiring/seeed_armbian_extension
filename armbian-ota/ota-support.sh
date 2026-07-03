@@ -1,3 +1,14 @@
+function extension_prepare_config__ota_image_suffix() {
+    local ota_image_suffix="-recovery"
+
+    if [[ "${AB_PART_OTA}" == "yes" ]]; then
+        ota_image_suffix="-ab"
+    fi
+
+    EXTRA_IMAGE_SUFFIXES+=("${ota_image_suffix}")
+    display_alert "OTA image suffix" "${ota_image_suffix}" "info"
+}
+
 function pre_umount_final_image__901_create_ota_payload_pkg() {
 
 
