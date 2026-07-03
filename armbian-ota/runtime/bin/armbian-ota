@@ -82,7 +82,7 @@ detect_start_mode() {
 
     [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
 
-    package_mode="$(read_package_manifest_value "${package_path}" "OTA_MODE" || true)"
+    package_mode="$(read_package_env_value "${package_path}" "OTA_MODE" || true)"
     [ -n "${package_mode}" ] || error_exit "OTA package metadata missing OTA_MODE; cannot detect OTA mode"
 
     case "${package_mode}" in

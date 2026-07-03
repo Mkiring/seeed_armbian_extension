@@ -184,7 +184,7 @@ The OTA package (`*-OTA.tar.gz`) contains:
 - `rootfs.sha256` - Root filesystem checksum (required)
 - `boot.tar.gz` - Boot partition image (optional)
 - `boot.sha256` - Boot partition checksum (optional)
-- `ota_manifest.env` - OTA mode and package metadata
+- `package.env` - OTA mode and package metadata
 - `boot.itb` - FIT boot image (for secure boot)
 
 ## Troubleshooting

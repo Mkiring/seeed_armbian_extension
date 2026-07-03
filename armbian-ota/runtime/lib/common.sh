@@ -1,7 +1,7 @@
 #!/bin/bash
 
 OTA_STATE_DIR="${OTA_STATE_DIR:-/var/lib/armbian-ota}"
-OTA_STATE_FILE="${OTA_STATE_FILE:-${OTA_STATE_DIR}/state.env}"
+OTA_STATE_FILE="${OTA_STATE_FILE:-${OTA_STATE_DIR}/ota-state.env}"
 OTA_WORK_DIR="${OTA_WORK_DIR:-/ota_work}"
 OTA_LOCK_FILE="${OTA_LOCK_FILE:-/var/run/armbian-ota.lock}"
 OTA_LOG_DIR="${OTA_LOG_DIR:-/var/log/armbian-ota}"
@@ -120,14 +120,14 @@ state_clear_runtime_fields() {
     state_set "COMPLETE_TIME" ""
 }
 
-read_package_manifest_value() {
+read_package_env_value() {
     local package_path="$1"
     local key="$2"
     local manifest_entry
 
     manifest_entry="$(
         tar -tzf "${package_path}" 2>/dev/null \
-            | awk '/(^|\/)ota_manifest\.env$/ { print; exit }'
+            | awk '/(^|\/)package\.env$/ { print; exit }'
     )"
     if [ -z "${manifest_entry}" ]; then
         return 1
@@ -142,7 +142,7 @@ assert_package_mode_matches() {
     local expected_mode="$2"
     local manifest_mode
 
-    manifest_mode="$(read_package_manifest_value "${package_path}" "OTA_MODE" || true)"
+    manifest_mode="$(read_package_env_value "${package_path}" "OTA_MODE" || true)"
     if [ -z "${manifest_mode}" ]; then
         error_exit "OTA package metadata missing OTA_MODE; refusing to continue"
     fi

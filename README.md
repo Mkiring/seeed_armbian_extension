@@ -87,8 +87,8 @@ Current implementation highlights:
 - `rootfs.sha256`
 - `boot.tar.gz` (when a separate boot partition exists)
 - `boot.sha256`
-- `ota_manifest.env`
-- `ota_manifest.txt`
+- `package.env`
+- `manifest.txt`
 - `ota_tools/` (offline/fallback runtime tools)
 
 ## Directory Layout (Simplified)
