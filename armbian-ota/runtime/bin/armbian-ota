@@ -17,43 +17,45 @@ export OTA_RUNTIME_DIR
 export OTA_SOURCE_ROOT
 
 . "${OTA_RUNTIME_DIR}/common.sh"
-if [ -f "${OTA_RUNTIME_DIR}/persist.sh" ]; then
-    . "${OTA_RUNTIME_DIR}/persist.sh"
-fi
-if [ -f "${OTA_RUNTIME_DIR}/preserve.sh" ]; then
-    . "${OTA_RUNTIME_DIR}/preserve.sh"
-fi
+
+[ -f "${OTA_RUNTIME_DIR}/persist.sh" ] && . "${OTA_RUNTIME_DIR}/persist.sh"
+[ -f "${OTA_RUNTIME_DIR}/preserve.sh" ] && . "${OTA_RUNTIME_DIR}/preserve.sh"
 
 HAS_AB_BACKEND=0
 HAS_RECOVERY_BACKEND=0
 
-if [ -f "${OTA_RUNTIME_DIR}/backend-ab.sh" ]; then
-    . "${OTA_RUNTIME_DIR}/backend-ab.sh"
-    HAS_AB_BACKEND=1
-elif [ -n "${OTA_SOURCE_ROOT}" ] && [ -f "${OTA_SOURCE_ROOT}/ab/runtime/backend.sh" ]; then
-    . "${OTA_SOURCE_ROOT}/ab/runtime/backend.sh"
-    HAS_AB_BACKEND=1
-fi
+load_backend() {
+    local mode="$1" src
 
-if [ -f "${OTA_RUNTIME_DIR}/backend-recovery.sh" ]; then
-    . "${OTA_RUNTIME_DIR}/backend-recovery.sh"
-    HAS_RECOVERY_BACKEND=1
-elif [ -n "${OTA_SOURCE_ROOT}" ] && [ -f "${OTA_SOURCE_ROOT}/recovery/runtime/backend.sh" ]; then
-    . "${OTA_SOURCE_ROOT}/recovery/runtime/backend.sh"
-    HAS_RECOVERY_BACKEND=1
-fi
+    for src in "${OTA_RUNTIME_DIR}/backend-${mode}.sh" "${OTA_SOURCE_ROOT:+${OTA_SOURCE_ROOT}/${mode}/runtime/backend.sh}"; do
+        [ -f "${src}" ] || continue
+        . "${src}"
+        case "${mode}" in
+            ab) HAS_AB_BACKEND=1 ;;
+            recovery) HAS_RECOVERY_BACKEND=1 ;;
+        esac
+        return 0
+    done
+}
 
 require_mode_backend() {
     local mode="$1"
-    case "${mode}" in
+
+    case "$mode" in
         ab)
             [ "${HAS_AB_BACKEND}" -eq 1 ] || error_exit "AB OTA backend is not installed on this firmware"
             ;;
         recovery)
             [ "${HAS_RECOVERY_BACKEND}" -eq 1 ] || error_exit "Recovery OTA backend is not installed on this firmware"
             ;;
+        *) error_exit "Unsupported mode: ${mode}" ;;
     esac
 }
+
+for mode in ab recovery; do
+    load_backend "${mode}"
+done
+unset mode
 
 parse_start_args() {
     OTA_CLI_MODE=""
@@ -66,6 +68,7 @@ parse_start_args() {
                 shift
                 ;;
             --mode)
+                [ $# -ge 2 ] || error_exit "Missing value for --mode"
                 OTA_CLI_MODE="$2"
                 shift 2
                 ;;
@@ -83,57 +86,49 @@ parse_start_args() {
     [ -n "${OTA_CLI_PACKAGE}" ] || error_exit "start requires an OTA package path"
 }
 
+call_mode_action() {
+    local mode="$1"
+    local action="$2"
+    local package="${3:-}"
+    local fn="${mode}_${action//-/_}"
+
+    require_mode_backend "${mode}"
+    case "${action}" in
+        start) fn="${mode}_start_ota" ;;
+        status|mark-success|rollback) ;;
+        *) error_exit "Unsupported action: ${action}" ;;
+    esac
+
+    case "${action}" in
+        start) "${fn}" "${package}" ;;
+        *) "${fn}" ;;
+    esac
+}
+
 dispatch_by_state_mode() {
     local action="$1"
     local current_mode
     current_mode="$(state_get OTA_MODE)"
 
     case "${current_mode}" in
-        ab)
-            require_mode_backend "ab"
-            case "${action}" in
-                status) ab_status ;;
-                mark-success) ab_mark_success ;;
-                rollback) ab_rollback ;;
-            esac
-            ;;
-        recovery)
-            require_mode_backend "recovery"
-            case "${action}" in
-                status) recovery_status ;;
-                mark-success) recovery_mark_success ;;
-                rollback) recovery_rollback ;;
-            esac
-            ;;
-        *)
-            if [ "${action}" = "status" ]; then
-                echo "=== Armbian OTA Status ==="
-                echo "Mode: unknown"
-                echo "Status: $(state_get STATUS)"
-                exit 0
-            fi
-            error_exit "No OTA mode recorded in ${OTA_STATE_FILE}. Start an OTA first."
-            ;;
+        ab|recovery) call_mode_action "${current_mode}" "${action}"; return ;;
     esac
+
+    if [ "${action}" = "status" ]; then
+        echo "=== Armbian OTA Status ==="
+        echo "Mode: unknown"
+        echo "Status: $(state_get STATUS)"
+        exit 0
+    fi
+
+    error_exit "No OTA mode recorded in ${OTA_STATE_FILE}. Start an OTA first."
 }
 
 case "${1:-}" in
     start)
         shift
         parse_start_args "$@"
-        case "${OTA_CLI_MODE}" in
-            ab)
-                require_mode_backend "ab"
-                ab_start_ota "${OTA_CLI_PACKAGE}"
-                ;;
-            recovery)
-                require_mode_backend "recovery"
-                recovery_start_ota "${OTA_CLI_PACKAGE}"
-                ;;
-            *)
-                error_exit "Unsupported mode: ${OTA_CLI_MODE}"
-                ;;
-        esac
+        call_mode_action "${OTA_CLI_MODE}" "start" "${OTA_CLI_PACKAGE}"
         ;;
     status)
         state_init

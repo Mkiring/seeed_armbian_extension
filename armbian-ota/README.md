@@ -22,8 +22,6 @@ extensions/armbian-ota/
 │   ├── initramfs_hooks/
 │   │   ├── 99-copy-tools                   # Initramfs hook for recovery OTA
 │   │   └── 99-ota-apply                    # Recovery OTA apply script
-│   ├── fit/
-│   │   └── fit-ota                         # FIT image OTA support
 │
 ├── runtime/                                # Unified OTA runtime
 │   ├── bin/
@@ -240,12 +238,12 @@ fw_setenv ota_in_progress 0
 2. For AB OTA: Modify files in `ab/`
 3. For shared functionality: Use `runtime/`
 
-### Function Naming Convention
+### Build Hook Entry Points
 
 In `ota-support.sh`:
-- Recovery OTA: `pre_update_initramfs__301_*` (priority 301)
-- AB OTA: `pre_update_initramfs__302_*` (priority 302)
-- Shared: Use appropriate priority based on dependencies
+- Runtime/assets installation: `pre_umount_final_image__89x_*`
+- OTA package creation: `pre_umount_final_image__901_*`
+- U-Boot env tool build: `pre_package_uboot_image__*`
 
 ## License
 

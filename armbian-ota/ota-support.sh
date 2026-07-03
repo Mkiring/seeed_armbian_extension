@@ -1,57 +1,3 @@
-function pre_update_initramfs__301_config_fit_ota_script(){
-
-    if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]; then
-        display_alert "ota config" "Installing FIT OTA support into initramfs" "info"
-        local root_dir="${MOUNT}"
-        local ota_ext_dir="${SRC}/extensions/armbian-ota"
-        # Copy 99-copy-tools hook file
-        local hook_src="${ota_ext_dir}/recovery/initramfs_hooks/99-copy-tools"
-        local hook_dst="${root_dir}/etc/initramfs-tools/hooks/zz-copy-tools"
-
-        if [[ -f "${hook_src}" ]]; then
-            cp "${hook_src}" "${hook_dst}" || {
-                display_alert "ota config" "Failed to copy 99-copy-toolshook" "err"
-                return 1
-            }
-            chmod +x "${hook_dst}"
-            display_alert "ota config" "99-copy-tools hook installation completed" "info"
-        else
-            display_alert "ota config" "99-copy-tools source file not found: ${hook_src}" "warn"
-        fi
-
-        # Copy fit-ota.sh script to initramfs
-        display_alert "ota config" "Installing fit-ota script" "info"
-        # Copy fit-ota.sh script
-        local ota_src="${ota_ext_dir}/recovery/fit/fit-ota"
-        local ota_dst="${root_dir}/etc/initramfs-tools/scripts/init-premount/1-fit-ota"
-
-        if [[ -f "${ota_src}" ]]; then
-            cp "${ota_src}" "${ota_dst}" || {
-                display_alert "ota config" "Failed to copy fit-ota script" "err"
-                return 1
-            }
-            chmod +x "${ota_dst}"
-            display_alert "ota config" "fit-ota script installation completed" "info"
-        else
-            display_alert "ota config" "fit-ota.sh source file not found: ${ota_src}" "warn"
-        fi
-
-        local persist_src="${ota_ext_dir}/runtime/lib/persist.sh"
-        local persist_dst="${root_dir}/usr/share/armbian-ota/persist.sh"
-        if [[ -f "${persist_src}" ]]; then
-            mkdir -p "$(dirname "${persist_dst}")"
-            cp "${persist_src}" "${persist_dst}" || {
-                display_alert "ota config" "Failed to copy persist.sh" "err"
-                return 1
-            }
-            chmod +x "${persist_dst}"
-            display_alert "ota config" "persist helper installation completed" "info"
-        else
-            display_alert "ota config" "persist helper source file not found: ${persist_src}" "warn"
-        fi
-    fi
-
-}
 function pre_umount_final_image__901_create_ota_payload_pkg() {
 
 
@@ -529,7 +475,6 @@ EOF
         cp -a "${recovery_src}/bin" "${payload_tools_dir}/recovery/" 2>/dev/null || true
         cp -a "${recovery_src}/runtime" "${payload_tools_dir}/recovery/" 2>/dev/null || true
         cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
-        cp -a "${recovery_src}/fit" "${payload_tools_dir}/recovery/" 2>/dev/null || true
     fi
 
     cat > "${payload_tools_dir}/README_INSTALL.txt" << 'EOF'
