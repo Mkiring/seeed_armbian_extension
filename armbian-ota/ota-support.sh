@@ -432,7 +432,7 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
         manifest_mode="ab"
     fi
 
-    local ota_mode_file="$ota_temp_dir/ota_manifest.env"
+    local ota_mode_file="$ota_temp_dir/package.env"
     cat > "$ota_mode_file" << EOF
 OTA_MODE=${manifest_mode}
 BOARD=${BOARD}
@@ -530,7 +530,7 @@ EOF
     fi
 
     # Create OTA package manifest file
-    local manifest_file="$ota_temp_dir/ota_manifest.txt"
+    local manifest_file="$ota_temp_dir/manifest.txt"
     cat > "$manifest_file" << EOF
 # Armbian OTA Package Manifest
 # Generated on: $(date)
@@ -551,7 +551,7 @@ EOF
     if [[ "${AB_PART_OTA}" == "yes" && -f "$ota_temp_dir/version.txt" ]]; then
         echo "- version.txt: Version information" >> "$manifest_file"
     fi
-    echo "- ota_manifest.env: OTA runtime metadata" >> "$manifest_file"
+    echo "- package.env: OTA runtime metadata" >> "$manifest_file"
     echo "- ota_tools/: OTA runtime scripts and helpers" >> "$manifest_file"
 
     # Create final OTA tar.gz package

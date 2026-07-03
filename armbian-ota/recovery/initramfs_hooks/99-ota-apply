@@ -126,7 +126,7 @@ ROOT_MNT="/mnt/root"
 BOOT_MNT="/mnt/boot"
 USERDATA_MNT="/mnt/userdata"
 STATE_DIR="${ROOT_MNT}/var/lib/armbian-ota"
-STATE_FILE="${STATE_DIR}/state.env"
+STATE_FILE="${STATE_DIR}/ota-state.env"
 
 OTA_DIR="${ROOT_MNT}/ota_work"
 ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
