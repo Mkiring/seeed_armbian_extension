@@ -54,3 +54,8 @@ if [ -f /usr/share/armbian-ota/persist.sh ]; then
     mkdir -p "${DESTDIR}/usr/share/armbian-ota"
     cp -p /usr/share/armbian-ota/persist.sh "${DESTDIR}/usr/share/armbian-ota/persist.sh"
 fi
+
+if [ -f /usr/share/armbian-ota/preserve.sh ]; then
+    mkdir -p "${DESTDIR}/usr/share/armbian-ota"
+    cp -p /usr/share/armbian-ota/preserve.sh "${DESTDIR}/usr/share/armbian-ota/preserve.sh"
+fi

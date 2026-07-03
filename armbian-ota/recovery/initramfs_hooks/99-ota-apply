@@ -117,6 +117,7 @@ set -x
 
 [ -f /scripts/functions ] && . /scripts/functions
 [ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
+[ -f /usr/share/armbian-ota/preserve.sh ] && . /usr/share/armbian-ota/preserve.sh
 
 # default fallback devices (if detection fails)
 ROOT_DEV=""
@@ -139,108 +140,6 @@ log "init-premount ota hook start"
 log "LOGFILE=${LOGFILE}"
 
 touch "${LOGDIR}/ota_ran.init-premount"
-
-# ===== helper: preserve selected files across recovery OTA =====
-prepare_preserve_list() {
-    raw=""
-    line=""
-    rel=""
-    target=""
-
-    rm -f "${PRESERVE_TMP_LIST}" 2>/dev/null || true
-    [ -f "${PRESERVE_LIST}" ] || {
-        log "preserve list not found: ${PRESERVE_LIST}, skip preserve step"
-        return 1
-    }
-
-    while IFS= read -r raw || [ -n "${raw}" ]; do
-        line="$(echo "${raw}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-        case "${line}" in
-            ""|\#*) continue ;;
-        esac
-        case "${line}" in
-            /*) ;;
-            *)
-                log "preserve: skip non-absolute path: ${line}"
-                continue
-                ;;
-        esac
-        case "${line}" in
-            "/"|"/."|"/.."|*"../"*|*"/.."|*"*"*|*"?"*|*"["*|*"]"*)
-                log "preserve: skip unsafe pattern: ${line}"
-                continue
-                ;;
-        esac
-
-        rel="${line#/}"
-        [ -n "${rel}" ] || continue
-        target="${ROOT_MNT}/${rel}"
-        if [ -e "${target}" ] || [ -L "${target}" ]; then
-            printf '%s\n' "${rel}" >> "${PRESERVE_TMP_LIST}"
-        else
-            log "preserve: path not found, skip: ${line}"
-        fi
-    done < "${PRESERVE_LIST}"
-
-    if [ ! -s "${PRESERVE_TMP_LIST}" ]; then
-        log "preserve: no valid entries found in ${PRESERVE_LIST}"
-        rm -f "${PRESERVE_TMP_LIST}" 2>/dev/null || true
-        return 1
-    fi
-
-    return 0
-}
-
-backup_preserved_files() {
-    err_file="${LOGDIR}/preserve.backup.stderr.log"
-    rc=0
-    rm -f "${PRESERVE_TAR}" "${err_file}" 2>/dev/null || true
-
-    prepare_preserve_list || return 0
-    log "preserve: backing up whitelisted files to ${PRESERVE_TAR}"
-
-    if tar --xattrs --acls --numeric-owner -cpf "${PRESERVE_TAR}" -C "${ROOT_MNT}" -T "${PRESERVE_TMP_LIST}" 2>"${err_file}"; then
-        log "preserve: backup completed (metadata mode)"
-        rm -f "${err_file}" 2>/dev/null || true
-        return 0
-    fi
-    rc=$?
-    log "preserve: metadata backup failed rc=${rc}, retry plain tar mode"
-    log_tail "preserve backup stderr" "${err_file}" 40
-
-    rm -f "${err_file}" 2>/dev/null || true
-    if tar -cpf "${PRESERVE_TAR}" -C "${ROOT_MNT}" -T "${PRESERVE_TMP_LIST}" 2>"${err_file}"; then
-        log "preserve: backup completed (plain mode)"
-        rm -f "${err_file}" 2>/dev/null || true
-        return 0
-    fi
-
-    rc=$?
-    log "WARN: preserve backup failed rc=${rc}, continue without preserve"
-    log_tail "preserve backup stderr" "${err_file}" 60
-    rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" "${err_file}" 2>/dev/null || true
-    return 0
-}
-
-restore_preserved_files() {
-    if [ ! -f "${PRESERVE_TAR}" ]; then
-        log "preserve: no backup archive found, skip restore"
-        return 0
-    fi
-
-    log "preserve: restoring whitelisted files from ${PRESERVE_TAR}"
-    start_heartbeat "restoring preserved files"
-    if ! extract_tar_with_fallback "${PRESERVE_TAR}" "${ROOT_MNT}" "preserve"; then
-        stop_heartbeat
-        log "WARN: preserve restore failed, continue OTA"
-        rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" 2>/dev/null || true
-        return 0
-    fi
-    stop_heartbeat
-    rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" 2>/dev/null || true
-    log "preserve: restore completed"
-    return 0
-}
 
 # ===== helper: get DEV + UUID by LABEL (e.g. /dev/mmcblk0p5 + UUID) =====
 get_dev_and_uuid_by_label() {
@@ -347,7 +246,11 @@ else
 fi
 
 # preserve whitelist paths before cleaning old rootfs
-backup_preserved_files
+if command -v ota_preserve_backup_archive >/dev/null 2>&1; then
+    ota_preserve_backup_archive "${ROOT_MNT}" "${PRESERVE_LIST}" "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" "${LOGDIR}"
+else
+    log "preserve helper not available, skip local config preserve"
+fi
 
 # ===== 2) clean rootfs (except ota_work and boot) =====
 log "cleaning ${ROOT_MNT} (except ota_work and boot)..."
@@ -382,7 +285,11 @@ fi
 stop_heartbeat
 
 sync
-restore_preserved_files
+if command -v ota_preserve_restore_archive >/dev/null 2>&1; then
+    ota_preserve_restore_archive "${ROOT_MNT}" "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}"
+else
+    log "preserve helper not available, skip local config restore"
+fi
 
 # Force-disable Armbian first-login marker after OTA. If new rootfs ships this
 # file, root login would trigger first-login flow unexpectedly.
