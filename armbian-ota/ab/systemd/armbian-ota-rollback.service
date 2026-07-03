@@ -6,6 +6,7 @@ After=armbian-ota-firstboot.service
 
 [Service]
 Type=oneshot
+ExecCondition=/bin/sh -c 'test -f /var/lib/armbian-ota/ota-state.env && grep -q "^OTA_MODE=ab$" /var/lib/armbian-ota/ota-state.env && grep -Eq "^STATUS=(ready_to_boot|boot_verifying)$" /var/lib/armbian-ota/ota-state.env'
 ExecStart=/usr/sbin/armbian-ota rollback
 TimeoutStartSec=60
 StandardOutput=journal+console
@@ -13,7 +14,7 @@ StandardError=journal+console
 
 # This service runs ONLY when health check (firstboot) fails
 # It is NOT enabled directly - only triggered via OnFailure
-# The rollback command itself checks ota_in_progress flag
+# The rollback command also checks ota_in_progress flag
 # It will rollback to the previous working slot if OTA was in progress
 
 [Install]
