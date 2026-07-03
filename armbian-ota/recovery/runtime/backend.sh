@@ -4,6 +4,12 @@ RECOVERY_ROOTFS_TAR="${OTA_WORK_DIR}/rootfs.tar.gz"
 RECOVERY_ROOTFS_SHA="${OTA_WORK_DIR}/rootfs.sha256"
 RECOVERY_BOOT_TAR="${OTA_WORK_DIR}/boot.tar.gz"
 RECOVERY_BOOT_SHA="${OTA_WORK_DIR}/boot.sha256"
+RECOVERY_COPY_TOOLS_HOOK="/etc/initramfs-tools/hooks/99-copy-tools"
+RECOVERY_OTA_APPLY_HOOK="/etc/initramfs-tools/scripts/init-premount/99-ota-apply"
+
+recovery_hook_status() {
+    [ -f "$1" ] && echo "INSTALLED" || echo "MISSING"
+}
 
 recovery_require_tools() {
     ensure_root
@@ -13,22 +19,44 @@ recovery_require_tools() {
 }
 
 recovery_install_initramfs_hooks() {
-    local asset_dir hook_src apply_src kver
-    asset_dir="$(installed_recovery_asset_dir)"
-    hook_src="${asset_dir}/initramfs_hooks/99-copy-tools"
-    apply_src="${asset_dir}/initramfs_hooks/99-ota-apply"
+    local asset_dir copy_tools_src ota_apply_src kver
 
-    [ -f "${hook_src}" ] || error_exit "Missing recovery hook template: ${hook_src}"
-    [ -f "${apply_src}" ] || error_exit "Missing recovery apply template: ${apply_src}"
+    asset_dir="$(installed_recovery_asset_dir)"
+    copy_tools_src="${asset_dir}/initramfs_hooks/99-copy-tools"
+    ota_apply_src="${asset_dir}/initramfs_hooks/99-ota-apply"
+
+    [ -f "${copy_tools_src}" ] || error_exit "Missing recovery hook template: ${copy_tools_src}"
+    [ -f "${ota_apply_src}" ] || error_exit "Missing recovery apply template: ${ota_apply_src}"
 
     mkdir -p /etc/initramfs-tools/hooks /etc/initramfs-tools/scripts/init-premount
-    cp "${hook_src}" /etc/initramfs-tools/hooks/99-copy-tools || error_exit "Failed to install 99-copy-tools"
-    cp "${apply_src}" /etc/initramfs-tools/scripts/init-premount/99-ota-apply || error_exit "Failed to install 99-ota-apply"
-    chmod 755 /etc/initramfs-tools/hooks/99-copy-tools /etc/initramfs-tools/scripts/init-premount/99-ota-apply
+    cp "${copy_tools_src}" "${RECOVERY_COPY_TOOLS_HOOK}" || error_exit "Failed to install 99-copy-tools"
+    cp "${ota_apply_src}" "${RECOVERY_OTA_APPLY_HOOK}" || error_exit "Failed to install 99-ota-apply"
+    chmod 755 "${RECOVERY_COPY_TOOLS_HOOK}" "${RECOVERY_OTA_APPLY_HOOK}"
 
     kver="$(detect_kver)"
     log_info "Rebuilding initramfs for kernel ${kver}"
     update-initramfs -u -k "${kver}" || error_exit "Failed to rebuild initramfs"
+}
+
+recovery_verify_payload() {
+    verify_sha256 "${RECOVERY_ROOTFS_TAR}" "${RECOVERY_ROOTFS_SHA}" "rootfs.tar.gz"
+
+    if [ -f "${RECOVERY_BOOT_TAR}" ] && [ -f "${RECOVERY_BOOT_SHA}" ]; then
+        verify_sha256 "${RECOVERY_BOOT_TAR}" "${RECOVERY_BOOT_SHA}" "boot.tar.gz"
+    fi
+}
+
+recovery_mark_prepared() {
+    local package_path="$1"
+
+    state_init
+    state_mark_mode "recovery"
+    state_mark_status "prepared"
+    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
+    state_set "CURRENT_SLOT" ""
+    state_set "TARGET_SLOT" ""
+    state_set "START_TIME" "$(date -Iseconds)"
+    state_set "COMPLETE_TIME" ""
 }
 
 recovery_start_ota() {
@@ -40,21 +68,9 @@ recovery_start_ota() {
     assert_package_mode_matches "${package_path}" "recovery"
 
     extract_ota_package "${package_path}" "${OTA_WORK_DIR}"
-    verify_sha256 "${RECOVERY_ROOTFS_TAR}" "${RECOVERY_ROOTFS_SHA}" "rootfs.tar.gz"
-    if [ -f "${RECOVERY_BOOT_TAR}" ] && [ -f "${RECOVERY_BOOT_SHA}" ]; then
-        verify_sha256 "${RECOVERY_BOOT_TAR}" "${RECOVERY_BOOT_SHA}" "boot.tar.gz"
-    fi
-
+    recovery_verify_payload
     recovery_install_initramfs_hooks
-
-    state_init
-    state_mark_mode "recovery"
-    state_mark_status "prepared"
-    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
-    state_set "CURRENT_SLOT" ""
-    state_set "TARGET_SLOT" ""
-    state_set "START_TIME" "$(date -Iseconds)"
-    state_set "COMPLETE_TIME" ""
+    recovery_mark_prepared "${package_path}"
 
     log_info "Recovery OTA prepared successfully"
     log_info "Reboot to apply the update in initramfs"
@@ -76,10 +92,6 @@ recovery_rollback() {
 }
 
 recovery_status() {
-    local hook_path apply_path
-    hook_path="/etc/initramfs-tools/hooks/99-copy-tools"
-    apply_path="/etc/initramfs-tools/scripts/init-premount/99-ota-apply"
-
     echo "=== Armbian OTA Status (Recovery) ==="
     echo "Mode: recovery"
     echo "Status: $(state_get STATUS)"
@@ -95,6 +107,6 @@ recovery_status() {
     fi
     echo ""
     echo "Initramfs hooks:"
-    echo "  99-copy-tools: $([ -f "${hook_path}" ] && echo INSTALLED || echo MISSING)"
-    echo "  99-ota-apply: $([ -f "${apply_path}" ] && echo INSTALLED || echo MISSING)"
+    echo "  99-copy-tools: $(recovery_hook_status "${RECOVERY_COPY_TOOLS_HOOK}")"
+    echo "  99-ota-apply: $(recovery_hook_status "${RECOVERY_OTA_APPLY_HOOK}")"
 }
