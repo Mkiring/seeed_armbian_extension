@@ -9,14 +9,14 @@ OnFailure=armbian-ota-rollback.service
 
 [Service]
 Type=oneshot
+ExecCondition=/bin/sh -c 'test -f /var/lib/armbian-ota/ota-state.env && grep -q "^OTA_MODE=ab$" /var/lib/armbian-ota/ota-state.env && grep -Eq "^STATUS=(ready_to_boot|boot_verifying)$" /var/lib/armbian-ota/ota-state.env'
 ExecStart=/usr/lib/armbian/armbian-ota-health-check
 RemainAfterExit=yes
 TimeoutStartSec=300
 StandardOutput=journal+console
 StandardError=journal+console
 
-# Health check runs on every boot after OTA
-# The health-check script itself checks if OTA is in progress
+# Health check only runs while an AB OTA boot is pending verification
 # If it passes, mark-success service will be triggered
 # If it fails, rollback service will be triggered
 
