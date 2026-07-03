@@ -19,8 +19,6 @@ extensions/armbian-ota/
 ├── recovery/                           # Recovery OTA mode
 │   ├── runtime/
 │   │   └── backend.sh                      # Recovery OTA backend
-│   ├── bin/
-│   │   └── start_prepare_ota.sh            # Compatibility wrapper
 │   ├── initramfs_hooks/
 │   │   ├── 99-copy-tools                   # Initramfs hook for recovery OTA
 │   │   └── 99-ota-apply                    # Recovery OTA apply script

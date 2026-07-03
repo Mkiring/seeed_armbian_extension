@@ -1188,15 +1188,6 @@ function pre_umount_final_image__895_install_ab_tools() {
         chroot "${root_dir}" systemctl enable armbian-ota-init-uboot.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-init-uboot.service" "warn"
         chroot "${root_dir}" systemctl enable armbian-ota-firstboot.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-firstboot.service" "warn"
         chroot "${root_dir}" systemctl enable armbian-ota-mark-success.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-mark-success.service" "warn"
-    else
-        display_alert "Recovery OTA" "Installing recovery OTA userspace tools" "info"
-        local recovery_src="${ota_ext_dir}/recovery"
-
-        cp "${recovery_src}/bin/start_prepare_ota.sh" "${root_dir}/usr/sbin/start_prepare_ota.sh" || {
-            display_alert "Recovery OTA" "Failed to install start_prepare_ota.sh wrapper" "err"
-            return 1
-        }
-        chmod +x "${root_dir}/usr/sbin/start_prepare_ota.sh"
     fi
 
     return 0
