@@ -4,6 +4,13 @@
 # Keep the preserve list itself across OTA.
 /etc/armbian-ota/back-list.txt
 
+# Keep OTA persist data (account files + /home) across recovery OTA. In recovery
+# mode /userdata is a rootfs directory, so it would be wiped by the rootfs
+# rewrite; preserving it lets the /userdata/.persist bind mounts carry user
+# accounts and home across the update. (A/B mode keeps .persist on the separate
+# armbi_usrdata partition, which is never rewritten, so this entry is a no-op there.)
+/userdata/.persist
+
 # Keep root/user first-login customizations.
 /root/.ssh
 /etc/default/useradd

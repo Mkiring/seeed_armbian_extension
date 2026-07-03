@@ -166,6 +166,12 @@ ROOT_UUID=""
 BOOT_UUID=""
 HAS_BOOT_PART=0
 AUTO_DECRYPT_MODE=0
+
+# Wait for block devices to settle before probing. In init-premount the root
+# partition node may not have appeared yet (mmc scan can lag the hook by ~1s),
+# which previously made blkid miss LABEL=armbi_root and silently skip OTA.
+udevadm settle --timeout=10 2>/dev/null || true
+
 # Detect auto-decrypt by LUKS container + mapper presence (NOT by security partition).
 # Covers secure-boot (OP-TEE unlock, no security part) and AB+non-secure-boot
 # (security-part raw key) alike. Plaintext root has no LUKS container -> standard mode, no wait.
@@ -192,8 +198,56 @@ fi
 boot_info="$(get_dev_and_uuid_by_label "armbi_boot" || true)"
 
 if [ "${AUTO_DECRYPT_MODE}" -eq 0 ]; then
-    root_info="$(get_dev_and_uuid_by_label "armbi_root" || true)"
-    if [ -n "$root_info" ]; then
+    # Standard mode root detection. Prefer /proc/cmdline root= (always present,
+    # independent of device probe timing), fall back to LABEL=armbi_root.
+    root_info=""
+    cmdline_root=""
+    for _tok in $(cat /proc/cmdline 2>/dev/null); do
+        case "${_tok}" in
+            root=*) cmdline_root="${_tok#root=}"; break ;;
+        esac
+    done
+
+    if [ -n "${cmdline_root}" ]; then
+        log "cmdline root= detected: ${cmdline_root}"
+        case "${cmdline_root}" in
+            UUID=*)
+                _cuuid="${cmdline_root#UUID=}"
+                _cdev=""
+                _i=0
+                while [ "${_i}" -lt 10 ]; do
+                    _cdev="$(blkid -U "${_cuuid}" 2>/dev/null)" && [ -n "${_cdev}" ] && break
+                    sleep 1
+                    _i=$((_i + 1))
+                done
+                if [ -n "${_cdev}" ]; then
+                    root_info="${_cdev} ${_cuuid}"
+                else
+                    log "WARN: cmdline root=UUID=${_cuuid} unresolved after 10s, fallback to LABEL"
+                fi
+                ;;
+            LABEL=*)
+                _clbl="${cmdline_root#LABEL=}"
+                _cinfo="$(get_dev_and_uuid_by_label "${_clbl}" || true)"
+                [ -n "${_cinfo}" ] && root_info="${_cinfo}"
+                ;;
+            /dev/*)
+                _cdev="${cmdline_root}"
+                _cuuid="$(blkid -s UUID -o value "${_cdev}" 2>/dev/null | head -n1)"
+                root_info="${_cdev} ${_cuuid}"
+                ;;
+            *)
+                log "WARN: cmdline root= format not recognized: ${cmdline_root}"
+                ;;
+        esac
+    fi
+
+    if [ -z "${root_info}" ]; then
+        log "cmdline root= unavailable or unresolved, fallback to LABEL=armbi_root"
+        root_info="$(get_dev_and_uuid_by_label "armbi_root" || true)"
+    fi
+
+    if [ -n "${root_info}" ]; then
         set -- $root_info
         ROOT_DEV="$1"
         ROOT_UUID="$2"
