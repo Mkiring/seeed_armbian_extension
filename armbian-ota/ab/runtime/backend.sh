@@ -357,6 +357,85 @@ ab_ensure_slot_boot_env() {
     ab_env_slot_boot_ready || error_exit "AB boot env is still invalid after reinitialization"
 }
 
+ab_slot_from_root_label() {
+    case "$1" in
+        "${ROOT_A_LABEL}") echo "a" ;;
+        "${ROOT_B_LABEL}") echo "b" ;;
+        *) echo "" ;;
+    esac
+}
+
+ab_empty_mount_dir() {
+    local mount_dir="$1" f
+
+    (
+        cd "${mount_dir}" || exit 1
+        for f in * .[!.]* ..?*; do
+            case "${f}" in
+                .|..|lost+found) continue ;;
+            esac
+            rm -rf "${f}" 2>/dev/null || true
+        done
+    )
+}
+
+ab_update_armbian_env() {
+    local arm_env="$1"
+    local root_type="$2"
+    local root_uuid="$3"
+
+    [ -f "${arm_env}" ] || return 0
+
+    if [ "${root_type}" = "crypto_LUKS" ]; then
+        if grep -q '^rootdev=' "${arm_env}"; then
+            sed -i 's|^rootdev=.*$|rootdev=/dev/mapper/armbian-root|' "${arm_env}"
+        else
+            printf '\nrootdev=/dev/mapper/armbian-root\n' >> "${arm_env}"
+        fi
+
+        [ -n "${root_uuid}" ] || return 0
+        if grep -q '^cryptdevice=' "${arm_env}"; then
+            sed -i "s|^cryptdevice=.*$|cryptdevice=UUID=${root_uuid}:armbian-root|" "${arm_env}"
+        else
+            printf 'cryptdevice=UUID=%s:armbian-root\n' "${root_uuid}" >> "${arm_env}"
+        fi
+        return 0
+    fi
+
+    [ -n "${root_uuid}" ] || return 0
+    if grep -q '^rootdev=' "${arm_env}"; then
+        sed -i "s|^rootdev=UUID=.*$|rootdev=UUID=${root_uuid}|" "${arm_env}"
+        sed -i "s|^rootdev=PARTUUID=.*$|rootdev=UUID=${root_uuid}|" "${arm_env}"
+    else
+        printf '\nrootdev=UUID=%s\n' "${root_uuid}" >> "${arm_env}"
+    fi
+}
+
+ab_verify_payload() {
+    local work_dir="$1"
+
+    verify_sha256 "${work_dir}/${AB_OTA_ROOTFS_TAR}" "${work_dir}/${AB_OTA_ROOTFS_SHA}" "rootfs.tar.gz"
+
+    if [ -f "${work_dir}/${AB_OTA_BOOT_TAR}" ] && [ -f "${work_dir}/${AB_OTA_BOOT_SHA}" ]; then
+        verify_sha256 "${work_dir}/${AB_OTA_BOOT_TAR}" "${work_dir}/${AB_OTA_BOOT_SHA}" "boot.tar.gz"
+    fi
+}
+
+ab_mark_ready_to_boot() {
+    local package_path="$1"
+    local current_slot="$2"
+    local target_slot="$3"
+
+    state_init
+    state_mark_mode "ab"
+    state_mark_status "ready_to_boot"
+    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
+    state_set "CURRENT_SLOT" "${current_slot}"
+    state_set "TARGET_SLOT" "${target_slot}"
+    state_set "START_TIME" "$(date -Iseconds)"
+    state_set "COMPLETE_TIME" ""
+}
+
 ab_update_target_partition() {
     local temp_work="$1"
     local target_root_label="$2"
@@ -367,12 +446,7 @@ ab_update_target_partition() {
     local target_root_type target_root_mount_dev target_root_luks_uuid
     local security_dev key_file luks_mapper luks_opened
 
-    target_slot=""
-    if [ "${target_root_label}" = "${ROOT_A_LABEL}" ]; then
-        target_slot="a"
-    elif [ "${target_root_label}" = "${ROOT_B_LABEL}" ]; then
-        target_slot="b"
-    fi
+    target_slot="$(ab_slot_from_root_label "${target_root_label}")"
 
     target_root_dev="$(ab_get_part_by_label "${target_root_label}")"
     target_boot_dev="$(ab_get_part_by_label "${target_boot_label}")"
@@ -424,17 +498,7 @@ ab_update_target_partition() {
         error_exit "Failed to mount target root partition"
     }
 
-    (
-        cd "${root_mnt}" || exit 1
-        for f in * .[!.]* ..?*; do
-            case "${f}" in
-                .|..|lost+found)
-                    continue
-                    ;;
-            esac
-            rm -rf "${f}" 2>/dev/null || true
-        done
-    )
+    ab_empty_mount_dir "${root_mnt}"
 
     tar --xattrs --acls --numeric-owner -xzf "${temp_work}/${AB_OTA_ROOTFS_TAR}" -C "${root_mnt}" || {
         umount "${root_mnt}" 2>/dev/null || true
@@ -462,18 +526,7 @@ ab_update_target_partition() {
     if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
         boot_mnt="$(mktemp -d)"
         if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
-            (
-                cd "${boot_mnt}" || exit 1
-                for f in * .[!.]* ..?*; do
-                    case "${f}" in
-                        .|..|lost+found)
-                            continue
-                            ;;
-                    esac
-                    rm -rf "${f}" 2>/dev/null || true
-                done
-            )
-
+            ab_empty_mount_dir "${boot_mnt}"
             tar --xattrs --acls --numeric-owner -xzf "${temp_work}/${AB_OTA_BOOT_TAR}" -C "${boot_mnt}" || log_warn "Failed to extract boot payload"
             sync
             umount "${boot_mnt}" 2>/dev/null || true
@@ -522,29 +575,7 @@ ab_update_target_partition() {
         boot_mnt="$(mktemp -d)"
         if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
             arm_env="${boot_mnt}/armbianEnv.txt"
-            if [ -f "${arm_env}" ]; then
-                if [ "${target_root_type}" = "crypto_LUKS" ]; then
-                    if grep -q '^rootdev=' "${arm_env}"; then
-                        sed -i 's|^rootdev=.*$|rootdev=/dev/mapper/armbian-root|' "${arm_env}"
-                    else
-                        printf '\nrootdev=/dev/mapper/armbian-root\n' >> "${arm_env}"
-                    fi
-                    if [ -n "${target_root_uuid}" ]; then
-                        if grep -q '^cryptdevice=' "${arm_env}"; then
-                            sed -i "s|^cryptdevice=.*$|cryptdevice=UUID=${target_root_uuid}:armbian-root|" "${arm_env}"
-                        else
-                            printf 'cryptdevice=UUID=%s:armbian-root\n' "${target_root_uuid}" >> "${arm_env}"
-                        fi
-                    fi
-                elif [ -n "${target_root_uuid}" ]; then
-                    if grep -q '^rootdev=' "${arm_env}"; then
-                        sed -i "s|^rootdev=UUID=.*$|rootdev=UUID=${target_root_uuid}|" "${arm_env}"
-                        sed -i "s|^rootdev=PARTUUID=.*$|rootdev=UUID=${target_root_uuid}|" "${arm_env}"
-                    else
-                        printf '\nrootdev=UUID=%s\n' "${target_root_uuid}" >> "${arm_env}"
-                    fi
-                fi
-            fi
+            ab_update_armbian_env "${arm_env}" "${target_root_type}" "${target_root_uuid}"
             umount "${boot_mnt}" 2>/dev/null || true
         fi
         rm -rf "${boot_mnt}"
@@ -552,27 +583,7 @@ ab_update_target_partition() {
 
     if [ -z "${arm_env}" ] && [ -f "${root_mnt}/boot/armbianEnv.txt" ]; then
         arm_env="${root_mnt}/boot/armbianEnv.txt"
-        if [ "${target_root_type}" = "crypto_LUKS" ]; then
-            if grep -q '^rootdev=' "${arm_env}"; then
-                sed -i 's|^rootdev=.*$|rootdev=/dev/mapper/armbian-root|' "${arm_env}"
-            else
-                printf '\nrootdev=/dev/mapper/armbian-root\n' >> "${arm_env}"
-            fi
-            if [ -n "${target_root_uuid}" ]; then
-                if grep -q '^cryptdevice=' "${arm_env}"; then
-                    sed -i "s|^cryptdevice=.*$|cryptdevice=UUID=${target_root_uuid}:armbian-root|" "${arm_env}"
-                else
-                    printf 'cryptdevice=UUID=%s:armbian-root\n' "${target_root_uuid}" >> "${arm_env}"
-                fi
-            fi
-        elif [ -n "${target_root_uuid}" ]; then
-            if grep -q '^rootdev=' "${arm_env}"; then
-                sed -i "s|^rootdev=UUID=.*$|rootdev=UUID=${target_root_uuid}|" "${arm_env}"
-                sed -i "s|^rootdev=PARTUUID=.*$|rootdev=UUID=${target_root_uuid}|" "${arm_env}"
-            else
-                printf '\nrootdev=UUID=%s\n' "${target_root_uuid}" >> "${arm_env}"
-            fi
-        fi
+        ab_update_armbian_env "${arm_env}" "${target_root_type}" "${target_root_uuid}"
     fi
 
     sync
@@ -604,23 +615,12 @@ ab_start_ota() {
 
     temp_work="$(mktemp -d)"
     extract_ota_package "${package_path}" "${temp_work}"
-    verify_sha256 "${temp_work}/${AB_OTA_ROOTFS_TAR}" "${temp_work}/${AB_OTA_ROOTFS_SHA}" "rootfs.tar.gz"
-    if [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_SHA}" ]; then
-        verify_sha256 "${temp_work}/${AB_OTA_BOOT_TAR}" "${temp_work}/${AB_OTA_BOOT_SHA}" "boot.tar.gz"
-    fi
+    ab_verify_payload "${temp_work}"
 
     ab_update_target_partition "${temp_work}" "${target_root_label}" "${target_boot_label}"
     rm -rf "${temp_work}"
 
-    state_init
-    state_mark_mode "ab"
-    state_mark_status "ready_to_boot"
-    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
-    state_set "CURRENT_SLOT" "${current_slot}"
-    state_set "TARGET_SLOT" "${target_slot}"
-    state_set "START_TIME" "$(date -Iseconds)"
-    state_set "COMPLETE_TIME" ""
-
+    ab_mark_ready_to_boot "${package_path}" "${current_slot}" "${target_slot}"
     ab_uboot_set_env "ota_in_progress" "1" || error_exit "Failed to set ota_in_progress"
     ab_uboot_set_env "boot_slot" "${target_slot}" || error_exit "Failed to switch boot_slot"
     ab_uboot_set_env "try_count" "0" || log_warn "Failed to reset try_count"

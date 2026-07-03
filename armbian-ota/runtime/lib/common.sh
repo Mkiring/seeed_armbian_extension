@@ -71,8 +71,9 @@ ensure_command() {
 
 state_init() {
     mkdir -p "${OTA_STATE_DIR}" 2>/dev/null || return 0
-    if [ ! -f "${OTA_STATE_FILE}" ]; then
-        cat > "${OTA_STATE_FILE}" 2>/dev/null <<'EOF' || true
+    [ -f "${OTA_STATE_FILE}" ] && return 0
+
+    cat > "${OTA_STATE_FILE}" 2>/dev/null <<'EOF' || true
 # Armbian OTA runtime state
 OTA_MODE=
 STATUS=idle
@@ -82,7 +83,6 @@ TARGET_SLOT=
 START_TIME=
 COMPLETE_TIME=
 EOF
-    fi
 }
 
 state_get() {
@@ -154,9 +154,10 @@ assert_package_mode_matches() {
             ;;
     esac
 
-    if [ "${expected_mode}" != "ab" ] && [ "${expected_mode}" != "recovery" ]; then
-        error_exit "Invalid requested OTA mode: ${expected_mode}"
-    fi
+    case "${expected_mode}" in
+        ab|recovery) ;;
+        *) error_exit "Invalid requested OTA mode: ${expected_mode}" ;;
+    esac
 
     if [ "${manifest_mode}" != "${expected_mode}" ]; then
         error_exit "OTA package mode mismatch: expected ${expected_mode}, manifest=${manifest_mode}"
@@ -172,28 +173,28 @@ verify_sha256() {
     [ -f "${sha_file}" ] || error_exit "Missing checksum file: ${sha_file}"
     ensure_command sha256sum
 
-    local payload_dir payload_base sha_dir sha_base tmp_sha
+    local payload_dir payload_base sha_path check_file tmp_sha
     payload_dir="$(cd "$(dirname "${payload}")" && pwd)"
     payload_base="$(basename "${payload}")"
-    sha_dir="$(cd "$(dirname "${sha_file}")" && pwd)"
-    sha_base="$(basename "${sha_file}")"
+    sha_path="$(cd "$(dirname "${sha_file}")" && pwd)/$(basename "${sha_file}")"
+    check_file="${sha_path}"
     tmp_sha=""
 
-    if ! grep -qE "[[:space:]]${payload_base}$" "${sha_dir}/${sha_base}"; then
+    if ! grep -qE "[[:space:]]${payload_base}$" "${sha_path}"; then
         tmp_sha="$(mktemp)"
-        awk -v f="${payload_base}" '{print $1"  "f}' "${sha_dir}/${sha_base}" > "${tmp_sha}" || error_exit "Failed to rewrite checksum file for ${label}"
+        awk -v f="${payload_base}" '{print $1"  "f}' "${sha_path}" > "${tmp_sha}" || {
+            rm -f "${tmp_sha}"
+            error_exit "Failed to rewrite checksum file for ${label}"
+        }
+        check_file="${tmp_sha}"
     fi
 
     log_info "Verifying ${label} checksum"
-    if [ -n "${tmp_sha}" ]; then
-        (cd "${payload_dir}" && sha256sum -c "${tmp_sha}" >/dev/null 2>&1) || {
-            rm -f "${tmp_sha}"
-            error_exit "${label} checksum verification failed"
-        }
-        rm -f "${tmp_sha}"
-    else
-        (cd "${payload_dir}" && sha256sum -c "${sha_dir}/${sha_base}" >/dev/null 2>&1) || error_exit "${label} checksum verification failed"
-    fi
+    (cd "${payload_dir}" && sha256sum -c "${check_file}" >/dev/null 2>&1) || {
+        [ -n "${tmp_sha}" ] && rm -f "${tmp_sha}"
+        error_exit "${label} checksum verification failed"
+    }
+    [ -n "${tmp_sha}" ] && rm -f "${tmp_sha}"
 }
 
 detect_kver() {
