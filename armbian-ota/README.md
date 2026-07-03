@@ -69,7 +69,7 @@ OTA_ENABLE=yes
 
 ```bash
 # On target system
-armbian-ota start --mode=recovery <path-to-ota-package.tar.gz>
+armbian-ota start <path-to-ota-package.tar.gz>
 reboot
 ```
 
@@ -132,7 +132,7 @@ slot into the newly staged target slot before boot switching.
 
 ### How It Works
 
-1. User initiates OTA with `armbian-ota start --mode=ab <package>`
+1. User initiates OTA with `armbian-ota start <package>`
 2. OTA payload is copied to target (inactive) slot partitions
 3. `ota_in_progress=1` and `boot_slot` are set to target slot
 4. System reboots
@@ -148,7 +148,7 @@ slot into the newly staged target slot before boot switching.
 armbian-ota status
 
 # Start OTA update
-armbian-ota start --mode=ab Armbian_xxx-OTA.tar.gz
+armbian-ota start Armbian_xxx-OTA.tar.gz
 
 # System will reboot and apply update automatically
 

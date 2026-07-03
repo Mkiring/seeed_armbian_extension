@@ -222,7 +222,7 @@ ab_get_security_passphrase_file() {
     return 0
 }
 
-ab_get_current_slot() {
+ab_detect_current_slot_from_root() {
     local root_dev root_part root_partlabel root_uuid root_a_uuid root_b_uuid
     root_dev=""
 
@@ -265,6 +265,18 @@ ab_get_current_slot() {
             echo "b"
             return 0
         fi
+    fi
+
+    echo ""
+}
+
+ab_get_current_slot() {
+    local current_slot
+
+    current_slot="$(ab_detect_current_slot_from_root)"
+    if [ -n "${current_slot}" ]; then
+        echo "${current_slot}"
+        return 0
     fi
 
     ab_uboot_get_env "boot_slot" || echo "a"
@@ -355,6 +367,30 @@ ab_ensure_slot_boot_env() {
     log_warn "AB boot env is incomplete, trying to repair via ${init_script} --force"
     "${init_script}" --force || error_exit "Failed to reinitialize AB boot env"
     ab_env_slot_boot_ready || error_exit "AB boot env is still invalid after reinitialization"
+}
+
+ab_require_partition_label() {
+    local label="$1"
+    local dev
+
+    dev="$(ab_get_part_by_label "${label}")"
+    [ -n "${dev}" ] || error_exit "AB OTA requires partition label ${label}, but it was not found"
+}
+
+ab_validate_environment() {
+    local current_slot
+
+    ab_ensure_slot_boot_env
+    ab_require_partition_label "${BOOT_A_LABEL}"
+    ab_require_partition_label "${BOOT_B_LABEL}"
+    ab_require_partition_label "${ROOT_A_LABEL}"
+    ab_require_partition_label "${ROOT_B_LABEL}"
+
+    current_slot="$(ab_detect_current_slot_from_root)"
+    case "${current_slot}" in
+        a|b) ;;
+        *) error_exit "Current rootfs is not running from an AB root partition" ;;
+    esac
 }
 
 ab_slot_from_root_label() {
@@ -598,11 +634,11 @@ ab_start_ota() {
     local package_path="$1"
     local current_slot target_slot target_root_label target_boot_label temp_work
 
-    [ -n "${package_path}" ] || error_exit "Usage: armbian-ota start --mode=ab <ota-package.tar.gz>"
+    [ -n "${package_path}" ] || error_exit "Usage: armbian-ota start <ota-package.tar.gz>"
     [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
     ab_require_tools
     assert_package_mode_matches "${package_path}" "ab"
-    ab_ensure_slot_boot_env
+    ab_validate_environment
 
     current_slot="$(ab_get_current_slot)"
     target_slot="$(ab_get_target_slot)"

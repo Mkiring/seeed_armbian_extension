@@ -115,7 +115,6 @@ set_env_key() {
 # enable shell trace (goes into log/kmsg)
 set -x
 
-[ -f /scripts/functions ] && . /scripts/functions
 [ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
 [ -f /usr/share/armbian-ota/preserve.sh ] && . /usr/share/armbian-ota/preserve.sh
 
@@ -195,8 +194,9 @@ boot_info="$(get_dev_and_uuid_by_label "armbi_boot" || true)"
 if [ "${AUTO_DECRYPT_MODE}" -eq 0 ]; then
     root_info="$(get_dev_and_uuid_by_label "armbi_root" || true)"
     if [ -n "$root_info" ]; then
-        ROOT_DEV="$(echo "$root_info" | awk '{print $1}')"
-        ROOT_UUID="$(echo "$root_info" | awk '{print $2}')"
+        set -- $root_info
+        ROOT_DEV="$1"
+        ROOT_UUID="$2"
     fi
     log "standard mode root detection: ROOT_DEV=${ROOT_DEV}, ROOT_UUID=${ROOT_UUID}"
 else
@@ -204,8 +204,9 @@ else
 fi
 
 if [ -n "$boot_info" ]; then
-    BOOT_DEV="$(echo "$boot_info" | awk '{print $1}')"
-    BOOT_UUID="$(echo "$boot_info" | awk '{print $2}')"
+    set -- $boot_info
+    BOOT_DEV="$1"
+    BOOT_UUID="$2"
     HAS_BOOT_PART=1
 fi
 
@@ -232,9 +233,7 @@ if [ ! -d "${OTA_DIR}" ] || [ ! -f "${ROOTFS_TAR}" ]; then
 fi
 
 HAS_BOOT_TAR=0
-if [ -f "${BOOT_TAR}" ]; then
-    HAS_BOOT_TAR=1
-fi
+[ -f "${BOOT_TAR}" ] && HAS_BOOT_TAR=1
 
 log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}"
 
@@ -446,6 +445,15 @@ sync
 
 log "  delete OTA payload directory ${OTA_DIR} ..."
 rm -rf "${OTA_DIR}" || true
+
+# ===== 8) update runtime state =====
+mkdir -p "${STATE_DIR}"
+if [ -f "${STATE_FILE}" ]; then
+    sed -i 's/^OTA_MODE=.*/OTA_MODE=recovery/' "${STATE_FILE}" 2>/dev/null || true
+    sed -i 's/^STATUS=.*/STATUS=success/' "${STATE_FILE}" 2>/dev/null || true
+    sed -i "s/^COMPLETE_TIME=.*/COMPLETE_TIME=$(date -Iseconds)/" "${STATE_FILE}" 2>/dev/null || true
+fi
+
 # ===== 8) unmount partitions =====
 if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
     log "unmounting ${BOOT_MNT} ..."
@@ -456,14 +464,6 @@ log "unmounting ${ROOT_MNT} ..."
 umount "${ROOT_MNT}" 2>/dev/null  || log "WARN: umount ${ROOT_MNT} failed"
 
 sync
-
-# ===== 8.5) update runtime state =====
-mkdir -p "${STATE_DIR}"
-if [ -f "${STATE_FILE}" ]; then
-    sed -i 's/^OTA_MODE=.*/OTA_MODE=recovery/' "${STATE_FILE}" 2>/dev/null || true
-    sed -i 's/^STATUS=.*/STATUS=success/' "${STATE_FILE}" 2>/dev/null || true
-    sed -i "s/^COMPLETE_TIME=.*/COMPLETE_TIME=$(date -Iseconds)/" "${STATE_FILE}" 2>/dev/null || true
-fi
 
 # ===== 9) reboot =====
 log "OTA done, rebooting..."

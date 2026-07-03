@@ -62,7 +62,7 @@ recovery_mark_prepared() {
 recovery_start_ota() {
     local package_path="$1"
 
-    [ -n "${package_path}" ] || error_exit "Usage: armbian-ota start --mode=recovery <ota-package.tar.gz>"
+    [ -n "${package_path}" ] || error_exit "Usage: armbian-ota start <ota-package.tar.gz>"
     [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
     recovery_require_tools
     assert_package_mode_matches "${package_path}" "recovery"
