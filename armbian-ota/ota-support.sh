@@ -571,7 +571,7 @@ EOF
         local ota_sha256=$(sha256sum "$ota_output_path" | awk '{print $1}')
 
         # Write checksums file
-        local checksum_file="${DEST}/images/${base_image_name}-OTA.checksums"
+        local checksum_file="${DEST}/images/${base_image_name}_${ota_type_label}.checksums"
         cat > "$checksum_file" << EOF
 # Armbian OTA Package Checksums
 # Package: ${ota_package_name}
@@ -796,44 +796,55 @@ function ota_configure_persist_fstab() {
     mkdir -p "${root_dir}/userdata" "${root_dir}/home"
 
     sed -i '/^# BEGIN armbian-ota persist$/,/^# END armbian-ota persist$/d' "${fstab}"
-    cat >> "${fstab}" <<'EOF'
 
-# BEGIN armbian-ota persist
-LABEL=armbi_usrdata                    /userdata       ext4  defaults,noatime,nofail,x-systemd.device-timeout=10s                  0  2
-/userdata/.persist/etc/passwd          /etc/passwd     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
-/userdata/.persist/etc/shadow          /etc/shadow     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
-/userdata/.persist/etc/group           /etc/group      none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
-/userdata/.persist/etc/gshadow         /etc/gshadow    none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
-/userdata/.persist/etc/subuid          /etc/subuid     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
-/userdata/.persist/etc/subgid          /etc/subgid     none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
-/userdata/.persist/home                /home           none  bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount  0  0
+    # The dedicated armbi_usrdata partition is provisioned only in A/B builds
+    # (pre_prepare_partitions__ab_part_ota). Recovery OTA -- encrypted or not --
+    # is a single rootfs partition with no armbi_usrdata, so /userdata is a plain
+    # directory on the rootfs and must NOT carry a LABEL=armbi_usrdata mount line
+    # (that device does not exist here: every boot would wait device-timeout then
+    # fail userdata.mount and cascade "Dependency failed"). The bind mounts also
+    # drop the userdata.mount ordering in directory mode (no such unit exists).
+    local bind_opts persist_mode
+    if [[ "${AB_PART_OTA}" == "yes" ]]; then
+        persist_mode="partition"
+        bind_opts="bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount"
+        {
+            echo ""
+            echo "# BEGIN armbian-ota persist"
+            echo "LABEL=armbi_usrdata                    /userdata       ext4  defaults,noatime,nofail,x-systemd.device-timeout=10s                  0  2"
+        } >> "${fstab}"
+    else
+        persist_mode="directory"
+        bind_opts="bind,nofail"
+        {
+            echo ""
+            echo "# BEGIN armbian-ota persist"
+            echo "# recovery OTA: /userdata is a rootfs directory (no armbi_usrdata partition);"
+            echo "# /userdata/.persist is preserved across OTA by /etc/armbian-ota/back-list.txt"
+        } >> "${fstab}"
+    fi
+
+    cat >> "${fstab}" <<EOF
+/userdata/.persist/etc/passwd          /etc/passwd     none  ${bind_opts}  0  0
+/userdata/.persist/etc/shadow          /etc/shadow     none  ${bind_opts}  0  0
+/userdata/.persist/etc/group           /etc/group      none  ${bind_opts}  0  0
+/userdata/.persist/etc/gshadow         /etc/gshadow    none  ${bind_opts}  0  0
+/userdata/.persist/etc/subuid          /etc/subuid     none  ${bind_opts}  0  0
+/userdata/.persist/etc/subgid          /etc/subgid     none  ${bind_opts}  0  0
+/userdata/.persist/home                /home           none  ${bind_opts}  0  0
 # END armbian-ota persist
 EOF
 
-    display_alert "OTA persist" "Configured /userdata/.persist bind mounts in fstab" "info"
+    display_alert "OTA persist" "Configured /userdata/.persist bind mounts in fstab (${persist_mode} mode)" "info"
 }
 
-function ota_init_userdata_persist() {
+# Seed <persist>/{etc,home} from the rootfs's /etc account files and /home.
+# Idempotent: copies only entries that do not already exist, so data already
+# preserved on the persist target (partition or directory) always wins.
+function ota_seed_persist_dir() {
     local root_dir="$1"
+    local persist="$2"
 
-    [[ "${AB_PART_OTA}" == "yes" ]] || return 0
-    [[ -n "${AB_USERDATA_PART_INDEX}" ]] || return 0
-    [[ -b "${LOOP}p${AB_USERDATA_PART_INDEX}" ]] || {
-        display_alert "OTA persist" "userdata partition not found, skip persist initialization" "warn"
-        return 0
-    }
-
-    local userdata_dev="${LOOP}p${AB_USERDATA_PART_INDEX}"
-    local userdata_mnt
-    userdata_mnt="$(mktemp -d)"
-
-    if ! mount "${userdata_dev}" "${userdata_mnt}"; then
-        display_alert "OTA persist" "Failed to mount userdata for persist initialization" "warn"
-        rm -rf "${userdata_mnt}"
-        return 0
-    fi
-
-    local persist="${userdata_mnt}/.persist"
     mkdir -p "${persist}/etc" "${persist}/home"
 
     local account_file
@@ -852,12 +863,46 @@ function ota_init_userdata_persist() {
     chmod 755 "${persist}" "${persist}/etc" "${persist}/home" 2>/dev/null || true
     chmod 644 "${persist}/etc/passwd" "${persist}/etc/group" "${persist}/etc/subuid" "${persist}/etc/subgid" 2>/dev/null || true
     chmod 600 "${persist}/etc/shadow" "${persist}/etc/gshadow" 2>/dev/null || true
+}
 
-    sync
-    umount "${userdata_mnt}" || display_alert "OTA persist" "Failed to unmount userdata after persist initialization" "warn"
-    rm -rf "${userdata_mnt}"
+function ota_init_userdata_persist() {
+    local root_dir="$1"
 
-    display_alert "OTA persist" "Initialized /userdata/.persist account files and home data" "info"
+    # A/B mode: seed the dedicated armbi_usrdata partition (survives OTA as a
+    # separate partition; never touched by the slot rewrite).
+    if [[ "${AB_PART_OTA}" == "yes" ]]; then
+        [[ -n "${AB_USERDATA_PART_INDEX}" ]] || return 0
+        [[ -b "${LOOP}p${AB_USERDATA_PART_INDEX}" ]] || {
+            display_alert "OTA persist" "userdata partition not found, skip persist initialization" "warn"
+            return 0
+        }
+
+        local userdata_dev="${LOOP}p${AB_USERDATA_PART_INDEX}"
+        local userdata_mnt
+        userdata_mnt="$(mktemp -d)"
+
+        if ! mount "${userdata_dev}" "${userdata_mnt}"; then
+            display_alert "OTA persist" "Failed to mount userdata for persist initialization" "warn"
+            rm -rf "${userdata_mnt}"
+            return 0
+        fi
+
+        ota_seed_persist_dir "${root_dir}" "${userdata_mnt}/.persist"
+
+        sync
+        umount "${userdata_mnt}" || display_alert "OTA persist" "Failed to unmount userdata after persist initialization" "warn"
+        rm -rf "${userdata_mnt}"
+
+        display_alert "OTA persist" "Initialized /userdata/.persist on armbi_usrdata partition" "info"
+        return 0
+    fi
+
+    # Recovery mode (encrypted or not): no armbi_usrdata partition. Seed
+    # /userdata/.persist as a plain directory on the rootfs so the fstab bind
+    # mounts have valid sources on first boot. Across OTA it is preserved by
+    # /etc/armbian-ota/back-list.txt (see ota_preserve_backup_archive).
+    ota_seed_persist_dir "${root_dir}" "${root_dir}/userdata/.persist"
+    display_alert "OTA persist" "Seeded /userdata/.persist directory (recovery OTA)" "info"
 }
 
 function pre_umount_final_image__897_configure_ota_persist() {
