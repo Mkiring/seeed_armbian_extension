@@ -63,15 +63,6 @@ parse_start_args() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --mode=*)
-                OTA_CLI_MODE="${1#--mode=}"
-                shift
-                ;;
-            --mode)
-                [ $# -ge 2 ] || error_exit "Missing value for --mode"
-                OTA_CLI_MODE="$2"
-                shift 2
-                ;;
             -*)
                 error_exit "Unknown option: $1"
                 ;;
@@ -82,8 +73,24 @@ parse_start_args() {
         esac
     done
 
-    [ -n "${OTA_CLI_MODE}" ] || error_exit "start requires --mode=ab|recovery"
     [ -n "${OTA_CLI_PACKAGE}" ] || error_exit "start requires an OTA package path"
+}
+
+detect_start_mode() {
+    local package_path="$1"
+    local package_mode
+
+    [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
+
+    package_mode="$(read_package_manifest_value "${package_path}" "OTA_MODE" || true)"
+    [ -n "${package_mode}" ] || error_exit "OTA package metadata missing OTA_MODE; cannot detect OTA mode"
+
+    case "${package_mode}" in
+        ab|recovery) ;;
+        *) error_exit "Invalid OTA_MODE in package metadata: ${package_mode} (expected ab or recovery)" ;;
+    esac
+
+    OTA_CLI_MODE="${package_mode}"
 }
 
 call_mode_action() {
@@ -128,6 +135,7 @@ case "${1:-}" in
     start)
         shift
         parse_start_args "$@"
+        detect_start_mode "${OTA_CLI_PACKAGE}"
         call_mode_action "${OTA_CLI_MODE}" "start" "${OTA_CLI_PACKAGE}"
         ;;
     status)
@@ -145,8 +153,7 @@ case "${1:-}" in
     *)
         cat <<'EOF'
 Usage:
-  armbian-ota start --mode=ab <ota-package.tar.gz>
-  armbian-ota start --mode=recovery <ota-package.tar.gz>
+  armbian-ota start <ota-package.tar.gz>
   armbian-ota status
   armbian-ota mark-success
   armbian-ota rollback

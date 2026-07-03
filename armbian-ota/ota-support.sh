@@ -486,7 +486,7 @@ If firmware was built with OTA enabled:
 - AB firmware (`AB_PART_OTA=yes`) already includes AB OTA runtime/tools.
 - Recovery firmware (`OTA_ENABLE=yes`, no `AB_PART_OTA`) already includes Recovery OTA runtime/tools.
 
-In those cases, you only need to copy the OTA package and run `armbian-ota start --mode=...`.
+In those cases, you only need to copy the OTA package and run `armbian-ota start <ota-package.tar.gz>`.
 
 Typical usage:
 1) If your firmware does not include OTA runtime, copy ota_tools/ to target board.
@@ -509,8 +509,7 @@ Typical usage:
    cp -a recovery/. /usr/share/armbian-ota/recovery/
 
 3) Trigger OTA:
-   armbian-ota start --mode=ab <ota-package.tar.gz>
-   armbian-ota start --mode=recovery <ota-package.tar.gz>
+   armbian-ota start <ota-package.tar.gz>
 EOF
 
     # Create version info file for compatibility wrapper

@@ -144,7 +144,7 @@ assert_package_mode_matches() {
 
     manifest_mode="$(read_package_manifest_value "${package_path}" "OTA_MODE" || true)"
     if [ -z "${manifest_mode}" ]; then
-        error_exit "OTA package metadata missing OTA_MODE; refusing to continue with --mode=${expected_mode}"
+        error_exit "OTA package metadata missing OTA_MODE; refusing to continue"
     fi
 
     case "${manifest_mode}" in
