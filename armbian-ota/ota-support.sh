@@ -836,44 +836,28 @@ function ota_configure_persist_fstab() {
     fi
 
     cat >> "${fstab}" <<EOF
-/userdata/.persist/etc/passwd          /etc/passwd     none  ${bind_opts}  0  0
-/userdata/.persist/etc/shadow          /etc/shadow     none  ${bind_opts}  0  0
-/userdata/.persist/etc/group           /etc/group      none  ${bind_opts}  0  0
-/userdata/.persist/etc/gshadow         /etc/gshadow    none  ${bind_opts}  0  0
-/userdata/.persist/etc/subuid          /etc/subuid     none  ${bind_opts}  0  0
-/userdata/.persist/etc/subgid          /etc/subgid     none  ${bind_opts}  0  0
 /userdata/.persist/home                /home           none  ${bind_opts}  0  0
 # END armbian-ota persist
 EOF
 
-    display_alert "OTA persist" "Configured /userdata/.persist bind mounts in fstab (${persist_mode} mode)" "info"
+    display_alert "OTA persist" "Configured /userdata/.persist/home bind mount in fstab (${persist_mode} mode)" "info"
 }
 
-# Seed <persist>/{etc,home} from the rootfs's /etc account files and /home.
-# Idempotent: copies only entries that do not already exist, so data already
+# Seed <persist>/home from the rootfs /home.
+# Idempotent: copies only when the persist home is empty, so data already
 # preserved on the persist target (partition or directory) always wins.
 function ota_seed_persist_dir() {
     local root_dir="$1"
     local persist="$2"
 
-    mkdir -p "${persist}/etc" "${persist}/home"
-
-    local account_file
-    for account_file in passwd shadow group gshadow subuid subgid; do
-        if [[ -f "${root_dir}/etc/${account_file}" && ! -e "${persist}/etc/${account_file}" ]]; then
-            cp -a "${root_dir}/etc/${account_file}" "${persist}/etc/${account_file}" || \
-                display_alert "OTA persist" "Failed to initialize ${account_file}" "warn"
-        fi
-    done
+    mkdir -p "${persist}/home"
 
     if [[ -d "${root_dir}/home" && -z "$(find "${persist}/home" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
         cp -a "${root_dir}/home/." "${persist}/home/" 2>/dev/null || \
             display_alert "OTA persist" "Failed to initialize /home persist data" "warn"
     fi
 
-    chmod 755 "${persist}" "${persist}/etc" "${persist}/home" 2>/dev/null || true
-    chmod 644 "${persist}/etc/passwd" "${persist}/etc/group" "${persist}/etc/subuid" "${persist}/etc/subgid" 2>/dev/null || true
-    chmod 600 "${persist}/etc/shadow" "${persist}/etc/gshadow" 2>/dev/null || true
+    chmod 755 "${persist}" "${persist}/home" 2>/dev/null || true
 }
 
 function ota_init_userdata_persist() {

@@ -41,27 +41,18 @@ ota_persist_init_userdata() {
     fi
 
     persist="${userdata_mnt}/.persist"
-    mkdir -p "${persist}/etc" "${persist}/home" 2>/dev/null || true
-
-    for account_file in passwd shadow group gshadow subuid subgid; do
-        if [ -f "${root_mnt}/etc/${account_file}" ] && [ ! -e "${persist}/etc/${account_file}" ]; then
-            cp -a "${root_mnt}/etc/${account_file}" "${persist}/etc/${account_file}" 2>/dev/null || \
-                ota_persist_log "failed to initialize ${account_file}"
-        fi
-    done
+    mkdir -p "${persist}/home" 2>/dev/null || true
 
     if [ -d "${root_mnt}/home" ] && [ -z "$(ls -A "${persist}/home" 2>/dev/null)" ]; then
         cp -a "${root_mnt}/home/." "${persist}/home/" 2>/dev/null || \
             ota_persist_log "failed to initialize /home"
     fi
 
-    chmod 755 "${persist}" "${persist}/etc" "${persist}/home" 2>/dev/null || true
-    chmod 644 "${persist}/etc/passwd" "${persist}/etc/group" "${persist}/etc/subuid" "${persist}/etc/subgid" 2>/dev/null || true
-    chmod 600 "${persist}/etc/shadow" "${persist}/etc/gshadow" 2>/dev/null || true
+    chmod 755 "${persist}" "${persist}/home" 2>/dev/null || true
 
     sync
     if [ "${mounted_here}" -eq 1 ]; then
         umount "${userdata_mnt}" 2>/dev/null || ota_persist_log "failed to unmount ${userdata_mnt}"
     fi
-    ota_persist_log "initialized /userdata/.persist account files and home data"
+    ota_persist_log "initialized /userdata/.persist home data"
 }
