@@ -170,6 +170,9 @@ armbian-ota start Armbian_xxx-OTA.tar.gz
 # Manual rollback (if needed)
 armbian-ota rollback
 
+# Manually switch to the other boot slot after OTA has completed
+armbian-ota switch-slot
+
 # Mark as successful (if automatic marking failed)
 armbian-ota mark-success
 ```
