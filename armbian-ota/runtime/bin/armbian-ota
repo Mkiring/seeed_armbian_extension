@@ -110,8 +110,9 @@ detect_start_metadata() {
     local package_mode package_encrypted package_encrypted_raw device_encrypted
 
     [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
+    load_package_env_metadata "${package_path}" || error_exit "OTA package metadata missing package.env"
 
-    package_mode="$(read_package_env_value "${package_path}" "OTA_MODE" || true)"
+    package_mode="$(package_env_get_value "OTA_MODE" || true)"
     [ -n "${package_mode}" ] || error_exit "OTA package metadata missing OTA_MODE; cannot detect OTA mode"
 
     case "${package_mode}" in
@@ -121,8 +122,8 @@ detect_start_metadata() {
 
     OTA_CLI_MODE="${package_mode}"
 
-    package_encrypted_raw="$(read_package_env_value "${package_path}" "OTA_ENCRYPTED" || true)"
-    [ -n "${package_encrypted_raw}" ] || error_exit "OTA package metadata missing OTA_ENCRYPTED"
+    package_encrypted_raw="$(package_env_get_value "OTA_ENCRYPTED" || true)"
+    package_encrypted_raw="${package_encrypted_raw:-no}"
 
     package_encrypted="$(normalize_yes_no "${package_encrypted_raw}")" ||
         error_exit "Invalid OTA_ENCRYPTED in package metadata: ${package_encrypted_raw} (expected yes or no)"
