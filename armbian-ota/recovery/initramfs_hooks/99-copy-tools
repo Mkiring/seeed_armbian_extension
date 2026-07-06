@@ -1,17 +1,22 @@
 #!/bin/sh
 
-# initramfs-tools hook: add tools (rm, tar, gzip) into initramfs
+# initramfs-tools hook: add OTA runtime tools into initramfs
 
 set -e
 
 
 . /usr/share/initramfs-tools/hook-functions
 
-echo "[99-copy-tools] adding /usr/bin/rm, /usr/bin/tar, /usr/bin/gzip... into initramfs..." >&2
+echo "[99-copy-tools] adding OTA runtime tools into initramfs..." >&2
 
 # ===== rm =====
 if [ -x /usr/bin/rm ]; then
     copy_exec /usr/bin/rm /usr/bin
+fi
+
+# ===== cp =====
+if [ -x /usr/bin/cp ]; then
+    copy_exec /usr/bin/cp /usr/bin
 fi
 
 # ===== tar =====
@@ -38,6 +43,16 @@ fi
 # ===== grep =====
 if [ -x /usr/bin/grep ]; then
     copy_exec /usr/bin/grep /usr/bin
+fi
+
+# ===== tail =====
+if [ -x /usr/bin/tail ]; then
+    copy_exec /usr/bin/tail /usr/bin
+fi
+
+# ===== date =====
+if [ -x /usr/bin/date ]; then
+    copy_exec /usr/bin/date /usr/bin
 fi
 
 # ===== sync =====
