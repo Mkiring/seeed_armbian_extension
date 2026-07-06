@@ -879,39 +879,23 @@ function ota_configure_persist_fstab() {
 
     sed -i '/^# BEGIN armbian-ota persist$/,/^# END armbian-ota persist$/d' "${fstab}"
 
-    # The dedicated armbi_usrdata partition is provisioned only in A/B builds
-    # (pre_prepare_partitions__ab_part_ota). Recovery OTA -- encrypted or not --
-    # is a single rootfs partition with no armbi_usrdata, so /userdata is a plain
-    # directory on the rootfs and must NOT carry a LABEL=armbi_usrdata mount line
-    # (that device does not exist here: every boot would wait device-timeout then
-    # fail userdata.mount and cascade "Dependency failed"). The bind mounts also
-    # drop the userdata.mount ordering in directory mode (no such unit exists).
-    local bind_opts persist_mode
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        persist_mode="partition"
-        bind_opts="bind,nofail,x-systemd.requires=userdata.mount,x-systemd.after=userdata.mount"
-        {
-            echo ""
-            echo "# BEGIN armbian-ota persist"
-            echo "LABEL=armbi_usrdata                    /userdata       ext4  defaults,noatime,nofail,x-systemd.device-timeout=10s                  0  2"
-        } >> "${fstab}"
-    else
-        persist_mode="directory"
-        bind_opts="bind,nofail"
-        {
-            echo ""
-            echo "# BEGIN armbian-ota persist"
-            echo "# recovery OTA: /userdata is a rootfs directory (no armbi_usrdata partition);"
-            echo "# /userdata/.persist is preserved across OTA by /etc/armbian-ota/preserve-list.txt"
-        } >> "${fstab}"
+        display_alert "OTA persist" "Skip /home bind mount; A/B overlayroot persists rootfs writes on armbi_usrdata" "info"
+        return 0
     fi
 
+    # Recovery OTA -- encrypted or not -- is a single rootfs partition with no
+    # armbi_usrdata. /userdata is a plain directory on the rootfs, so do not add
+    # LABEL=armbi_usrdata or userdata.mount ordering here.
     cat >> "${fstab}" <<EOF
-/userdata/.persist/home                /home           none  ${bind_opts}  0  0
+
+# BEGIN armbian-ota persist
+# recovery OTA: /userdata is a rootfs directory preserved by /etc/armbian-ota/preserve-list.txt
+/userdata/.persist/home                /home           none  bind,nofail  0  0
 # END armbian-ota persist
 EOF
 
-    display_alert "OTA persist" "Configured /userdata/.persist/home bind mount in fstab (${persist_mode} mode)" "info"
+    display_alert "OTA persist" "Configured /userdata/.persist/home bind mount in fstab (recovery mode)" "info"
 }
 
 # Seed <persist>/home from the rootfs /home.
@@ -934,32 +918,8 @@ function ota_seed_persist_dir() {
 function ota_init_userdata_persist() {
     local root_dir="$1"
 
-    # A/B mode: seed the dedicated armbi_usrdata partition (survives OTA as a
-    # separate partition; never touched by the slot rewrite).
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        [[ -n "${AB_USERDATA_PART_INDEX}" ]] || return 0
-        [[ -b "${LOOP}p${AB_USERDATA_PART_INDEX}" ]] || {
-            display_alert "OTA persist" "userdata partition not found, skip persist initialization" "warn"
-            return 0
-        }
-
-        local userdata_dev="${LOOP}p${AB_USERDATA_PART_INDEX}"
-        local userdata_mnt
-        userdata_mnt="$(mktemp -d)"
-
-        if ! mount "${userdata_dev}" "${userdata_mnt}"; then
-            display_alert "OTA persist" "Failed to mount userdata for persist initialization" "warn"
-            rm -rf "${userdata_mnt}"
-            return 0
-        fi
-
-        ota_seed_persist_dir "${root_dir}" "${userdata_mnt}/.persist"
-
-        sync
-        umount "${userdata_mnt}" || display_alert "OTA persist" "Failed to unmount userdata after persist initialization" "warn"
-        rm -rf "${userdata_mnt}"
-
-        display_alert "OTA persist" "Initialized /userdata/.persist on armbi_usrdata partition" "info"
+        display_alert "OTA persist" "Skip /userdata/.persist initialization in A/B overlayroot mode" "info"
         return 0
     fi
 
