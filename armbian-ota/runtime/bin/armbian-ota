@@ -134,6 +134,7 @@ dispatch_by_state_mode() {
 case "${1:-}" in
     start)
         shift
+        ensure_root
         parse_start_args "$@"
         detect_start_mode "${OTA_CLI_PACKAGE}"
         call_mode_action "${OTA_CLI_MODE}" "start" "${OTA_CLI_PACKAGE}"
@@ -143,10 +144,12 @@ case "${1:-}" in
         dispatch_by_state_mode "status"
         ;;
     mark-success)
+        ensure_root
         state_init
         dispatch_by_state_mode "mark-success"
         ;;
     rollback)
+        ensure_root
         state_init
         dispatch_by_state_mode "rollback"
         ;;
