@@ -1,6 +1,6 @@
 #!/bin/sh
 
-OTA_PRESERVE_LIST="${OTA_PRESERVE_LIST:-/etc/armbian-ota/back-list.txt}"
+OTA_PRESERVE_LIST="${OTA_PRESERVE_LIST:-/etc/armbian-ota/preserve-list.txt}"
 
 ota_preserve_log_info() {
     if command -v log_info >/dev/null 2>&1; then

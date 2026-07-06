@@ -552,8 +552,8 @@ ab_update_target_partition() {
     fi
 
     if command -v ota_preserve_apply_list >/dev/null 2>&1; then
-        preserve_list="/etc/armbian-ota/back-list.txt"
-        [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/back-list.txt"
+        preserve_list="/etc/armbian-ota/preserve-list.txt"
+        [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/preserve-list.txt"
         ota_preserve_apply_list "/" "${root_mnt}" "${preserve_list}"
     else
         log_warn "preserve helper not available, skip local config preserve"
