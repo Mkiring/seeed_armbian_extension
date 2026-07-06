@@ -98,9 +98,11 @@ Typical usage:
    chmod +x /usr/sbin/armbian-ota
    mkdir -p /usr/share/armbian-ota
    cp -a runtime/lib/common.sh /usr/share/armbian-ota/common.sh
+   cp -a runtime/lib/state.sh /usr/share/armbian-ota/state.sh
    cp -a runtime/lib/persist.sh /usr/share/armbian-ota/persist.sh
    cp -a runtime/lib/preserve.sh /usr/share/armbian-ota/preserve.sh
    mkdir -p /etc/armbian-ota
+   cp -a runtime/policy/ota-state.env.template /etc/armbian-ota/ota-state.env.template
    if [ -f /etc/armbian-ota/preserve-list.txt ]; then
        cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt.default
    else
@@ -762,6 +764,7 @@ function pre_umount_final_image__894_install_ota_runtime() {
     local ab_src="${ota_ext_dir}/ab"
     local recovery_src="${ota_ext_dir}/recovery"
     local default_preserve_list="${runtime_src}/policy/preserve-list.txt"
+    local state_template="${runtime_src}/policy/ota-state.env.template"
 
     if [[ ! -d "${runtime_src}" ]]; then
         display_alert "OTA runtime" "runtime source dir missing: ${runtime_src}" "warn"
@@ -777,6 +780,10 @@ function pre_umount_final_image__894_install_ota_runtime() {
     }
     cp "${runtime_src}/lib/common.sh" "${root_dir}/usr/share/armbian-ota/common.sh" || {
         display_alert "OTA runtime" "Failed to install common.sh" "err"
+        return 1
+    }
+    cp "${runtime_src}/lib/state.sh" "${root_dir}/usr/share/armbian-ota/state.sh" || {
+        display_alert "OTA runtime" "Failed to install state.sh" "err"
         return 1
     }
     cp "${runtime_src}/lib/persist.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" || {
@@ -801,6 +808,13 @@ function pre_umount_final_image__894_install_ota_runtime() {
         fi
     fi
 
+    if [[ -f "${state_template}" ]]; then
+        mkdir -p "${root_dir}/etc/armbian-ota"
+        cp "${state_template}" "${root_dir}/etc/armbian-ota/ota-state.env.template" || {
+            display_alert "OTA runtime" "Failed to install ota-state.env.template" "warn"
+        }
+    fi
+
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
         cp "${ab_src}/runtime/backend.sh" "${root_dir}/usr/share/armbian-ota/backend-ab.sh" || {
             display_alert "OTA runtime" "Failed to install backend-ab.sh" "err"
@@ -820,7 +834,7 @@ function pre_umount_final_image__894_install_ota_runtime() {
         fi
     fi
 
-    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
+    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/state.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-ab.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-ab.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-recovery.sh"
 

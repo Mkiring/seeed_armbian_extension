@@ -7,6 +7,10 @@ OTA_LOCK_FILE="${OTA_LOCK_FILE:-/var/run/armbian-ota.lock}"
 OTA_LOG_DIR="${OTA_LOG_DIR:-/var/log/armbian-ota}"
 OTA_LOG_FILE="${OTA_LOG_FILE:-${OTA_LOG_DIR}/ota.log}"
 
+COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${COMMON_LIB_DIR}/state.sh"
+unset COMMON_LIB_DIR
+
 init_logging() {
     mkdir -p "${OTA_LOG_DIR}" "${OTA_STATE_DIR}"
 }
@@ -73,16 +77,10 @@ state_init() {
     mkdir -p "${OTA_STATE_DIR}" 2>/dev/null || return 0
     [ -f "${OTA_STATE_FILE}" ] && return 0
 
-    cat > "${OTA_STATE_FILE}" 2>/dev/null <<'EOF' || true
-# Armbian OTA runtime state
-OTA_MODE=
-STATUS=idle
-PACKAGE_PATH=
-CURRENT_SLOT=
-TARGET_SLOT=
-START_TIME=
-COMPLETE_TIME=
-EOF
+    (
+        OTA_STATE_STATUS=idle
+        ota_state_write_file "${OTA_STATE_FILE}"
+    ) || true
 }
 
 state_get() {
@@ -96,11 +94,7 @@ state_set() {
     local key="$1"
     local value="$2"
     state_init
-    if grep -q -E "^${key}=" "${OTA_STATE_FILE}"; then
-        sed -i "s|^${key}=.*|${key}=${value}|" "${OTA_STATE_FILE}"
-    else
-        printf '%s=%s\n' "${key}" "${value}" >> "${OTA_STATE_FILE}"
-    fi
+    ota_state_set_key "${OTA_STATE_FILE}" "${key}" "${value}"
 }
 
 state_mark_mode() {

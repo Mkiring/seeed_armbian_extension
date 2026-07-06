@@ -115,6 +115,7 @@ set_env_key() {
 # enable shell trace (goes into log/kmsg)
 set -x
 
+[ -f /usr/share/armbian-ota/state.sh ] && . /usr/share/armbian-ota/state.sh
 [ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
 [ -f /usr/share/armbian-ota/preserve.sh ] && . /usr/share/armbian-ota/preserve.sh
 
@@ -502,10 +503,21 @@ rm -rf "${OTA_DIR}" || true
 
 # ===== 8) update runtime state =====
 mkdir -p "${STATE_DIR}"
-if [ -f "${STATE_FILE}" ]; then
-    sed -i 's/^OTA_MODE=.*/OTA_MODE=recovery/' "${STATE_FILE}" 2>/dev/null || true
-    sed -i 's/^STATUS=.*/STATUS=success/' "${STATE_FILE}" 2>/dev/null || true
-    sed -i "s/^COMPLETE_TIME=.*/COMPLETE_TIME=$(date -Iseconds)/" "${STATE_FILE}" 2>/dev/null || true
+PACKAGE_PATH_VALUE="$(grep -E '^PACKAGE_PATH=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+START_TIME_VALUE="$(grep -E '^START_TIME=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+COMPLETE_TIME_VALUE="$(date -Iseconds)"
+if command -v ota_state_write_file >/dev/null 2>&1; then
+    (
+        OTA_STATE_TEMPLATE_FILE="${ROOT_MNT}/etc/armbian-ota/ota-state.env.template"
+        OTA_STATE_MODE=recovery
+        OTA_STATE_STATUS=success
+        OTA_STATE_PACKAGE_PATH="${PACKAGE_PATH_VALUE}"
+        OTA_STATE_START_TIME="${START_TIME_VALUE}"
+        OTA_STATE_COMPLETE_TIME="${COMPLETE_TIME_VALUE}"
+        ota_state_write_file "${STATE_FILE}"
+    ) || log "WARN: failed to write ${STATE_FILE}"
+else
+    log "WARN: state helper not available, failed to write ${STATE_FILE}"
 fi
 
 # ===== 8) unmount partitions =====

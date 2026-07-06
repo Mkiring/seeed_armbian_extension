@@ -472,10 +472,34 @@ ab_mark_ready_to_boot() {
     state_set "COMPLETE_TIME" ""
 }
 
+ab_write_target_state() {
+    local root_mnt="$1"
+    local package_path="$2"
+    local current_slot="$3"
+    local target_slot="$4"
+    local state_file start_time
+
+    state_file="${root_mnt}/var/lib/armbian-ota/ota-state.env"
+    start_time="$(date -Iseconds)"
+
+    (
+        OTA_STATE_TEMPLATE_FILE="${root_mnt}/etc/armbian-ota/ota-state.env.template"
+        OTA_STATE_MODE=ab
+        OTA_STATE_STATUS=ready_to_boot
+        OTA_STATE_PACKAGE_PATH="$(basename "${package_path}")"
+        OTA_STATE_CURRENT_SLOT="${current_slot}"
+        OTA_STATE_TARGET_SLOT="${target_slot}"
+        OTA_STATE_START_TIME="${start_time}"
+        ota_state_write_file "${state_file}"
+    ) || error_exit "Failed to write target OTA state"
+}
+
 ab_update_target_partition() {
     local temp_work="$1"
     local target_root_label="$2"
     local target_boot_label="$3"
+    local package_path="$4"
+    local current_slot="$5"
     local target_slot target_root_dev target_boot_dev root_mnt boot_mnt
     local target_root_uuid target_boot_uuid existing_root_uuid existing_boot_uuid
     local fstab arm_env crypttab preserve_list
@@ -558,6 +582,8 @@ ab_update_target_partition() {
     else
         log_warn "preserve helper not available, skip local config preserve"
     fi
+
+    ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
 
     if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
         boot_mnt="$(mktemp -d)"
@@ -653,7 +679,7 @@ ab_start_ota() {
     extract_ota_package "${package_path}" "${temp_work}"
     ab_verify_payload "${temp_work}"
 
-    ab_update_target_partition "${temp_work}" "${target_root_label}" "${target_boot_label}"
+    ab_update_target_partition "${temp_work}" "${target_root_label}" "${target_boot_label}" "${package_path}" "${current_slot}"
     rm -rf "${temp_work}"
 
     ab_mark_ready_to_boot "${package_path}" "${current_slot}" "${target_slot}"
