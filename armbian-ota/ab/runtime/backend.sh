@@ -542,12 +542,6 @@ ab_update_target_partition() {
         error_exit "Failed to extract rootfs payload"
     }
 
-    if command -v ota_persist_init_userdata >/dev/null 2>&1; then
-        ota_persist_init_userdata "/" "/mnt/armbian-ota-userdata"
-    else
-        log_warn "persist helper not available, skip userdata persist initialization"
-    fi
-
     if command -v ota_preserve_apply_list >/dev/null 2>&1; then
         preserve_list="/etc/armbian-ota/preserve-list.txt"
         [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/preserve-list.txt"
