@@ -570,6 +570,7 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
     local ota_mode_file="$ota_temp_dir/package.env"
     cat > "$ota_mode_file" << EOF
 OTA_MODE=${manifest_mode}
+OTA_ENCRYPTED=${CRYPTROOT_ENABLE:-no}
 BOARD=${BOARD}
 RELEASE=${RELEASE}
 BRANCH=${BRANCH}
