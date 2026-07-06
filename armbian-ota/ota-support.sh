@@ -1,9 +1,162 @@
-function extension_prepare_config__ota_image_suffix() {
-    local ota_image_suffix="-recovery"
-
+function ota_get_layout_suffix() {
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        ota_image_suffix="-ab"
+        echo "_AB_PART"
+    else
+        echo "_RECOVERY"
     fi
+}
+
+function ota_get_package_type_label() {
+    if [[ "${AB_PART_OTA}" == "yes" ]]; then
+        echo "AB_PART_OTA"
+    else
+        echo "RECOVERY_OTA"
+    fi
+}
+
+function ota_get_manifest_mode() {
+    if [[ "${AB_PART_OTA}" == "yes" ]]; then
+        echo "ab"
+    else
+        echo "recovery"
+    fi
+}
+
+function ota_get_image_variant_suffix() {
+    local suffix=""
+
+    if [[ "${CRYPTROOT_ENABLE}" == "yes" ]]; then
+        suffix="${suffix}_ENCRYPTED"
+    fi
+
+    suffix="${suffix}$(ota_get_layout_suffix)"
+    echo "${suffix}"
+}
+
+function ota_build_package_base_image_name() {
+    local kernel_version_for_image="unknown"
+    if [[ -n "$KERNEL_VERSION" ]]; then
+        kernel_version_for_image="$KERNEL_VERSION"
+    elif [[ -n "$IMAGE_INSTALLED_KERNEL_VERSION" ]]; then
+        kernel_version_for_image="${IMAGE_INSTALLED_KERNEL_VERSION/-$LINUXFAMILY/}"
+    fi
+
+    local vendor_version_prelude="${VENDOR}_${IMAGE_VERSION:-"${REVISION}"}_"
+    if [[ "${include_vendor_version:-"yes"}" == "no" ]]; then
+        vendor_version_prelude=""
+    fi
+
+    local base_image_name="${vendor_version_prelude}${BOARD^}_${RELEASE}_${BRANCH}_${kernel_version_for_image}"
+
+    if [[ -n "$DESKTOP_ENVIRONMENT" ]]; then
+        base_image_name="${base_image_name}_${DESKTOP_ENVIRONMENT}"
+    fi
+    if [[ "$BUILD_DESKTOP" == "yes" ]]; then
+        base_image_name="${base_image_name}_desktop"
+    fi
+    if [[ "$BUILD_MINIMAL" == "yes" ]]; then
+        base_image_name="${base_image_name}_minimal"
+    fi
+    if [[ "$ROOTFS_TYPE" == "nfs" ]]; then
+        base_image_name="${base_image_name}_nfsboot"
+    fi
+
+    # Keep non-layout variants (for example _ENCRYPTED), but omit the layout
+    # suffix because the OTA package type label already carries it.
+    local variant_suffix
+    variant_suffix="$(ota_get_image_variant_suffix)"
+    local layout_suffix
+    layout_suffix="$(ota_get_layout_suffix)"
+    if [[ "${variant_suffix}" == *"${layout_suffix}" ]]; then
+        variant_suffix="${variant_suffix%"${layout_suffix}"}"
+    fi
+    if [[ -n "${variant_suffix}" ]]; then
+        base_image_name="${base_image_name}${variant_suffix}"
+    fi
+
+    echo "${base_image_name}"
+}
+
+function ota_write_payload_tools_readme() {
+    local payload_tools_dir="$1"
+
+    cat > "${payload_tools_dir}/README_INSTALL.txt" << 'EOF'
+Armbian OTA Runtime Tools
+
+This payload contains OTA runtime scripts for fallback/offline installation.
+
+If firmware was built with OTA enabled:
+- AB firmware (`AB_PART_OTA=yes`) already includes AB OTA runtime/tools.
+- Recovery firmware (`OTA_ENABLE=yes`, no `AB_PART_OTA`) already includes Recovery OTA runtime/tools.
+
+In those cases, you only need to copy the OTA package and run `armbian-ota start <ota-package.tar.gz>`.
+
+Typical usage:
+1) If your firmware does not include OTA runtime, copy ota_tools/ to target board.
+2) Install runtime CLI and libraries manually (as root), for example:
+   cp -a runtime/bin/armbian-ota /usr/sbin/armbian-ota
+   chmod +x /usr/sbin/armbian-ota
+   mkdir -p /usr/share/armbian-ota
+   cp -a runtime/lib/common.sh /usr/share/armbian-ota/common.sh
+   cp -a runtime/lib/persist.sh /usr/share/armbian-ota/persist.sh
+   cp -a runtime/lib/preserve.sh /usr/share/armbian-ota/preserve.sh
+   mkdir -p /etc/armbian-ota
+   if [ -f /etc/armbian-ota/preserve-list.txt ]; then
+       cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt.default
+   else
+       cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt
+   fi
+   cp -a ab/runtime/backend.sh /usr/share/armbian-ota/backend-ab.sh
+   cp -a recovery/runtime/backend.sh /usr/share/armbian-ota/backend-recovery.sh
+   mkdir -p /usr/share/armbian-ota/recovery
+   cp -a recovery/. /usr/share/armbian-ota/recovery/
+
+3) Trigger OTA:
+   armbian-ota start <ota-package.tar.gz>
+EOF
+}
+
+function ota_copy_payload_tools() {
+    local ota_temp_dir="$1"
+    local ota_ext_dir
+    ota_ext_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local runtime_src="${ota_ext_dir}/runtime"
+    local ab_src="${ota_ext_dir}/ab"
+    local recovery_src="${ota_ext_dir}/recovery"
+    local payload_tools_dir="${ota_temp_dir}/ota_tools"
+
+    mkdir -p "${payload_tools_dir}"
+
+    if [[ -d "${runtime_src}" ]]; then
+        mkdir -p "${payload_tools_dir}/runtime"
+        cp -a "${runtime_src}/." "${payload_tools_dir}/runtime/" || {
+            display_alert "OTA payload" "Failed to copy runtime tools into payload" "err"
+            return 1
+        }
+    else
+        display_alert "OTA payload" "runtime source dir not found: ${runtime_src}" "warn"
+    fi
+
+    if [[ -d "${ab_src}" ]]; then
+        mkdir -p "${payload_tools_dir}/ab"
+        cp -a "${ab_src}/lib" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${ab_src}/runtime" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${ab_src}/systemd" "${payload_tools_dir}/ab/" 2>/dev/null || true
+    fi
+
+    if [[ -d "${recovery_src}" ]]; then
+        mkdir -p "${payload_tools_dir}/recovery"
+        cp -a "${recovery_src}/bin" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${recovery_src}/runtime" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+    fi
+
+    ota_write_payload_tools_readme "${payload_tools_dir}"
+}
+
+function extension_prepare_config__ota_image_suffix() {
+    local ota_image_suffix
+    ota_image_suffix="$(ota_get_image_variant_suffix)"
 
     EXTRA_IMAGE_SUFFIXES+=("${ota_image_suffix}")
     display_alert "OTA image suffix" "${ota_image_suffix}" "info"
@@ -81,8 +234,6 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
         fi
     else
         # Normal mode: Dynamically detect boot and rootfs partitions
-        local partitions_found=()
-
         # Get all partition information (including size, mount point)
         local partition_info
         partition_info=$(lsblk -ln -o NAME,SIZE,MOUNTPOINT "${LOOP}" | grep -E "${LOOP##*/}p?[0-9]+" | sort)
@@ -115,8 +266,6 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
                 display_alert "DEBUG parsed fields" "name=${partition_name}, size=${part_size}, mount=${mount_point}" "debug"
 
                 if [[ -b "$full_path" ]]; then
-                    partitions_found+=("$full_path")
-
                     # Use mount point information to differentiate
                     if [[ -n "$mount_point" ]]; then
                         # Detect boot partition: mount path contains "/boot"
@@ -195,9 +344,6 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
     local rootfs_mount="${WORKDIR}/rootfs_mount"
     mkdir -p "$boot_mount" "$rootfs_mount"
 
-    local extract_boot=false
-    local extract_rootfs=true  # rootfs always extracted
-
     # Define tar package paths
     local boot_tar="${ota_temp_dir}/boot.tar.gz"
     local rootfs_tar="${ota_temp_dir}/rootfs.tar.gz"
@@ -241,8 +387,6 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
                 local boot_tar_size=$(stat -c%s "$boot_tar")
                 display_alert "Boot content archived" "boot.tar.gz size: $((boot_tar_size / 1024)) KB" "info"
                 display_alert "Boot partition contents" "Found $(find "$boot_mount" -type f | wc -l) files" "debug"
-                extract_boot=true
-
                 # Generate SHA256 for boot.tar.gz
                 if command -v sha256sum >/dev/null 2>&1; then
                     (cd "${ota_temp_dir}" && sha256sum "boot.tar.gz" > "${boot_sha_file}") || {
@@ -287,8 +431,6 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
             local rootfs_tar_size=$(stat -c%s "$rootfs_tar")
             display_alert "Rootfs content archived" "rootfs.tar.gz size: $((rootfs_tar_size / 1024 / 1024)) MB" "info"
             display_alert "Rootfs partition contents" "Found $(find "$rootfs_mount" -type f | wc -l) files" "debug"
-            extract_rootfs=true
-
             # Generate SHA256 for rootfs.tar.gz
             if command -v sha256sum >/dev/null 2>&1; then
                 (cd "${ota_temp_dir}" && sha256sum "rootfs.tar.gz" > "${rootfs_sha_file}") || {
@@ -382,66 +524,21 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
     # Create final OTA package
     display_alert "Creating final OTA package" "Combining tools and images" "info"
 
-    # Use Armbian official variable to get image name
-    local base_image_name=""
+    local base_image_name
+    base_image_name="$(ota_build_package_base_image_name)"
 
-	# Get kernel version information
-	local kernel_version_for_image="unknown"
-	if [[ -n "$KERNEL_VERSION" ]]; then
-		kernel_version_for_image="$KERNEL_VERSION"
-	elif [[ -n "$IMAGE_INSTALLED_KERNEL_VERSION" ]]; then
-		kernel_version_for_image="${IMAGE_INSTALLED_KERNEL_VERSION/-$LINUXFAMILY/}"
-	fi
+    local ota_type_label
+    ota_type_label="$(ota_get_package_type_label)"
+    display_alert "OTA package type" "${ota_type_label}" "info"
 
-	# Construct vendor and version prefix
-	local vendor_version_prelude="${VENDOR}_${IMAGE_VERSION:-"${REVISION}"}_"
-	if [[ "${include_vendor_version:-"yes"}" == "no" ]]; then
-		vendor_version_prelude=""
-	fi
-
-	# Construct base name
-	base_image_name="${vendor_version_prelude}${BOARD^}_${RELEASE}_${BRANCH}_${kernel_version_for_image}"
-
-	# Add desktop environment suffix
-	if [[ -n "$DESKTOP_ENVIRONMENT" ]]; then
-		base_image_name="${base_image_name}_${DESKTOP_ENVIRONMENT}"
-	fi
-
-	# Add extra image suffix
-	if [[ -n "$EXTRA_IMAGE_SUFFIX" ]]; then
-		base_image_name="${base_image_name}${EXTRA_IMAGE_SUFFIX}"
-	fi
-
-	# Add build type suffix
-	if [[ "$BUILD_DESKTOP" == "yes" ]]; then
-		base_image_name="${base_image_name}_desktop"
-	fi
-	if [[ "$BUILD_MINIMAL" == "yes" ]]; then
-		base_image_name="${base_image_name}_minimal"
-	fi
-	if [[ "$ROOTFS_TYPE" == "nfs" ]]; then
-		base_image_name="${base_image_name}_nfsboot"
-	fi
-
-    # Create OTA package name with OTA type label
-    local ota_type_label=""
-    if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        ota_type_label="AB_PART_OTA"
-        display_alert "OTA package type" "A/B partition OTA" "info"
-    else
-        ota_type_label="RECOVERY_OTA"
-        display_alert "OTA package type" "Recovery OTA" "info"
-    fi
     local ota_package_name="${base_image_name}_${ota_type_label}.tar.gz"
     local ota_output_path="${DEST}/images/${ota_package_name}"
 
     # Ensure output directory exists
     mkdir -p "${DEST}/images/"
 
-    local manifest_mode="recovery"
-    if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        manifest_mode="ab"
-    fi
+    local manifest_mode
+    manifest_mode="$(ota_get_manifest_mode)"
 
     local ota_mode_file="$ota_temp_dir/package.env"
     cat > "$ota_mode_file" << EOF
@@ -453,75 +550,10 @@ VERSION=${IMAGE_VERSION:-"${REVISION}"}
 KERNEL=${KERNEL_VERSION:-"${IMAGE_INSTALLED_KERNEL_VERSION}"}
 EOF
 
-    # Package OTA runtime tools into payload as a fallback/offline bundle.
-    local ota_ext_dir
-    ota_ext_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local runtime_src="${ota_ext_dir}/runtime"
-    local ab_src="${ota_ext_dir}/ab"
-    local recovery_src="${ota_ext_dir}/recovery"
-    local payload_tools_dir="${ota_temp_dir}/ota_tools"
-
-    mkdir -p "${payload_tools_dir}"
-
-    if [[ -d "${runtime_src}" ]]; then
-        mkdir -p "${payload_tools_dir}/runtime"
-        cp -a "${runtime_src}/." "${payload_tools_dir}/runtime/" || {
-            display_alert "OTA payload" "Failed to copy runtime tools into payload" "err"
-            rm -rf "$ota_temp_dir"
-            return 1
-        }
-    else
-        display_alert "OTA payload" "runtime source dir not found: ${runtime_src}" "warn"
+    if ! ota_copy_payload_tools "${ota_temp_dir}"; then
+        rm -rf "$ota_temp_dir"
+        return 1
     fi
-
-    if [[ -d "${ab_src}" ]]; then
-        mkdir -p "${payload_tools_dir}/ab"
-        cp -a "${ab_src}/lib" "${payload_tools_dir}/ab/" 2>/dev/null || true
-        cp -a "${ab_src}/runtime" "${payload_tools_dir}/ab/" 2>/dev/null || true
-        cp -a "${ab_src}/systemd" "${payload_tools_dir}/ab/" 2>/dev/null || true
-    fi
-
-    if [[ -d "${recovery_src}" ]]; then
-        mkdir -p "${payload_tools_dir}/recovery"
-        cp -a "${recovery_src}/bin" "${payload_tools_dir}/recovery/" 2>/dev/null || true
-        cp -a "${recovery_src}/runtime" "${payload_tools_dir}/recovery/" 2>/dev/null || true
-        cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
-    fi
-
-    cat > "${payload_tools_dir}/README_INSTALL.txt" << 'EOF'
-Armbian OTA Runtime Tools
-
-This payload contains OTA runtime scripts for fallback/offline installation.
-
-If firmware was built with OTA enabled:
-- AB firmware (`AB_PART_OTA=yes`) already includes AB OTA runtime/tools.
-- Recovery firmware (`OTA_ENABLE=yes`, no `AB_PART_OTA`) already includes Recovery OTA runtime/tools.
-
-In those cases, you only need to copy the OTA package and run `armbian-ota start <ota-package.tar.gz>`.
-
-Typical usage:
-1) If your firmware does not include OTA runtime, copy ota_tools/ to target board.
-2) Install runtime CLI and libraries manually (as root), for example:
-   cp -a runtime/bin/armbian-ota /usr/sbin/armbian-ota
-   chmod +x /usr/sbin/armbian-ota
-   mkdir -p /usr/share/armbian-ota
-   cp -a runtime/lib/common.sh /usr/share/armbian-ota/common.sh
-   cp -a runtime/lib/persist.sh /usr/share/armbian-ota/persist.sh
-   cp -a runtime/lib/preserve.sh /usr/share/armbian-ota/preserve.sh
-   mkdir -p /etc/armbian-ota
-   if [ -f /etc/armbian-ota/preserve-list.txt ]; then
-       cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt.default
-   else
-       cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt
-   fi
-   cp -a ab/runtime/backend.sh /usr/share/armbian-ota/backend-ab.sh
-   cp -a recovery/runtime/backend.sh /usr/share/armbian-ota/backend-recovery.sh
-   mkdir -p /usr/share/armbian-ota/recovery
-   cp -a recovery/. /usr/share/armbian-ota/recovery/
-
-3) Trigger OTA:
-   armbian-ota start <ota-package.tar.gz>
-EOF
 
     # Create version info file for compatibility wrapper
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
