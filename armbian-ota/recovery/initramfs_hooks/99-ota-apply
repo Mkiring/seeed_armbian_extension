@@ -306,14 +306,14 @@ else
     log "preserve helper not available, skip local config preserve"
 fi
 
-# ===== 2) clean rootfs (except ota_work and boot) =====
-log "cleaning ${ROOT_MNT} (except ota_work and boot)..."
+# ===== 2) clean rootfs (except ota_work, boot, and userdata) =====
+log "cleaning ${ROOT_MNT} (except ota_work, boot, and userdata)..."
 start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
 (
     cd "${ROOT_MNT}" || exit 1
     for f in * .[!.]* ..?*; do
         case "$f" in
-            "."|".."|"ota_work"|"boot")
+            "."|".."|"ota_work"|"boot"|"userdata")
                 continue
                 ;;
         esac
