@@ -626,7 +626,13 @@ EOF
 
     # Create final OTA tar.gz package
     display_alert "Creating final OTA package" "${ota_package_name}" "info"
-    if (cd "$ota_temp_dir" && tar -czf "$ota_output_path" .); then
+    if (
+        cd "$ota_temp_dir" &&
+        {
+            printf '%s\0' "package.env"
+            find . -mindepth 1 ! -path "./package.env" ! -type d -printf '%P\0' | LC_ALL=C sort -z
+        } | tar --null -czf "$ota_output_path" -T -
+    ); then
         local ota_size=$(stat -c%s "$ota_output_path")
         display_alert "OTA package created successfully" "${ota_package_name} ($((ota_size / 1024 / 1024)) MB)" "info"
 

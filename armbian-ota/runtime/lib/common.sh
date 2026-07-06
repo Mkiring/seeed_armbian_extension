@@ -157,6 +157,7 @@ read_package_env_value() {
     local key="$2"
     local manifest_entry
 
+    log_info "Reading OTA package metadata: ${key} from ${package_path}" >&2
     manifest_entry="$(
         tar -tzf "${package_path}" 2>/dev/null \
             | awk '/(^|\/)package\.env$/ { print; exit }'
