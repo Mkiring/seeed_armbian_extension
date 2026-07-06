@@ -98,13 +98,7 @@ AB_PART_OTA=yes
 
 ### Persistent Data
 
-`/home` is decoupled from the rootfs image via a bind mount, so it survives an
-OTA update. The backing store is `/userdata/.persist`, and the default
-persistent bind mount is:
-
-| Source | Target |
-|--------|--------|
-| `/userdata/.persist/home` | `/home` |
+User data survives OTA updates differently depending on the OTA mode.
 
 User account database files (`/etc/passwd`, `/etc/shadow`, `/etc/group`,
 `/etc/gshadow`, `/etc/subuid`, `/etc/subgid`) remain normal files at runtime.
@@ -114,10 +108,10 @@ those files with the preserve whitelist instead of bind mounting them.
 
 The `/userdata` backing store differs by OTA mode:
 
-- **A/B OTA**: `/userdata` is the dedicated `armbi_usrdata` partition (see the
-  partition table above). It is never rewritten by a slot update, so
-  `/userdata/.persist` survives naturally. The fstab carries the
-  `LABEL=armbi_usrdata -> /userdata` mount plus the `/home` bind mount.
+- **A/B OTA**: overlayroot is enabled and uses the dedicated `armbi_usrdata`
+  partition as the writable upper layer. Rootfs slots stay read-only, and
+  runtime writes such as `/home` are persisted by overlayroot on `armbi_usrdata`.
+  No `/userdata/.persist/home -> /home` bind mount is installed in this mode.
 - **Recovery OTA (encrypted or not)**: the image is a single rootfs partition
   with no `armbi_usrdata`, so `/userdata` is a plain directory on the rootfs.
   The fstab carries only the `/home` bind mount (no `LABEL=armbi_usrdata` line and no
@@ -127,9 +121,15 @@ The `/userdata` backing store differs by OTA mode:
   `/etc/armbian-ota/preserve-list.txt` so the preserve step backs it up before the
   rewrite and restores it after.
 
+For Recovery OTA, the persistent bind mount is:
+
+| Source | Target |
+|--------|--------|
+| `/userdata/.persist/home` | `/home` |
+
 At image build time `ota_init_userdata_persist` seeds `/userdata/.persist/home`
-from the rootfs so the bind mount has a valid source on first boot. Seeding is
-idempotent: existing preserved data always wins.
+from the rootfs for Recovery OTA so the bind mount has a valid source on first
+boot. Seeding is idempotent: existing preserved data always wins.
 
 Local device configuration is preserved with `/etc/armbian-ota/preserve-list.txt`;
 the default source file is `runtime/policy/preserve-list.txt`. Recovery OTA backs up those
