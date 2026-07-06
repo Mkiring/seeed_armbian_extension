@@ -1163,6 +1163,13 @@ function pre_umount_final_image__898_config_overlayroot() {
     else
         display_alert "overlayroot" "/etc/overlayroot.conf not found" "warn"
     fi
+
+    # The Debian overlayroot package installs a MOTD script that dumps
+    # overlay mount entries on every login. It is noisy for production images.
+    if [[ -e "${root_dir}/etc/update-motd.d/97-overlayroot" ]]; then
+        rm -f "${root_dir}/etc/update-motd.d/97-overlayroot"
+        display_alert "overlayroot" "Removed overlayroot MOTD mount dump" "info"
+    fi
 }
 
 function pre_umount_final_image__896_install_resize_userdata_service() {
