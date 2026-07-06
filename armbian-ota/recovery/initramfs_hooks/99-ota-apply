@@ -131,7 +131,7 @@ STATE_FILE="${STATE_DIR}/ota-state.env"
 OTA_DIR="${ROOT_MNT}/ota_work"
 ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
 BOOT_TAR="${OTA_DIR}/boot.tar.gz"
-PRESERVE_LIST="${ROOT_MNT}/etc/armbian-ota/back-list.txt"
+PRESERVE_LIST="${ROOT_MNT}/etc/armbian-ota/preserve-list.txt"
 PRESERVE_TAR="${OTA_DIR}/ota-preserve.tar"
 PRESERVE_TMP_LIST="${LOGDIR}/ota-preserve.list"
 

@@ -509,10 +509,10 @@ Typical usage:
    cp -a runtime/lib/persist.sh /usr/share/armbian-ota/persist.sh
    cp -a runtime/lib/preserve.sh /usr/share/armbian-ota/preserve.sh
    mkdir -p /etc/armbian-ota
-   if [ -f /etc/armbian-ota/back-list.txt ]; then
-       cp -a runtime/policy/back-list.txt /etc/armbian-ota/back-list.txt.default
+   if [ -f /etc/armbian-ota/preserve-list.txt ]; then
+       cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt.default
    else
-       cp -a runtime/policy/back-list.txt /etc/armbian-ota/back-list.txt
+       cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt
    fi
    cp -a ab/runtime/backend.sh /usr/share/armbian-ota/backend-ab.sh
    cp -a recovery/runtime/backend.sh /usr/share/armbian-ota/backend-recovery.sh
@@ -729,7 +729,7 @@ function pre_umount_final_image__894_install_ota_runtime() {
     local runtime_src="${ota_ext_dir}/runtime"
     local ab_src="${ota_ext_dir}/ab"
     local recovery_src="${ota_ext_dir}/recovery"
-    local default_back_list="${runtime_src}/policy/back-list.txt"
+    local default_preserve_list="${runtime_src}/policy/preserve-list.txt"
 
     if [[ ! -d "${runtime_src}" ]]; then
         display_alert "OTA runtime" "runtime source dir missing: ${runtime_src}" "warn"
@@ -756,15 +756,15 @@ function pre_umount_final_image__894_install_ota_runtime() {
         return 1
     }
 
-    if [[ -f "${default_back_list}" ]]; then
+    if [[ -f "${default_preserve_list}" ]]; then
         mkdir -p "${root_dir}/etc/armbian-ota"
-        if [[ -f "${root_dir}/etc/armbian-ota/back-list.txt" ]]; then
-            cp "${default_back_list}" "${root_dir}/etc/armbian-ota/back-list.txt.default" || {
-                display_alert "OTA runtime" "Failed to install default back-list.txt.default" "warn"
+        if [[ -f "${root_dir}/etc/armbian-ota/preserve-list.txt" ]]; then
+            cp "${default_preserve_list}" "${root_dir}/etc/armbian-ota/preserve-list.txt.default" || {
+                display_alert "OTA runtime" "Failed to install default preserve-list.txt.default" "warn"
             }
         else
-            cp "${default_back_list}" "${root_dir}/etc/armbian-ota/back-list.txt" || {
-                display_alert "OTA runtime" "Failed to install default back-list.txt" "warn"
+            cp "${default_preserve_list}" "${root_dir}/etc/armbian-ota/preserve-list.txt" || {
+                display_alert "OTA runtime" "Failed to install default preserve-list.txt" "warn"
             }
         fi
     fi
@@ -831,7 +831,7 @@ function ota_configure_persist_fstab() {
             echo ""
             echo "# BEGIN armbian-ota persist"
             echo "# recovery OTA: /userdata is a rootfs directory (no armbi_usrdata partition);"
-            echo "# /userdata/.persist is preserved across OTA by /etc/armbian-ota/back-list.txt"
+            echo "# /userdata/.persist is preserved across OTA by /etc/armbian-ota/preserve-list.txt"
         } >> "${fstab}"
     fi
 
@@ -895,7 +895,7 @@ function ota_init_userdata_persist() {
     # Recovery mode (encrypted or not): no armbi_usrdata partition. Seed
     # /userdata/.persist as a plain directory on the rootfs so the fstab bind
     # mounts have valid sources on first boot. Across OTA it is preserved by
-    # /etc/armbian-ota/back-list.txt (see ota_preserve_backup_archive).
+    # /etc/armbian-ota/preserve-list.txt (see ota_preserve_backup_archive).
     ota_seed_persist_dir "${root_dir}" "${root_dir}/userdata/.persist"
     display_alert "OTA persist" "Seeded /userdata/.persist directory (recovery OTA)" "info"
 }

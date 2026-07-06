@@ -31,7 +31,7 @@ extensions/armbian-ota/
 │   │   ├── persist.sh                      # Shared userdata persistence helper
 │   │   └── preserve.sh                     # Shared local config preserve helper
 │   └── policy/
-│       └── back-list.txt                   # Default local config preserve list
+│       └── preserve-list.txt                   # Default local config preserve list
 │
 ├── ab/                                 # AB Partition OTA mode
 │   ├── runtime/
@@ -124,15 +124,15 @@ The `/userdata` backing store differs by OTA mode:
   `userdata.mount` ordering, which would otherwise wait for a non-existent
   device and fail with "Dependency failed"). Because recovery OTA rewrites the
   whole rootfs, `/userdata/.persist` is added to
-  `/etc/armbian-ota/back-list.txt` so the preserve step backs it up before the
+  `/etc/armbian-ota/preserve-list.txt` so the preserve step backs it up before the
   rewrite and restores it after.
 
 At image build time `ota_init_userdata_persist` seeds `/userdata/.persist/home`
 from the rootfs so the bind mount has a valid source on first boot. Seeding is
 idempotent: existing preserved data always wins.
 
-Local device configuration is preserved with `/etc/armbian-ota/back-list.txt`;
-the default source file is `runtime/policy/back-list.txt`. Recovery OTA backs up those
+Local device configuration is preserved with `/etc/armbian-ota/preserve-list.txt`;
+the default source file is `runtime/policy/preserve-list.txt`. Recovery OTA backs up those
 paths before cleaning the current rootfs and restores them after extraction. AB
 OTA applies the same list by copying those paths from the currently running
 slot into the newly staged target slot before boot switching.

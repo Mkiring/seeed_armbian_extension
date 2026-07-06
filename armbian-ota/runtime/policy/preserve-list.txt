@@ -2,7 +2,7 @@
 # Lines starting with # are comments.
 #
 # Keep the preserve list itself across OTA.
-/etc/armbian-ota/back-list.txt
+/etc/armbian-ota/preserve-list.txt
 
 # Keep account databases across OTA. These files must remain normal files at
 # runtime because useradd/groupadd replace them via rename.
