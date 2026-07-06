@@ -12,10 +12,7 @@ recovery_hook_status() {
 }
 
 recovery_require_tools() {
-    ensure_root
-    init_logging
-    ensure_command tar sha256sum update-initramfs mount umount sed grep awk
-    acquire_lock || error_exit "Cannot acquire OTA lock"
+    ota_require_runtime tar sha256sum update-initramfs mount umount sed grep awk
 }
 
 recovery_install_initramfs_hooks() {
@@ -39,24 +36,15 @@ recovery_install_initramfs_hooks() {
 }
 
 recovery_verify_payload() {
-    verify_sha256 "${RECOVERY_ROOTFS_TAR}" "${RECOVERY_ROOTFS_SHA}" "rootfs.tar.gz"
-
-    if [ -f "${RECOVERY_BOOT_TAR}" ] && [ -f "${RECOVERY_BOOT_SHA}" ]; then
-        verify_sha256 "${RECOVERY_BOOT_TAR}" "${RECOVERY_BOOT_SHA}" "boot.tar.gz"
-    fi
+    verify_payload_archives "${OTA_WORK_DIR}" \
+        "rootfs.tar.gz" "rootfs.sha256" \
+        "boot.tar.gz" "boot.sha256"
 }
 
 recovery_mark_prepared() {
     local package_path="$1"
 
-    state_init
-    state_mark_mode "recovery"
-    state_mark_status "prepared"
-    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
-    state_set "CURRENT_SLOT" ""
-    state_set "TARGET_SLOT" ""
-    state_set "START_TIME" "$(date -Iseconds)"
-    state_set "COMPLETE_TIME" ""
+    state_mark_prepared "recovery" "prepared" "${package_path}"
 }
 
 recovery_start_ota() {

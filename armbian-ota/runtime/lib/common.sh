@@ -73,6 +73,27 @@ ensure_command() {
     done
 }
 
+ota_require_runtime() {
+    ensure_root
+    init_logging
+    ensure_command "$@"
+    acquire_lock || error_exit "Cannot acquire OTA lock"
+}
+
+empty_mount_dir() {
+    local mount_dir="$1" f
+
+    (
+        cd "${mount_dir}" || exit 1
+        for f in * .[!.]* ..?*; do
+            case "${f}" in
+                .|..|lost+found) continue ;;
+            esac
+            rm -rf "${f}" 2>/dev/null || true
+        done
+    )
+}
+
 state_init() {
     mkdir -p "${OTA_STATE_DIR}" 2>/dev/null || return 0
     [ -f "${OTA_STATE_FILE}" ] && return 0
@@ -111,6 +132,23 @@ state_clear_runtime_fields() {
     state_set "CURRENT_SLOT" ""
     state_set "TARGET_SLOT" ""
     state_set "START_TIME" ""
+    state_set "COMPLETE_TIME" ""
+}
+
+state_mark_prepared() {
+    local mode="$1"
+    local status="$2"
+    local package_path="$3"
+    local current_slot="${4:-}"
+    local target_slot="${5:-}"
+
+    state_init
+    state_mark_mode "${mode}"
+    state_mark_status "${status}"
+    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
+    state_set "CURRENT_SLOT" "${current_slot}"
+    state_set "TARGET_SLOT" "${target_slot}"
+    state_set "START_TIME" "$(date -Iseconds)"
     state_set "COMPLETE_TIME" ""
 }
 
@@ -189,6 +227,20 @@ verify_sha256() {
         error_exit "${label} checksum verification failed"
     }
     [ -n "${tmp_sha}" ] && rm -f "${tmp_sha}"
+}
+
+verify_payload_archives() {
+    local work_dir="$1"
+    local rootfs_tar="$2"
+    local rootfs_sha="$3"
+    local boot_tar="$4"
+    local boot_sha="$5"
+
+    verify_sha256 "${work_dir}/${rootfs_tar}" "${work_dir}/${rootfs_sha}" "${rootfs_tar}"
+
+    if [ -f "${work_dir}/${boot_tar}" ] && [ -f "${work_dir}/${boot_sha}" ]; then
+        verify_sha256 "${work_dir}/${boot_tar}" "${work_dir}/${boot_sha}" "${boot_tar}"
+    fi
 }
 
 detect_kver() {

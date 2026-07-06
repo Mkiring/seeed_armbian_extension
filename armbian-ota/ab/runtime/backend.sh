@@ -326,10 +326,7 @@ ab_get_retry_max() {
 }
 
 ab_require_tools() {
-    ensure_root
-    init_logging
-    ensure_command fw_printenv fw_setenv blkid mount umount tar findmnt sed grep awk reboot dd
-    acquire_lock || error_exit "Cannot acquire OTA lock"
+    ota_require_runtime fw_printenv fw_setenv blkid mount umount tar findmnt sed grep awk reboot dd
 }
 
 ab_env_slot_boot_ready() {
@@ -401,20 +398,6 @@ ab_slot_from_root_label() {
     esac
 }
 
-ab_empty_mount_dir() {
-    local mount_dir="$1" f
-
-    (
-        cd "${mount_dir}" || exit 1
-        for f in * .[!.]* ..?*; do
-            case "${f}" in
-                .|..|lost+found) continue ;;
-            esac
-            rm -rf "${f}" 2>/dev/null || true
-        done
-    )
-}
-
 ab_update_armbian_env() {
     local arm_env="$1"
     local root_type="$2"
@@ -449,12 +432,9 @@ ab_update_armbian_env() {
 
 ab_verify_payload() {
     local work_dir="$1"
-
-    verify_sha256 "${work_dir}/${AB_OTA_ROOTFS_TAR}" "${work_dir}/${AB_OTA_ROOTFS_SHA}" "rootfs.tar.gz"
-
-    if [ -f "${work_dir}/${AB_OTA_BOOT_TAR}" ] && [ -f "${work_dir}/${AB_OTA_BOOT_SHA}" ]; then
-        verify_sha256 "${work_dir}/${AB_OTA_BOOT_TAR}" "${work_dir}/${AB_OTA_BOOT_SHA}" "boot.tar.gz"
-    fi
+    verify_payload_archives "${work_dir}" \
+        "${AB_OTA_ROOTFS_TAR}" "${AB_OTA_ROOTFS_SHA}" \
+        "${AB_OTA_BOOT_TAR}" "${AB_OTA_BOOT_SHA}"
 }
 
 ab_mark_ready_to_boot() {
@@ -462,14 +442,7 @@ ab_mark_ready_to_boot() {
     local current_slot="$2"
     local target_slot="$3"
 
-    state_init
-    state_mark_mode "ab"
-    state_mark_status "ready_to_boot"
-    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
-    state_set "CURRENT_SLOT" "${current_slot}"
-    state_set "TARGET_SLOT" "${target_slot}"
-    state_set "START_TIME" "$(date -Iseconds)"
-    state_set "COMPLETE_TIME" ""
+    state_mark_prepared "ab" "ready_to_boot" "${package_path}" "${current_slot}" "${target_slot}"
 }
 
 ab_write_target_state() {
@@ -558,7 +531,7 @@ ab_update_target_partition() {
         error_exit "Failed to mount target root partition"
     }
 
-    ab_empty_mount_dir "${root_mnt}"
+    empty_mount_dir "${root_mnt}"
 
     tar --xattrs --acls --numeric-owner -xzf "${temp_work}/${AB_OTA_ROOTFS_TAR}" -C "${root_mnt}" || {
         umount "${root_mnt}" 2>/dev/null || true
@@ -588,7 +561,7 @@ ab_update_target_partition() {
     if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
         boot_mnt="$(mktemp -d)"
         if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
-            ab_empty_mount_dir "${boot_mnt}"
+            empty_mount_dir "${boot_mnt}"
             tar --xattrs --acls --numeric-owner -xzf "${temp_work}/${AB_OTA_BOOT_TAR}" -C "${boot_mnt}" || log_warn "Failed to extract boot payload"
             sync
             umount "${boot_mnt}" 2>/dev/null || true
