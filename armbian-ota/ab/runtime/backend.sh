@@ -726,6 +726,48 @@ ab_rollback() {
     reboot
 }
 
+ab_switch_slot() {
+    local target_slot="$1"
+    local current_slot target_boot_label target_root_label
+
+    ab_require_tools
+    current_slot="$(ab_get_current_slot)"
+    [ -n "${target_slot}" ] || target_slot="$(ab_get_target_slot)"
+
+    case "${target_slot}" in
+        a|b) ;;
+        *) error_exit "Usage: armbian-ota switch-slot [a|b]" ;;
+    esac
+
+    if [ "$(ab_uboot_get_env ota_in_progress)" = "1" ]; then
+        error_exit "Cannot switch slots while A/B OTA is in progress"
+    fi
+
+    target_boot_label="$(ab_get_slot_boot_label "${target_slot}")"
+    target_root_label="$(ab_get_slot_root_label "${target_slot}")"
+    [ -n "$(ab_get_part_by_label "${target_boot_label}")" ] || error_exit "Cannot find target boot partition: ${target_boot_label}"
+    [ -n "$(ab_get_part_by_label "${target_root_label}")" ] || error_exit "Cannot find target root partition: ${target_root_label}"
+
+    if [ "${current_slot}" = "${target_slot}" ]; then
+        log_info "Already booting slot ${target_slot}"
+        return 0
+    fi
+
+    ab_uboot_set_env "boot_slot" "${target_slot}" || error_exit "Failed to switch boot_slot"
+    ab_uboot_set_env "boot_success" "${target_slot}" || log_warn "Failed to update boot_success"
+    ab_uboot_set_env "ota_in_progress" "0" || log_warn "Failed to clear ota_in_progress"
+    ab_uboot_set_env "try_count" "0" || log_warn "Failed to reset try_count"
+    ab_uboot_set_env "slot_retry_left" "$(ab_get_retry_max)" || log_warn "Failed to reset slot_retry_left"
+
+    state_mark_mode "ab"
+    state_mark_status "slot_switched"
+    state_set "CURRENT_SLOT" "${current_slot}"
+    state_set "TARGET_SLOT" "${target_slot}"
+    state_set "COMPLETE_TIME" "$(date -Iseconds)"
+
+    log_info "Boot slot switched from ${current_slot} to ${target_slot}; reboot to apply"
+}
+
 ab_status() {
     local current_slot ota_in_progress
     current_slot="$(ab_get_current_slot)"

@@ -154,6 +154,14 @@ call_mode_action() {
     esac
 }
 
+switch_ab_slot() {
+    local target_slot="$1"
+
+    ensure_root
+    require_mode_backend "ab"
+    ab_switch_slot "${target_slot}"
+}
+
 dispatch_by_state_mode() {
     local action="$1"
     local current_mode
@@ -195,6 +203,10 @@ case "${1:-}" in
         state_init
         dispatch_by_state_mode "rollback"
         ;;
+    switch-slot)
+        shift
+        switch_ab_slot "${1:-}"
+        ;;
     *)
         cat <<'EOF'
 Usage:
@@ -202,6 +214,7 @@ Usage:
   armbian-ota status
   armbian-ota mark-success
   armbian-ota rollback
+  armbian-ota switch-slot [a|b]
 EOF
         exit 1
         ;;
