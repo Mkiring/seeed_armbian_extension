@@ -1,0 +1,43 @@
+#!/bin/sh
+
+ota_state_set_key() {
+    state_file="$1"
+    key="$2"
+    value="$3"
+
+    if grep -q -E "^${key}=" "${state_file}" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "${state_file}"
+    else
+        printf '%s=%s\n' "${key}" "${value}" >> "${state_file}"
+    fi
+}
+
+ota_state_write_file() {
+    state_file="$1"
+    state_dir="${state_file%/*}"
+    template_file="${OTA_STATE_TEMPLATE_FILE:-/etc/armbian-ota/ota-state.env.template}"
+
+    mkdir -p "${state_dir}" || return 1
+    if [ -f "${template_file}" ]; then
+        cp "${template_file}" "${state_file}" || return 1
+    else
+        cat > "${state_file}" <<'EOF' || return 1
+# Armbian OTA runtime state
+OTA_MODE=
+STATUS=idle
+PACKAGE_PATH=
+CURRENT_SLOT=
+TARGET_SLOT=
+START_TIME=
+COMPLETE_TIME=
+EOF
+    fi
+
+    ota_state_set_key "${state_file}" OTA_MODE "${OTA_STATE_MODE:-}"
+    ota_state_set_key "${state_file}" STATUS "${OTA_STATE_STATUS:-idle}"
+    ota_state_set_key "${state_file}" PACKAGE_PATH "${OTA_STATE_PACKAGE_PATH:-}"
+    ota_state_set_key "${state_file}" CURRENT_SLOT "${OTA_STATE_CURRENT_SLOT:-}"
+    ota_state_set_key "${state_file}" TARGET_SLOT "${OTA_STATE_TARGET_SLOT:-}"
+    ota_state_set_key "${state_file}" START_TIME "${OTA_STATE_START_TIME:-}"
+    ota_state_set_key "${state_file}" COMPLETE_TIME "${OTA_STATE_COMPLETE_TIME:-}"
+}
