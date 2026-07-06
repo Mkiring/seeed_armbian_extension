@@ -946,11 +946,44 @@ function rk_ab_autodecrypt_nonsecure_mode_enabled() {
 	[[ "${AB_PART_OTA}" == "yes" && "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" != "yes" ]]
 }
 
+function ota_set_default_ab_partition_sizes() {
+	AB_BOOT_SIZE=${AB_BOOT_SIZE:-256}  # 256MiB for each boot partition
+
+	if [[ -n "${AB_ROOTFS_SIZE:-}" ]]; then
+		return 0
+	fi
+
+	local rootfs_size_tier="${AB_ROOTFS_SIZE_TIER:-}"
+	if [[ -z "${rootfs_size_tier}" ]]; then
+		if [[ "${BUILD_MINIMAL}" == "yes" ]]; then
+			rootfs_size_tier="minimal"
+		else
+			rootfs_size_tier="mid"
+		fi
+	fi
+
+	case "${rootfs_size_tier}" in
+		minimal)
+			AB_ROOTFS_SIZE=4096
+			;;
+		mid)
+			AB_ROOTFS_SIZE=6144
+			;;
+		full)
+			AB_ROOTFS_SIZE=8192
+			;;
+		*)
+			exit_with_error "Invalid AB_ROOTFS_SIZE_TIER" "${rootfs_size_tier}"
+			;;
+	esac
+
+	display_alert "A/B partition OTA" "Using AB_ROOTFS_SIZE=${AB_ROOTFS_SIZE} MiB (${rootfs_size_tier} tier)" "info"
+}
+
 function pre_prepare_partitions__ab_part_ota() {
 	if [[ "${AB_PART_OTA}" == "yes" ]]; then
 		USE_HOOK_FOR_PARTITION="yes"
-		AB_BOOT_SIZE=${AB_BOOT_SIZE:-256}  # 256MiB for each boot partition
-		AB_ROOTFS_SIZE=${AB_ROOTFS_SIZE:-4608}  # 4.5GiB for each rootfs partition
+		ota_set_default_ab_partition_sizes
 		SECURE_STORAGE_SECURITY_SIZE=${SECURE_STORAGE_SECURITY_SIZE:-4}
         USERDATA=${USERDATA:-256}  # userdata partition by default
         BOOTFS_TYPE="ext4"

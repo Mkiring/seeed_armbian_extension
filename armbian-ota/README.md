@@ -183,7 +183,8 @@ Add to your board configuration or build command:
 OTA_ENABLE=yes
 AB_PART_OTA=yes
 AB_BOOT_SIZE=256        # Boot partition size in MiB
-AB_ROOTFS_SIZE=4608     # Rootfs partition size in MiB
+AB_ROOTFS_SIZE_TIER=mid # minimal=4096, mid=6144, full=8192 MiB per rootfs
+# AB_ROOTFS_SIZE=8192   # Optional explicit rootfs partition size override
 USERDATA=256            # Userdata partition size in MiB
 
 # For Recovery OTA
