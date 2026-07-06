@@ -76,13 +76,43 @@ parse_start_args() {
     [ -n "${OTA_CLI_PACKAGE}" ] || error_exit "start requires an OTA package path"
 }
 
-detect_start_mode() {
+normalize_yes_no() {
+    case "$1" in
+        yes|true|1) echo "yes" ;;
+        no|false|0) echo "no" ;;
+        *) return 1 ;;
+    esac
+}
+
+detect_device_encryption() {
+    local mode="$1" label dev type
+
+    if [ "${mode}" = "ab" ]; then
+        for label in armbi_roota armbi_rootb; do
+            dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | head -n1 || true)"
+            [ -n "${dev}" ] || continue
+            type="$(blkid -o value -s TYPE "${dev}" 2>/dev/null || true)"
+            [ "${type}" = "crypto_LUKS" ] && echo "yes" && return 0
+        done
+        echo "no"
+        return 0
+    fi
+
+    if blkid -t TYPE=crypto_LUKS >/dev/null 2>&1 || [ -e /dev/mapper/armbian-root ]; then
+        echo "yes"
+    else
+        echo "no"
+    fi
+}
+
+detect_start_metadata() {
     local package_path="$1"
-    local package_mode
+    local package_mode package_encrypted package_encrypted_raw device_encrypted
 
     [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
+    load_package_env_metadata "${package_path}" || error_exit "OTA package metadata missing package.env"
 
-    package_mode="$(read_package_env_value "${package_path}" "OTA_MODE" || true)"
+    package_mode="$(package_env_get_value "OTA_MODE" || true)"
     [ -n "${package_mode}" ] || error_exit "OTA package metadata missing OTA_MODE; cannot detect OTA mode"
 
     case "${package_mode}" in
@@ -91,6 +121,18 @@ detect_start_mode() {
     esac
 
     OTA_CLI_MODE="${package_mode}"
+
+    package_encrypted_raw="$(package_env_get_value "OTA_ENCRYPTED" || true)"
+    package_encrypted_raw="${package_encrypted_raw:-no}"
+
+    package_encrypted="$(normalize_yes_no "${package_encrypted_raw}")" ||
+        error_exit "Invalid OTA_ENCRYPTED in package metadata: ${package_encrypted_raw} (expected yes or no)"
+
+    ensure_command blkid
+    device_encrypted="$(detect_device_encryption "${OTA_CLI_MODE}")"
+    if [ "${package_encrypted}" != "${device_encrypted}" ]; then
+        error_exit "OTA package encryption mismatch: package=${package_encrypted}, device=${device_encrypted}"
+    fi
 }
 
 call_mode_action() {
@@ -136,7 +178,7 @@ case "${1:-}" in
         shift
         ensure_root
         parse_start_args "$@"
-        detect_start_mode "${OTA_CLI_PACKAGE}"
+        detect_start_metadata "${OTA_CLI_PACKAGE}"
         call_mode_action "${OTA_CLI_MODE}" "start" "${OTA_CLI_PACKAGE}"
         ;;
     status)

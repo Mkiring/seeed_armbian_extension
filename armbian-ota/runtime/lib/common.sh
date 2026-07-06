@@ -152,12 +152,15 @@ state_mark_prepared() {
     state_set "COMPLETE_TIME" ""
 }
 
-read_package_env_value() {
+load_package_env_metadata() {
     local package_path="$1"
-    local key="$2"
     local manifest_entry
 
-    log_info "Reading OTA package metadata: ${key} from ${package_path}" >&2
+    if [ "${OTA_PACKAGE_ENV_PATH:-}" = "${package_path}" ] && [ -n "${OTA_PACKAGE_ENV_CONTENT+x}" ]; then
+        return 0
+    fi
+
+    log_info "Reading OTA package metadata from ${package_path}" >&2
     manifest_entry="$(
         tar -tzf "${package_path}" 2>/dev/null \
             | awk '/(^|\/)package\.env$/ { print; exit }'
@@ -166,8 +169,23 @@ read_package_env_value() {
         return 1
     fi
 
-    tar -xOf "${package_path}" "${manifest_entry}" 2>/dev/null \
+    OTA_PACKAGE_ENV_PATH="${package_path}"
+    OTA_PACKAGE_ENV_CONTENT="$(tar -xOf "${package_path}" "${manifest_entry}" 2>/dev/null)" || return 1
+}
+
+package_env_get_value() {
+    local key="$1"
+
+    printf '%s\n' "${OTA_PACKAGE_ENV_CONTENT:-}" \
         | grep -E "^${key}=" | tail -n1 | cut -d'=' -f2-
+}
+
+read_package_env_value() {
+    local package_path="$1"
+    local key="$2"
+
+    load_package_env_metadata "${package_path}" || return 1
+    package_env_get_value "${key}"
 }
 
 assert_package_mode_matches() {
