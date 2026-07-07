@@ -1,6 +1,6 @@
 /dts-v1/;
 / {
-    description = "U-Boot FIT source file for arm";
+    description = "U-Boot FIT source file for Rockchip RK3588";
 
     images {
         fdt {
@@ -63,7 +63,7 @@
             kernel = "kernel";
             ramdisk = "ramdisk";
             multi = "resource";
-            description = "Rockchip RK35xx FIT Image";
+            description = "Rockchip RK3588 FIT Image";
 
             signature {
                 algo = "sha256,rsa2048";

@@ -393,6 +393,31 @@ function resolve_platform_defconfig_path() {
     echo ""
 }
 
+function resolve_platform_its_template() {
+    # Match FIT load addresses to U-Boot's per-SoC ENV_MEM_LAYOUT_SETTINGS.
+    local secure_config_dir="$1"
+    local platform candidate
+
+    platform="$(detect_rk_secure_boot_platform)"
+    case "${platform}" in
+        rk3576)
+            candidate="${secure_config_dir}/rk3576_fit_kernel.its"
+            [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+            ;;
+        rk3588)
+            candidate="${secure_config_dir}/rk3588_fit_kernel.its"
+            [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+            ;;
+        *)
+            ;;
+    esac
+
+    candidate="${secure_config_dir}/fit_kernel.its"
+    [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+
+    echo ""
+}
+
 function pre_prepare_partitions__040_require_secure_storage_hook() {
     # If secure boot + auto decrypt are enabled together, secure storage hook must be present.
     if [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]; then
@@ -861,12 +886,14 @@ function pre_umount_final_image__package_fit() {
     cp -f "${ramdisk_path}" "${fit_work}/initrd.img"
 
     # Use external ITS template file
-    local extension_dir its_template
+    local extension_dir secure_config_dir its_template
     extension_dir="$(resolve_rk_secure_extension_dir)"
-    its_template="${extension_dir}/secure-boot-config/fit_kernel.its"
+    secure_config_dir="${extension_dir}/secure-boot-config"
+    its_template="$(resolve_platform_its_template "${secure_config_dir}")"
     if [[ ! -f "${its_template}" ]]; then
-        exit_with_error "FIT packaging failed: ITS template missing" "${its_template}"
+        exit_with_error "FIT packaging failed: ITS template missing" "${secure_config_dir}"
     fi
+    display_alert "fit-post-initrd" "Using ITS template: ${its_template}" "info"
 
     # Copy ITS template to work directory
     cp -f "${its_template}" "${fit_work}/boot-final.its"
