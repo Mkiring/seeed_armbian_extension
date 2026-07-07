@@ -1,4 +1,4 @@
-function ota_get_layout_suffix() {
+function ota_image_layout_suffix() {
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
         echo "_AB_PART"
     else
@@ -22,30 +22,21 @@ function ota_get_manifest_mode() {
     fi
 }
 
-function ota_get_image_variant_suffix() {
-    local suffix=""
+function ota_image_kernel_version_without_family() {
+    local kernel_version="$1"
 
-    if [[ "${CRYPTROOT_ENABLE}" == "yes" ]]; then
-        suffix="${suffix}_ENCRYPTED"
+    if [[ -n "${LINUXFAMILY:-}" ]]; then
+        kernel_version="${kernel_version/-$LINUXFAMILY/}"
     fi
 
-    suffix="${suffix}$(ota_get_layout_suffix)"
-    echo "${suffix}"
+    echo "${kernel_version}"
 }
 
-function ota_get_non_ota_extra_image_suffix() {
-    local extra_image_suffix="${EXTRA_IMAGE_SUFFIX:-}"
-    local ota_image_suffix
-    ota_image_suffix="$(ota_get_image_variant_suffix)"
-
-    if [[ -n "${ota_image_suffix}" && "${extra_image_suffix}" == *"${ota_image_suffix}" ]]; then
-        extra_image_suffix="${extra_image_suffix%"${ota_image_suffix}"}"
-    fi
-
-    echo "${extra_image_suffix}"
+function ota_image_feature_suffix() {
+    echo "${EXTRA_IMAGE_SUFFIX:-}"
 }
 
-function ota_build_image_name_from_kernel() {
+function ota_image_base_name_from_kernel() {
     local kernel_version_for_image="$1"
     local vendor_version_prelude="${VENDOR}_${IMAGE_VERSION:-"${REVISION}"}_"
     if [[ "${include_vendor_version:-"yes"}" == "no" ]]; then
@@ -58,10 +49,10 @@ function ota_build_image_name_from_kernel() {
         base_image_name="${base_image_name}_${DESKTOP_ENVIRONMENT}"
     fi
 
-    local non_ota_extra_suffix
-    non_ota_extra_suffix="$(ota_get_non_ota_extra_image_suffix)"
-    if [[ -n "${non_ota_extra_suffix}" ]]; then
-        base_image_name="${base_image_name}${non_ota_extra_suffix}"
+    local feature_suffix
+    feature_suffix="$(ota_image_feature_suffix)"
+    if [[ -n "${feature_suffix}" ]]; then
+        base_image_name="${base_image_name}${feature_suffix}"
     fi
 
     if [[ "$BUILD_DESKTOP" == "yes" ]]; then
@@ -74,32 +65,42 @@ function ota_build_image_name_from_kernel() {
         base_image_name="${base_image_name}_nfsboot"
     fi
 
-    local ota_image_suffix
-    ota_image_suffix="$(ota_get_image_variant_suffix)"
-    if [[ -n "${ota_image_suffix}" ]]; then
-        base_image_name="${base_image_name}${ota_image_suffix}"
+    local ota_suffix
+    ota_suffix="$(ota_image_layout_suffix)"
+    if [[ -n "${ota_suffix}" ]]; then
+        base_image_name="${base_image_name}${ota_suffix}"
     fi
 
     echo "${base_image_name}"
 }
 
-function calculate_image_version() {
-    declare kernel_version_for_image="unknown"
-    kernel_version_for_image="${IMAGE_INSTALLED_KERNEL_VERSION/-$LINUXFAMILY/}"
-
-    calculated_image_version="$(ota_build_image_name_from_kernel "${kernel_version_for_image}")"
-    display_alert "Calculated image version" "${calculated_image_version}" "debug"
-}
-
-function ota_build_package_base_image_name() {
+function ota_image_package_base_name() {
     local kernel_version_for_image="unknown"
     if [[ -n "$KERNEL_VERSION" ]]; then
         kernel_version_for_image="$KERNEL_VERSION"
     elif [[ -n "$IMAGE_INSTALLED_KERNEL_VERSION" ]]; then
-        kernel_version_for_image="${IMAGE_INSTALLED_KERNEL_VERSION/-$LINUXFAMILY/}"
+        kernel_version_for_image="$(ota_image_kernel_version_without_family "${IMAGE_INSTALLED_KERNEL_VERSION}")"
     fi
 
-    ota_build_image_name_from_kernel "${kernel_version_for_image}"
+    ota_image_base_name_from_kernel "${kernel_version_for_image}"
+}
+
+function ota_image_ota_package_name() {
+    local base_image_name="$1"
+    echo "${base_image_name}_OTA.tar.gz"
+}
+
+function ota_image_checksum_name() {
+    local base_image_name="$1"
+    echo "${base_image_name}_OTA.checksums"
+}
+
+function calculate_image_version() {
+    declare kernel_version_for_image="unknown"
+    kernel_version_for_image="$(ota_image_kernel_version_without_family "${IMAGE_INSTALLED_KERNEL_VERSION}")"
+
+    calculated_image_version="$(ota_image_base_name_from_kernel "${kernel_version_for_image}")"
+    display_alert "Calculated image version" "${calculated_image_version}" "debug"
 }
 
 function ota_write_payload_tools_readme() {
@@ -183,17 +184,14 @@ function ota_copy_payload_tools() {
 
 function extension_prepare_config__ota_image_suffix() {
     local ota_image_suffix
-    ota_image_suffix="$(ota_get_image_variant_suffix)"
+    ota_image_suffix="$(ota_image_layout_suffix)"
 
-    EXTRA_IMAGE_SUFFIXES+=("${ota_image_suffix}")
-    display_alert "OTA image suffix" "${ota_image_suffix}" "info"
+    display_alert "OTA image suffix" "${ota_image_suffix} (applied during image naming)" "info"
 }
 
 function pre_umount_final_image__901_create_ota_payload_pkg() {
 
-
     display_alert "pre_umount_final_image__901 Extracting partition images from loop device" "Detecting and extracting partitions from ${LOOP}" "info"
-
 
     # Check for secure boot and auto ota configuration
     local secure_boot_and_decrypt="no"
@@ -552,13 +550,14 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
     display_alert "Creating final OTA package" "Combining tools and images" "info"
 
     local base_image_name
-    base_image_name="$(ota_build_package_base_image_name)"
+    base_image_name="$(ota_image_package_base_name)"
 
     local ota_type_label
     ota_type_label="$(ota_get_package_type_label)"
     display_alert "OTA package type" "${ota_type_label}" "info"
 
-    local ota_package_name="${base_image_name}_OTA.tar.gz"
+    local ota_package_name
+    ota_package_name="$(ota_image_ota_package_name "${base_image_name}")"
     local ota_output_path="${DEST}/images/${ota_package_name}"
 
     # Ensure output directory exists
@@ -648,7 +647,7 @@ EOF
         local ota_sha256=$(sha256sum "$ota_output_path" | awk '{print $1}')
 
         # Write checksums file
-        local checksum_file="${DEST}/images/${base_image_name}_OTA.checksums"
+        local checksum_file="${DEST}/images/$(ota_image_checksum_name "${base_image_name}")"
         cat > "$checksum_file" << EOF
 # Armbian OTA Package Checksums
 # Package: ${ota_package_name}
