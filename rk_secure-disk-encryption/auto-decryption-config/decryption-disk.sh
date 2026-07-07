@@ -76,8 +76,12 @@ if [ ! -e /dev/block/by-name/security ]; then
 fi
 log_step "[Decryption-disk] security partition resolved: $(readlink -f /dev/block/by-name/security)"
 
-/usr/bin/tee-supplicant &
-log_step "[Decryption-disk] tee-supplicant started"
+if [ -x /usr/bin/tee-supplicant ]; then
+    /usr/bin/tee-supplicant &
+    log_step "[Decryption-disk] tee-supplicant started"
+else
+    log_step "[Decryption-disk] tee-supplicant missing, keybox path unavailable"
+fi
 
 
 # Check security partition header marker
@@ -87,19 +91,23 @@ log_step "[Decryption-disk] Security partition marker: $SECURITY_MARKER"
 
 if [ "$SECURITY_MARKER" = "SSKR" ]; then
     log_step "[Decryption-disk] Security partition has SSKR marker, reading with keybox_app..."
-    /usr/bin/keybox_app
+    /usr/bin/keybox_app || true
     log_step "[Decryption-disk] keybox_app read finished (SSKR path)"
 else
     log_step "[Decryption-disk] No SSKR marker, reading first 64 bytes as password..."
     dd if=/dev/block/by-name/security of=/tmp/syspw bs=1 count=64 2>/dev/null
-    # Write password to keybox if needed
-    log_step "[Decryption-disk] keybox_app write start"
-    /usr/bin/keybox_app write
-    log_step "[Decryption-disk] keybox_app write done"
-    rm /tmp/syspw
-    log_step "[Decryption-disk] keybox_app read start"
-    /usr/bin/keybox_app
-    log_step "[Decryption-disk] keybox_app read done"
+
+    if [ -x /usr/bin/keybox_app ]; then
+        log_step "[Decryption-disk] keybox_app write start"
+        /usr/bin/keybox_app write || log_step "[Decryption-disk] keybox_app write failed, keeping raw password"
+        log_step "[Decryption-disk] keybox_app write done"
+
+        if [ ! -s /tmp/syspw ]; then
+            log_step "[Decryption-disk] keybox_app read start"
+            /usr/bin/keybox_app || true
+            log_step "[Decryption-disk] keybox_app read done"
+        fi
+    fi
 fi
 
 # Verify password was successfully retrieved

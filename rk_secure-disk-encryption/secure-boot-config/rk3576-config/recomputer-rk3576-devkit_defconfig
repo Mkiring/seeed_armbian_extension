@@ -242,8 +242,7 @@ CONFIG_ENV_IS_IN_BLK_DEV=y
 CONFIG_SPI_FLASH_PUYA=y
 CONFIG_CMD_I2C=y
 
-# CONFIG_FIT_SIGNATURE=y
-# CONFIG_SPL_FIT_SIGNATURE=y
-# CONFIG_USE_BOOTARGS=y
-# # CONFIG_BOOTARGS="console=ttyS0,1500000 root=UUID=0b06166d-3930-4176-b30a-900806bd6202 rw rootwait rootfstype=ext4"
-# CONFIG_BOOTARGS="console=ttyS0,1500000 root=/dev/mapper/armbian-root rw rootwait rootfstype=ext4"
+# CONFIG_FIT_SIGNATURE is not set
+# CONFIG_SPL_FIT_SIGNATURE is not set
+CONFIG_USE_BOOTARGS=y
+CONFIG_BOOTARGS="earlycon=uart8250,mmio32,0x2ad40000 console=ttyFIQ0 root=/dev/mapper/armbian-root rw rootwait"

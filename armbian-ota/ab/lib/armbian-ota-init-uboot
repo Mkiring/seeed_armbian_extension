@@ -238,8 +238,9 @@ echo "distro_bootpart_a ${BOOT_A_PART}" >> "${TEMP_ENV}"
 echo "distro_bootpart_b ${BOOT_B_PART}" >> "${TEMP_ENV}"
 echo "ab_boot_devtype ${BOOT_DEVTYPE}" >> "${TEMP_ENV}"
 echo "ab_boot_devnum ${BOOT_DEVNUM}" >> "${TEMP_ENV}"
+echo "boot_targets ${BOOT_DEVTYPE}${BOOT_DEVNUM}" >> "${TEMP_ENV}"
 
-log_info "Set distro_bootpart_a=${BOOT_A_PART}, distro_bootpart_b=${BOOT_B_PART}, ab_boot_devtype=${BOOT_DEVTYPE}, ab_boot_devnum=${BOOT_DEVNUM}"
+log_info "Set distro_bootpart_a=${BOOT_A_PART}, distro_bootpart_b=${BOOT_B_PART}, ab_boot_devtype=${BOOT_DEVTYPE}, ab_boot_devnum=${BOOT_DEVNUM}, boot_targets=${BOOT_DEVTYPE}${BOOT_DEVNUM}"
 
 # ============================================================
 # Modify bootcmd to use slot-based booting
@@ -252,7 +253,7 @@ cat >> "${TEMP_ENV}" << EOF
 # U-Boot preboot guard for A/B OTA retry/fallback
 ab_preboot if test "\${ota_in_progress}" = "1"; then if env exists slot_retry_max; then true; else setenv slot_retry_max 3; fi; if env exists slot_retry_left; then true; else setenv slot_retry_left \${slot_retry_max}; fi; if test "\${slot_retry_left}" = "0"; then if env exists boot_success; then setenv boot_slot \${boot_success}; else setenv boot_slot a; fi; setenv ota_in_progress 0; setenv slot_retry_left \${slot_retry_max}; saveenv; reset; fi; setexpr slot_retry_left \${slot_retry_left} - 1; saveenv; fi
 # Keep normal boot flow (similar to non-OTA default)
-bootcmd run ab_preboot; run boot_pci_enum; run distro_bootcmd; boot_fit; bootrkp
+bootcmd run ab_preboot; if env exists boot_pci_enum; then run boot_pci_enum; fi; run distro_bootcmd; boot_fit; bootrkp
 # Slot-aware partition selection only on AB boot media; others stay unchanged
 scan_dev_for_boot_part if test "\${devtype}" = "\${ab_boot_devtype}" && test "\${devnum}" = "\${ab_boot_devnum}"; then if test "\${boot_slot}" = "b"; then setenv devplist \${distro_bootpart_b}; else setenv devplist \${distro_bootpart_a}; fi; else part list \${devtype} \${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi; boot_android \${devtype} \${devnum}; for distro_bootpart in \${devplist}; do if fstype \${devtype} \${devnum}:\${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done
 EOF
