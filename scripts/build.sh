@@ -156,6 +156,26 @@ append_security_args() {
     return 0
 }
 
+append_cache_ttl_args() {
+    [[ -n "${UBOOT_GIT_CACHE_TTL:-}" ]] && BUILD_CMD+=(UBOOT_GIT_CACHE_TTL="$UBOOT_GIT_CACHE_TTL")
+    [[ -n "${KERNEL_GIT_CACHE_TTL:-}" ]] && BUILD_CMD+=(KERNEL_GIT_CACHE_TTL="$KERNEL_GIT_CACHE_TTL")
+    [[ -n "${GHCR_MIRROR:-}" ]] && BUILD_CMD+=(GHCR_MIRROR="$GHCR_MIRROR")
+    [[ -n "${GHCR_MIRROR_ADDRESS:-}" ]] && BUILD_CMD+=(GHCR_MIRROR_ADDRESS="$GHCR_MIRROR_ADDRESS")
+    [[ -n "${DOWNLOAD_MIRROR:-}" ]] && BUILD_CMD+=(DOWNLOAD_MIRROR="$DOWNLOAD_MIRROR")
+    [[ -n "${REGIONAL_MIRROR:-}" ]] && BUILD_CMD+=(REGIONAL_MIRROR="$REGIONAL_MIRROR")
+    [[ -n "${DEBIAN_MIRROR:-}" ]] && BUILD_CMD+=(DEBIAN_MIRROR="$DEBIAN_MIRROR")
+    [[ -n "${DEBIAN_SECURITY:-}" ]] && BUILD_CMD+=(DEBIAN_SECURITY="$DEBIAN_SECURITY")
+    [[ -n "${UBUNTU_MIRROR:-}" ]] && BUILD_CMD+=(UBUNTU_MIRROR="$UBUNTU_MIRROR")
+    [[ -n "${GITHUB_MIRROR:-}" ]] && BUILD_CMD+=(GITHUB_MIRROR="$GITHUB_MIRROR")
+    [[ -n "${GHPROXY_ADDRESS:-}" ]] && BUILD_CMD+=(GHPROXY_ADDRESS="$GHPROXY_ADDRESS")
+    [[ -n "${GITPROXY_ADDRESS:-}" ]] && BUILD_CMD+=(GITPROXY_ADDRESS="$GITPROXY_ADDRESS")
+    [[ -n "${SEEED_RK_EXTENSION_OFFLINE:-}" ]] && BUILD_CMD+=(SEEED_RK_EXTENSION_OFFLINE="$SEEED_RK_EXTENSION_OFFLINE")
+    [[ -n "${ARMBIAN_CONFIGNG_OFFLINE:-}" ]] && BUILD_CMD+=(ARMBIAN_CONFIGNG_OFFLINE="$ARMBIAN_CONFIGNG_OFFLINE")
+    [[ -n "${ROOTFS_EXTRACT_WITHOUT_PV:-}" ]] && BUILD_CMD+=(ROOTFS_EXTRACT_WITHOUT_PV="$ROOTFS_EXTRACT_WITHOUT_PV")
+    [[ -n "${ENABLE_EXTENSIONS:-}" ]] && BUILD_CMD+=(ENABLE_EXTENSIONS="$ENABLE_EXTENSIONS")
+    return 0
+}
+
 profile_count() {
     local wanted="$1" count=0 profile
     for profile in "${PROFILES[@]}"; do
@@ -411,6 +431,8 @@ else
     append_security_args yes
     [[ "$RK_COMPILE_USBPLUG" == "yes" ]] && BUILD_CMD+=(RK_COMPILE_USBPLUG=yes)
 fi
+
+append_cache_ttl_args
 
 # ── Execute or dry-run ──────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "yes" ]]; then
