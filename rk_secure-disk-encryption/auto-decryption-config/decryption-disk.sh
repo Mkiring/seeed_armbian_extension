@@ -1,30 +1,17 @@
 #!/bin/sh
 #
-# initramfs-tools init-premount hook: decryption disk auto link by-name
+# initramfs-tools init-top hook: unlock encrypted root from the security partition.
 
 export SECURITY_STORAGE=SECURITY
+
 BN_DIR="/dev/block/by-name"
-mkdir -p "$BN_DIR"
+SYSPW_FILE="/tmp/syspw"
+MAPPER_NAME="armbian-root"
+TEE_SUPPLICANT_PID=""
 
 log_step() {
     echo "$*"
-    if [ -e /dev/kmsg ]; then
-        echo "$*" > /dev/kmsg 2>/dev/null || true
-    fi
-}
-
-set_initramfs_root() {
-    local root_dev="$1"
-
-    mkdir -p /conf 2>/dev/null || true
-    {
-        echo "ROOT='${root_dev}'"
-        echo "readonly='n'"
-    } >> /conf/param.conf
-
-    ROOT="${root_dev}"
-    readonly=n
-    export ROOT readonly
+    [ -e /dev/kmsg ] && echo "$*" > /dev/kmsg 2>/dev/null || true
 }
 
 first_line() {
@@ -37,6 +24,7 @@ first_line() {
 
 get_cmdline_crypt_uuid() {
     local token value
+
     for token in $(cat /proc/cmdline 2>/dev/null); do
         case "$token" in
             cryptdevice=UUID=*:*)
@@ -45,134 +33,114 @@ get_cmdline_crypt_uuid() {
                 return 0
                 ;;
             cryptdevice=UUID=*)
-                value="${token#cryptdevice=UUID=}"
-                echo "${value}"
+                echo "${token#cryptdevice=UUID=}"
                 return 0
                 ;;
         esac
     done
+
     return 1
+}
+
+keybox_ready() {
+    [ -x /usr/bin/keybox_app ] &&
+        [ -x /usr/bin/tee-supplicant ] &&
+        [ -e /dev/tee0 ] &&
+        [ -e /dev/teepriv0 ]
+}
+
+start_tee_supplicant() {
+    keybox_ready || return 1
+    /usr/bin/tee-supplicant >/dev/null 2>&1 &
+    TEE_SUPPLICANT_PID="$!"
+    log_step "[Decryption-disk] tee-supplicant started"
+}
+
+stop_tee_supplicant() {
+    if [ -n "$TEE_SUPPLICANT_PID" ] && kill -0 "$TEE_SUPPLICANT_PID" 2>/dev/null; then
+        kill "$TEE_SUPPLICANT_PID" >/dev/null 2>&1 || true
+        wait "$TEE_SUPPLICANT_PID" 2>/dev/null || true
+    fi
+    TEE_SUPPLICANT_PID=""
 }
 
 log_step "[Decryption-disk] ENTER 0-decryption-disk"
 
-for disk in /sys/block/*; do
-    disk_name="$(basename "$disk")"
-    case "$disk_name" in
-        loop*|ram*|zram*|dm-*|mtdblock*) continue ;;
-    esac
-
-    for entry in "$disk"/"${disk_name}"*; do
-        [ -d "$entry" ] || continue
-        [ -f "$entry/partition" ] || continue
-
-        devnode="/dev/$(basename "$entry")"
-        name="$(sed -n 's/^PARTNAME=//p;q' "$entry/uevent")"
-
-        if [ -n "$name" ]; then
-            ln -sf "$devnode" "$BN_DIR/$name"
-            echo "[Decryption-disk] $name  ->  $devnode"
-        fi
-    done
-done
-
-echo
-echo "[Decryption-disk] ln Done. Result:"
-ls -l $BN_DIR
-log_step "[Decryption-disk] by-name links created"
-
 SECURITY_DEV="$(blkid -t PARTLABEL=security -o device 2>/dev/null | first_line || true)"
-[ -n "$SECURITY_DEV" ] && /bin/ln -sf "$SECURITY_DEV" /dev/block/by-name/security 2>/dev/null || true
-if [ ! -e /dev/block/by-name/security ]; then
-    log_step "[Decryption-disk] Error: cannot resolve security partition (/dev/block/by-name/security)"
-    blkid
+if [ -z "$SECURITY_DEV" ]; then
+    log_step "[Decryption-disk] Error: cannot resolve security partition by PARTLABEL=security"
+    blkid 2>/dev/null || true
     exit 1
 fi
-log_step "[Decryption-disk] security partition resolved: $(readlink -f /dev/block/by-name/security)"
 
-if [ -x /usr/bin/tee-supplicant ]; then
-    /usr/bin/tee-supplicant &
-    log_step "[Decryption-disk] tee-supplicant started"
-else
-    log_step "[Decryption-disk] tee-supplicant missing, keybox path unavailable"
-fi
+mkdir -p "$BN_DIR" 2>/dev/null || true
+ln -sf "$SECURITY_DEV" "${BN_DIR}/security" 2>/dev/null || true
+log_step "[Decryption-disk] security partition resolved: ${SECURITY_DEV}"
 
-
-# Check security partition header marker
-SECURITY_MARKER="$(dd if=/dev/block/by-name/security bs=1 count=4 2>/dev/null)"
-
-log_step "[Decryption-disk] Security partition marker: $SECURITY_MARKER"
+rm -f "$SYSPW_FILE" 2>/dev/null || true
+SECURITY_MARKER="$(dd if="$SECURITY_DEV" bs=1 count=4 2>/dev/null || true)"
+log_step "[Decryption-disk] Security partition marker: ${SECURITY_MARKER:-<empty>}"
 
 if [ "$SECURITY_MARKER" = "SSKR" ]; then
-    log_step "[Decryption-disk] Security partition has SSKR marker, reading with keybox_app..."
-    /usr/bin/keybox_app || true
-    log_step "[Decryption-disk] keybox_app read finished (SSKR path)"
+    log_step "[Decryption-disk] SSKR marker found, reading passphrase with keybox_app"
+    if ! start_tee_supplicant; then
+        log_step "[Decryption-disk] Error: SSKR marker requires working OP-TEE and keybox_app"
+        exit 1
+    fi
+
+    if ! /usr/bin/keybox_app >/dev/null 2>&1; then
+        stop_tee_supplicant
+        log_step "[Decryption-disk] Error: keybox_app read failed"
+        exit 1
+    fi
+    stop_tee_supplicant
 else
-    log_step "[Decryption-disk] No SSKR marker, reading first 64 bytes as password..."
-    dd if=/dev/block/by-name/security of=/tmp/syspw bs=1 count=64 2>/dev/null
+    log_step "[Decryption-disk] No SSKR marker, reading raw passphrase"
+    dd if="$SECURITY_DEV" of="$SYSPW_FILE" bs=1 count=64 2>/dev/null || {
+        log_step "[Decryption-disk] Error: failed to read raw passphrase"
+        exit 1
+    }
+    chmod 600 "$SYSPW_FILE" 2>/dev/null || true
 
-    if [ -x /usr/bin/keybox_app ]; then
-        log_step "[Decryption-disk] keybox_app write start"
-        /usr/bin/keybox_app write || log_step "[Decryption-disk] keybox_app write failed, keeping raw password"
-        log_step "[Decryption-disk] keybox_app write done"
-
-        if [ ! -s /tmp/syspw ]; then
-            log_step "[Decryption-disk] keybox_app read start"
-            /usr/bin/keybox_app || true
-            log_step "[Decryption-disk] keybox_app read done"
-        fi
+    if keybox_ready && start_tee_supplicant; then
+        /usr/bin/keybox_app write >/dev/null 2>&1 ||
+            log_step "[Decryption-disk] keybox_app write failed, keeping raw passphrase"
+        stop_tee_supplicant
+    else
+        log_step "[Decryption-disk] OP-TEE keybox path unavailable, using raw passphrase"
     fi
 fi
 
-# Verify password was successfully retrieved
-if [ -f /tmp/syspw ] && [ -s /tmp/syspw ]; then
-    log_step "[Decryption-disk] Password successfully retrieved from security partition"
-    PW_LEN="$(wc -c < /tmp/syspw 2>/dev/null || echo 0)"
-    echo "[Decryption-disk] password bytes read: ${PW_LEN}"
-
-    # Decrypt LUKS partition
-    log_step "[Decryption-disk] Searching for LUKS partitions..."
-
-    ROOT_DEVICE=""
-    TARGET_LUKS_UUID="$(get_cmdline_crypt_uuid || true)"
-    if [ -n "$TARGET_LUKS_UUID" ]; then
-        ROOT_DEVICE="$(blkid -t UUID="$TARGET_LUKS_UUID" -o device 2>/dev/null | first_line || true)"
-        if [ -n "$ROOT_DEVICE" ]; then
-            ROOT_TYPE="$(blkid -s TYPE -o value "$ROOT_DEVICE" 2>/dev/null || true)"
-            if [ "$ROOT_TYPE" != "crypto_LUKS" ]; then
-                ROOT_DEVICE=""
-            else
-                log_step "[Decryption-disk] Selected LUKS by cmdline UUID: ${TARGET_LUKS_UUID}"
-            fi
-        fi
-    fi
-
-    # Fallback: choose the first LUKS device
-    if [ -z "$ROOT_DEVICE" ]; then
-        ROOT_DEVICE="$(blkid -t TYPE="crypto_LUKS" -o device 2>/dev/null | first_line || true)"
-    fi
-
-    if [ -z "$ROOT_DEVICE" ]; then
-        log_step "[Decryption-disk] Error: No LUKS partition found"
-        echo "[Decryption-disk] Available partitions:"
-        ls -la /dev/mmcblk* /dev/sd* 2>/dev/null | grep -E "mmcblk[0-9]+$|sd[a-z][0-9]*$"
-        exit 1
-    fi
-
-    UUID=$(blkid -s UUID -o value "$ROOT_DEVICE")
-    log_step "[Decryption-disk] Found LUKS device: $ROOT_DEVICE (UUID: $UUID)"
-
-    # Unlock LUKS partition with password
-    log_step "[Decryption-disk] Unlocking LUKS encrypted partition..."
-    cat /tmp/syspw | /sbin/cryptsetup luksOpen "$ROOT_DEVICE" armbian-root || {
-        log_step "[Decryption-disk] Error: Failed to unlock LUKS partition"
-        exit 1
-    }
-
-    set_initramfs_root "/dev/mapper/armbian-root"
-    log_step "[Decryption-disk] root device set to ${ROOT}"
-    log_step "[Decryption-disk] LUKS partition unlocked successfully"
-else
+if [ ! -s "$SYSPW_FILE" ]; then
     log_step "[Decryption-disk] Error: Failed to retrieve password from security partition"
     exit 1
 fi
+log_step "[Decryption-disk] Password successfully retrieved from security partition"
+
+ROOT_DEVICE=""
+TARGET_LUKS_UUID="$(get_cmdline_crypt_uuid || true)"
+if [ -n "$TARGET_LUKS_UUID" ]; then
+    ROOT_DEVICE="$(blkid -t UUID="$TARGET_LUKS_UUID" -o device 2>/dev/null | first_line || true)"
+    if [ -n "$ROOT_DEVICE" ] && [ "$(blkid -s TYPE -o value "$ROOT_DEVICE" 2>/dev/null || true)" != "crypto_LUKS" ]; then
+        ROOT_DEVICE=""
+    fi
+fi
+
+[ -n "$ROOT_DEVICE" ] || ROOT_DEVICE="$(blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | first_line || true)"
+if [ -z "$ROOT_DEVICE" ]; then
+    log_step "[Decryption-disk] Error: No LUKS partition found"
+    blkid 2>/dev/null || true
+    exit 1
+fi
+
+ROOT_UUID="$(blkid -s UUID -o value "$ROOT_DEVICE" 2>/dev/null || true)"
+log_step "[Decryption-disk] Found LUKS device: ${ROOT_DEVICE} (UUID: ${ROOT_UUID:-unknown})"
+log_step "[Decryption-disk] Unlocking LUKS encrypted partition"
+
+/sbin/cryptsetup luksOpen "$ROOT_DEVICE" "$MAPPER_NAME" < "$SYSPW_FILE" || {
+    log_step "[Decryption-disk] Error: Failed to unlock LUKS partition"
+    exit 1
+}
+
+log_step "[Decryption-disk] root mapper ready: /dev/mapper/${MAPPER_NAME}"
+log_step "[Decryption-disk] LUKS partition unlocked successfully"
