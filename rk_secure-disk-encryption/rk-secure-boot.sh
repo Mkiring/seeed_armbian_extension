@@ -142,7 +142,7 @@ function collect_vendor_artifacts() {
     local copied=0
     for artifact in "${artifacts[@]}"; do
         if [[ -f "${artifact}" ]]; then
-            cp -v "${artifact}" "${dst_dir}/" 2>&1 | grep -v '->' || true
+            cp -v "${artifact}" "${dst_dir}/" 2>&1 | grep -v -- '->' || true
             copied=$((copied+1))
         fi
     done
@@ -174,15 +174,16 @@ VENDOR_META
 
 function detect_rk_secure_boot_platform() {
     # Return value: rk3576 / rk3588 / unknown
-    # Platform detection is based on BOOT_SOC only.
-    local boot_soc
-    boot_soc="$(echo "${BOOT_SOC}" | tr '[:upper:]' '[:lower:]')"
+    # Platform detection prefers BOOT_SOC, then falls back to board names.
+    local boot_soc board_name
+    boot_soc="$(echo "${BOOT_SOC:-}" | tr '[:upper:]' '[:lower:]')"
+    board_name="$(echo "${BOARD_NAME:-${BOARD:-}}" | tr '[:upper:]' '[:lower:]')"
 
-    if [[ "${boot_soc}" == *"3576"* ]]; then
+    if [[ "${boot_soc}" == *"3576"* || "${board_name}" == *"3576"* ]]; then
         echo "rk3576"
         return 0
     fi
-    if [[ "${boot_soc}" == *"3588"* ]]; then
+    if [[ "${boot_soc}" == *"3588"* || "${board_name}" == *"3588"* ]]; then
         echo "rk3588"
         return 0
     fi
@@ -450,7 +451,7 @@ function apply_secure_boot_config() {
     selected_defconfig="$(resolve_platform_defconfig_path "${secure_config_dir}")"
 
     if [[ -n "${selected_defconfig}" ]]; then
-        cp -vf "${selected_defconfig}" configs/ && defconfig_count=$((defconfig_count + 1))
+        cp -f "${selected_defconfig}" configs/ && defconfig_count=$((defconfig_count + 1))
         display_alert "secure-uboot" "Applied defconfig: $(basename "${selected_defconfig}") (BOOT_SOC=${BOOT_SOC} BOARD_NAME=${BOARD_NAME:-${BOARD:-}})" "info"
     else
         exit_with_error "No matching defconfig found for platform/board" "BOOT_SOC=${BOOT_SOC} BOARD_NAME=${BOARD_NAME:-${BOARD:-}} platform=${platform} board=${board}"
@@ -730,21 +731,18 @@ function pre_package_kernel_image__create_resource_img() {
     local output_resource_img="${kernel_src}/resource.img"
 
     # Check necessary files and tools
-    [[ -f "${dtb_path}" ]] || {
-        display_alert "Missing DTB file" "${dtb_path}" "err"
-        return 0
-    }
+    [[ -f "${dtb_path}" ]] ||
+        exit_with_error "Missing DTB file for resource.img" "${dtb_path}"
 
-    [[ -n "${resource_tool}" && -x "${resource_tool}" ]] || {
-        display_alert "Missing resource_tool" "Searched in u-boot and rkbin-tools directories" "err"
-        return 0
-    }
+    [[ -n "${resource_tool}" && -x "${resource_tool}" ]] ||
+        exit_with_error "Missing resource_tool" "${resource_tool}"
 
     display_alert "Using resource_tool" "${resource_tool}" "debug"
     
     # Create temporary work directory
-    local temp_work_dir=$(mktemp -d)
-    mkdir -p "${temp_work_dir}"
+    local temp_work_dir
+    temp_work_dir="$(mktemp -d)" ||
+        exit_with_error "Failed to create temporary resource.img work directory" "${TMPDIR:-/tmp}"
     
     # Copy DTB file to work directory
     local dtb_filename=$(basename "${dtb_path}")
@@ -758,9 +756,7 @@ function pre_package_kernel_image__create_resource_img() {
     (
         cd "${temp_work_dir}"
 
-        display_alert "Debug: Packing resource.img" "DTB: ${dtb_filename}, Output: ${output_resource_img}" "debug"
-        display_alert "Debug: Working directory" "$(pwd)" "debug"
-        display_alert "Debug: Files in temp dir" "$(ls -la)" "debug"
+        display_alert "resource.img" "Packing DTB ${dtb_filename} -> ${output_resource_img}" "debug"
 
         # Create in current directory first, then move to target location
         "${resource_tool}" --pack "${dtb_filename}" "./resource.img" || {
@@ -832,6 +828,42 @@ function pre_umount_final_image__100_set_armbianenv_verbosity() {
     fi
 }
 
+function rk_secure_boot_kernel_bootargs() {
+    local console_args root_args extra_args
+
+    case "$(detect_rk_secure_boot_platform 2>/dev/null || echo unknown)" in
+        rk3588)
+            console_args="earlycon=uart8250,mmio32,0xfeb50000 console=ttyFIQ0 irqchip.gicv3_pseudo_nmi=0"
+            ;;
+        rk3576|*)
+            console_args="earlycon=uart8250,mmio32,0x2ad40000 console=ttyFIQ0"
+            ;;
+    esac
+
+    root_args="${RK_SECURE_BOOT_ROOTARGS:-root=/dev/mapper/armbian-root rw rootwait}"
+    extra_args="${RK_SECURE_BOOT_EXTRA_BOOTARGS:-}"
+
+    printf '%s %s' "${console_args}" "${root_args}"
+    if [[ -n "${extra_args}" ]]; then
+        printf ' %s' "${extra_args}"
+    fi
+}
+
+function rk_secure_boot_patch_dtb_bootargs() {
+    local dtb_file="$1"
+    local bootargs="$2"
+
+    [[ -f "${dtb_file}" ]] || exit_with_error "FIT packaging failed: DTB copy missing" "${dtb_file}"
+    if ! command -v fdtput >/dev/null 2>&1; then
+        exit_with_error "FIT packaging failed: fdtput missing, cannot inject root bootargs" "device-tree-compiler"
+    fi
+
+    fdtput -c "${dtb_file}" /chosen 2>/dev/null || true
+    fdtput -t s "${dtb_file}" /chosen bootargs "${bootargs}" ||
+        exit_with_error "FIT packaging failed: cannot inject /chosen/bootargs" "${dtb_file}"
+    display_alert "fit-post-initrd" "Injected DTB bootargs: ${bootargs}" "info"
+}
+
 function pre_umount_final_image__package_fit() {
     if ! rk_full_secure_boot_enabled; then
         return 0
@@ -884,6 +916,7 @@ function pre_umount_final_image__package_fit() {
     cp -f "${dtb_path}" "${fit_work}/board.dtb"
     if [[ -f "${resource_path}" ]]; then cp -f "${resource_path}" "${fit_work}/resource.img"; else : > "${fit_work}/resource.img"; fi
     cp -f "${ramdisk_path}" "${fit_work}/initrd.img"
+    rk_secure_boot_patch_dtb_bootargs "${fit_work}/board.dtb" "$(rk_secure_boot_kernel_bootargs)"
 
     # Use external ITS template file
     local extension_dir secure_config_dir its_template
@@ -899,10 +932,10 @@ function pre_umount_final_image__package_fit() {
     cp -f "${its_template}" "${fit_work}/boot-final.its"
 
     # Replace placeholders with actual file paths
-    sed -i "s|@KERNEL_DTB@|${dtb_path}|g" "${fit_work}/boot-final.its"
-    sed -i "s|@KERNEL_IMG@|${kernel_img_path}|g" "${fit_work}/boot-final.its"
-    sed -i "s|@RAMDISK_IMG@|${ramdisk_path}|g" "${fit_work}/boot-final.its"
-    sed -i "s|@RESOURCE_IMG@|${resource_path}|g" "${fit_work}/boot-final.its"
+    sed -i "s|@KERNEL_DTB@|${fit_work}/board.dtb|g" "${fit_work}/boot-final.its"
+    sed -i "s|@KERNEL_IMG@|${fit_work}/Image|g" "${fit_work}/boot-final.its"
+    sed -i "s|@RAMDISK_IMG@|${fit_work}/initrd.img|g" "${fit_work}/boot-final.its"
+    sed -i "s|@RESOURCE_IMG@|${fit_work}/resource.img|g" "${fit_work}/boot-final.its"
 
     display_alert "fit-post-initrd" "Generating final FIT (initial boot-final.img)" "info"
     (
@@ -1018,7 +1051,7 @@ function post_umount_final_image__flash_fit_kernel() {
 
     [[ -b "${boot_dev}" ]] || exit_with_error "FIT flash failed: target boot partition does not exist" "${boot_dev}"
 
-    display_alert "fit-flash" "dd if="${fit_image}" of="${boot_dev}"" "info"
+    display_alert "fit-flash" "dd if=${fit_image} of=${boot_dev}" "info"
     dd if="${fit_image}" of="${boot_dev}" conv=fsync || exit_with_error "FIT flash failed: dd write error" "${boot_dev}"
 
     sync

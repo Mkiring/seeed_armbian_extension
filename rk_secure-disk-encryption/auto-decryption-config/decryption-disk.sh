@@ -155,6 +155,9 @@ if [ -f /tmp/syspw ] && [ -s /tmp/syspw ]; then
         exit 1
     }
 
+    ROOT="/dev/mapper/armbian-root"
+    export ROOT
+    log_step "[Decryption-disk] root device set to ${ROOT}"
     log_step "[Decryption-disk] LUKS partition unlocked successfully"
 else
     log_step "[Decryption-disk] Error: Failed to retrieve password from security partition"

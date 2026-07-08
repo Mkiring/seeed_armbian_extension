@@ -28,12 +28,23 @@ function rk_autodecrypt_detect_vendor_board() {
         return 0
     fi
 
+    if [[ "$(type -t detect_rk_secure_boot_board || true)" == "function" ]]; then
+        local detected_board
+        detected_board="$(detect_rk_secure_boot_board)"
+        if [[ -n "${detected_board}" && "${detected_board}" != "unknown" ]]; then
+            echo "${detected_board}"
+            return 0
+        fi
+    fi
+
     local boot_soc
-    boot_soc="$(echo "${BOOT_SOC}" | tr '[:upper:]' '[:lower:]')"
+    boot_soc="$(echo "${BOOT_SOC:-}" | tr '[:upper:]' '[:lower:]')"
     if [[ "${boot_soc}" == *"3576"* ]]; then
         echo "recomputer-rk3576-devkit"
-    else
+    elif [[ "${boot_soc}" == *"3588"* ]]; then
         echo "recomputer-rk3588-devkit"
+    else
+        echo "unknown"
     fi
 }
 
@@ -204,14 +215,14 @@ function pre_umount_final_image__120_adjust_boot_cmd_load_addr_for_autodecrypt()
         return 0
     }
 
-    if grep -qE '^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"0x05000000"[[:space:]]*$' "${boot_cmd}"; then
+    if grep -qE '^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"?0x0?5000000"?[[:space:]]*$' "${boot_cmd}"; then
         display_alert "optee-autodecrypt" "boot.cmd load_addr already set to safe address 0x05000000" "debug"
         rk_autodecrypt_refresh_boot_scr_from_boot_cmd "${boot_cmd}" "${boot_scr}"
         return 0
     fi
 
-    if grep -qE '^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"0x9000000"[[:space:]]*$' "${boot_cmd}"; then
-        sed -i -E 's|^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"0x9000000"[[:space:]]*$|setenv load_addr "0x05000000"|' "${boot_cmd}" ||
+    if grep -qE '^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"?0x0?9000000"?[[:space:]]*$' "${boot_cmd}"; then
+        sed -i -E 's|^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"?0x0?9000000"?[[:space:]]*$|setenv load_addr "0x05000000"|' "${boot_cmd}" ||
             exit_with_error "failed to update boot.cmd load_addr" "${boot_cmd}"
         display_alert "optee-autodecrypt" "Updated /boot/boot.cmd load_addr: 0x9000000 -> 0x05000000" "info"
         rk_autodecrypt_refresh_boot_scr_from_boot_cmd "${boot_cmd}" "${boot_scr}"
@@ -228,7 +239,19 @@ function pre_update_initramfs__300_optee_inject() {
         fetch_from_repo "${RKBIN_GIT_URL:-"https://github.com/ackPeng/rockchip_sdk_tools.git"}" "rockchip_sdk_tools" "branch:${RKSDK_TOOLS_BRANCH:-"main"}"
     fi
 
-    apt-get install -y python3-pycryptodome
+    if ! python3 - <<'PY' >/dev/null 2>&1
+import Crypto
+PY
+    then
+        if [[ "$(type -t run_host_command_logged || true)" == "function" ]]; then
+            run_host_command_logged apt-get install -y python3-pycryptodome ||
+                exit_with_error "failed to install python3-pycryptodome" "apt-get"
+        else
+            apt-get install -y python3-pycryptodome ||
+                exit_with_error "failed to install python3-pycryptodome" "apt-get"
+        fi
+    fi
+
     # Inject OP-TEE related binaries and TAs before generating initrd, and create initramfs hooks.
     local root_dir="${MOUNT}"
     [[ -d "${root_dir}" ]] || { display_alert "optee" "root_dir does not exist: ${root_dir}" "err"; return 0; }
@@ -239,14 +262,21 @@ function pre_update_initramfs__300_optee_inject() {
     local optee_bin_dir="${RK_SDK_TOOLS}/external/security/bin/optee_v2/lib/arm64"
 
     if [[ -d "${optee_bin_dir}" ]]; then
-        mkdir -p "${root_dir}/usr/bin" || { display_alert "optee" "Failed to create usr/bin" "err"; return 0; }
-        mkdir -p "${root_dir}/usr/lib" || { display_alert "optee" "Failed to create usr/lib" "err"; return 0; }
+        mkdir -p "${root_dir}/usr/bin" ||
+            exit_with_error "Failed to create usr/bin" "${root_dir}/usr/bin"
+        mkdir -p "${root_dir}/usr/lib" ||
+            exit_with_error "Failed to create usr/lib" "${root_dir}/usr/lib"
 
-        install -m 0755 "${optee_bin_dir}/tee-supplicant" "${root_dir}/usr/bin/tee-supplicant" 
-        install -m 0644 "${optee_bin_dir}/libteec.so" "${root_dir}/usr/lib/libteec.so" 
-        install -m 0644 "${optee_bin_dir}/libteec.so.1" "${root_dir}/usr/lib/libteec.so.1"
-        install -m 0644 "${optee_bin_dir}/libteec.so.1.0" "${root_dir}/usr/lib/libteec.so.1.0"
-        install -m 0644 "${optee_bin_dir}/libteec.so.1.0.0" "${root_dir}/usr/lib/libteec.so.1.0.0"
+        install -m 0755 "${optee_bin_dir}/tee-supplicant" "${root_dir}/usr/bin/tee-supplicant" ||
+            exit_with_error "Failed to install tee-supplicant" "${optee_bin_dir}/tee-supplicant"
+        install -m 0644 "${optee_bin_dir}/libteec.so" "${root_dir}/usr/lib/libteec.so" ||
+            exit_with_error "Failed to install libteec.so" "${optee_bin_dir}/libteec.so"
+        install -m 0644 "${optee_bin_dir}/libteec.so.1" "${root_dir}/usr/lib/libteec.so.1" ||
+            exit_with_error "Failed to install libteec.so.1" "${optee_bin_dir}/libteec.so.1"
+        install -m 0644 "${optee_bin_dir}/libteec.so.1.0" "${root_dir}/usr/lib/libteec.so.1.0" ||
+            exit_with_error "Failed to install libteec.so.1.0" "${optee_bin_dir}/libteec.so.1.0"
+        install -m 0644 "${optee_bin_dir}/libteec.so.1.0.0" "${root_dir}/usr/lib/libteec.so.1.0.0" ||
+            exit_with_error "Failed to install libteec.so.1.0.0" "${optee_bin_dir}/libteec.so.1.0.0"
     else
         display_alert "optee" "OP-TEE client binary directory not found: ${optee_bin_dir}" "err"
         return 1
@@ -262,10 +292,10 @@ function pre_update_initramfs__300_optee_inject() {
         return 1
     fi
 
-    cd "${rk_tee_build_dir}" || { display_alert "optee" "Cannot enter rk_tee_user_v2 directory: ${rk_tee_build_dir}" "err"; return 1; }
-
-    # Execute compilation
-    ./build.sh 6432  || {
+    (
+        cd "${rk_tee_build_dir}" || exit 1
+        ./build.sh 6432
+    ) || {
         display_alert "optee" "rk_tee_user_v2 compilation failed" "err"
         return 1
     }
@@ -274,20 +304,18 @@ function pre_update_initramfs__300_optee_inject() {
     local keybox_app_path="${rk_tee_build_dir}/out/extra_app/keybox_app"
     local ta_file_path="${rk_tee_build_dir}/out/ta/extra_app/8c6cf810-685d-4654-ae71-8031beee467e.ta"
 
-    if [[ ! -f "${keybox_app_path}" ]]; then
-        display_alert "optee" "keybox_app not found: ${keybox_app_path}" "warn"
-    fi
-
-    if [[ ! -f "${ta_file_path}" ]]; then
-        display_alert "optee" "TA file not found: ${ta_file_path}" "warn"
-    fi
+    [[ -f "${keybox_app_path}" ]] || exit_with_error "keybox_app not found after build" "${keybox_app_path}"
+    [[ -f "${ta_file_path}" ]] || exit_with_error "TA file not found after build" "${ta_file_path}"
 
     display_alert "optee" "rk_tee_user_v2 compiled successfully" "info"
 
     # Install TA files
-    mkdir -p "${root_dir}/lib/optee_armtz" || display_alert "optee" "Failed to create optee_armtz" "err"
-    install -m 0755 "${keybox_app_path}" "${root_dir}/usr/bin/keybox_app"
-    install -m 0644 "${ta_file_path}" "${root_dir}/lib/optee_armtz/8c6cf810-685d-4654-ae71-8031beee467e.ta"
+    mkdir -p "${root_dir}/lib/optee_armtz" ||
+        exit_with_error "Failed to create optee_armtz" "${root_dir}/lib/optee_armtz"
+    install -m 0755 "${keybox_app_path}" "${root_dir}/usr/bin/keybox_app" ||
+        exit_with_error "Failed to install keybox_app" "${keybox_app_path}"
+    install -m 0644 "${ta_file_path}" "${root_dir}/lib/optee_armtz/8c6cf810-685d-4654-ae71-8031beee467e.ta" ||
+        exit_with_error "Failed to install OP-TEE TA" "${ta_file_path}"
 
     display_alert "optee" "OP-TEE client installation completed" "info"
 
@@ -315,6 +343,8 @@ function pre_update_initramfs__300_optee_inject() {
     # Copy install-optee hook file
     local hook_src="${extension_dir}/auto-decryption-config/install-optee"
     local hook_dst="${root_dir}/etc/initramfs-tools/hooks/install-optee"
+    mkdir -p "$(dirname "${hook_dst}")" ||
+        exit_with_error "Failed to create initramfs hooks directory" "$(dirname "${hook_dst}")"
 
     if [[ -f "${hook_src}" ]]; then
         cp "${hook_src}" "${hook_dst}" || {
@@ -324,7 +354,7 @@ function pre_update_initramfs__300_optee_inject() {
         chmod +x "${hook_dst}"
         display_alert "optee" "install-optee hook installation completed" "info"
     else
-        display_alert "optee" "install-optee source file not found: ${hook_src}" "warn"
+        exit_with_error "install-optee source file not found" "${hook_src}"
     fi
 
     # Copy decryption-disk.sh script to initramfs
@@ -336,6 +366,8 @@ function pre_update_initramfs__300_optee_inject() {
     # Copy decryption-disk.sh script
     local decryption_src="${extension_dir}/auto-decryption-config/decryption-disk.sh"
     local decryption_dst="${root_dir}/etc/initramfs-tools/scripts/init-top/0-decryption-disk"
+    mkdir -p "$(dirname "${decryption_dst}")" ||
+        exit_with_error "Failed to create initramfs init-top directory" "$(dirname "${decryption_dst}")"
 
     if [[ -f "${decryption_src}" ]]; then
         cp "${decryption_src}" "${decryption_dst}" || {
@@ -345,7 +377,7 @@ function pre_update_initramfs__300_optee_inject() {
         chmod +x "${decryption_dst}"
         display_alert "optee" "decryption-disk script installation completed" "info"
     else
-        display_alert "optee" "decryption-disk.sh source file not found: ${decryption_src}" "warn"
+        exit_with_error "decryption-disk.sh source file not found" "${decryption_src}"
     fi
 }
 
