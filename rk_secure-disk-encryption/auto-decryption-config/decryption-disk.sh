@@ -13,6 +13,20 @@ log_step() {
     fi
 }
 
+set_initramfs_root() {
+    local root_dev="$1"
+
+    mkdir -p /conf 2>/dev/null || true
+    {
+        echo "ROOT='${root_dev}'"
+        echo "readonly='n'"
+    } >> /conf/param.conf
+
+    ROOT="${root_dev}"
+    readonly=n
+    export ROOT readonly
+}
+
 first_line() {
     while IFS= read -r line; do
         printf '%s\n' "$line"
@@ -155,8 +169,7 @@ if [ -f /tmp/syspw ] && [ -s /tmp/syspw ]; then
         exit 1
     }
 
-    ROOT="/dev/mapper/armbian-root"
-    export ROOT
+    set_initramfs_root "/dev/mapper/armbian-root"
     log_step "[Decryption-disk] root device set to ${ROOT}"
     log_step "[Decryption-disk] LUKS partition unlocked successfully"
 else
