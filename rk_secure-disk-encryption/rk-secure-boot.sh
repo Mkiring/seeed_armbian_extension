@@ -733,9 +733,12 @@ function pre_package_kernel_image__create_resource_img() {
     temp_work_dir="$(mktemp -d)" ||
         exit_with_error "Failed to create temporary resource.img work directory" "${TMPDIR:-/tmp}"
     
-    # Copy DTB file to work directory
+    # Copy DTB file to work directory and inject bootargs before packing resource.img.
+    # Rockchip vendor boot flows may pass the DTB from resource.img rather than the
+    # FIT fdt image, so both copies must carry a valid root= argument.
     local dtb_filename=$(basename "${dtb_path}")
     cp "${dtb_path}" "${temp_work_dir}/${dtb_filename}"
+    rk_secure_boot_patch_dtb_bootargs "${temp_work_dir}/${dtb_filename}" "$(rk_secure_boot_kernel_bootargs)"
 
     # Ensure output directory exists and is writable
     local output_dir=$(dirname "${output_resource_img}")
