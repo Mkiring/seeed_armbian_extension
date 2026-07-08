@@ -25,12 +25,11 @@ This repository contains Armbian extensions focused on:
 
 Current relevant logic in `seeed_armbian_extension.sh`:
 
-1. When `CRYPTROOT_ENABLE=yes`, it enables `rk_secure-disk-encryption/rk-cryptroot-verbosity` (sets `verbosity=7` in `armbianEnv.txt` for early boot troubleshooting).
-2. It validates `CRYPTROOT_PASSPHRASE` length when encryption is enabled; the passphrase must be exactly 64 characters or the build exits with error.
-3. When `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes`:
+1. It validates `CRYPTROOT_PASSPHRASE` length when encryption is enabled; the passphrase must be exactly 64 characters or the build exits with error.
+2. When `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes`:
    - `CRYPTROOT_SSH_UNLOCK=no`
    - Enables `rk_secure-disk-encryption/rk-auto-decryption-disk`
-4. When `OTA_ENABLE=yes`, it enables `armbian-ota/ota-support`.
+3. When `OTA_ENABLE=yes`, it enables `armbian-ota/ota-support`.
 
 ## Quick Build Examples
 
@@ -102,7 +101,6 @@ seeed_armbian_extension/
 │   ├── recovery_ota/                         # Recovery OTA (initramfs apply)
 │   └── ab_ota/                               # A/B OTA userspace/systemd
 └── rk_secure-disk-encryption/
-    ├── rk-cryptroot-verbosity.sh             # Sets armbianEnv verbosity in cryptroot builds
     ├── rk-auto-decryption-disk.sh            # Auto-decryption workflow
     └── auto-decryption-config/               # initramfs hook and decrypt scripts
 ```
@@ -110,7 +108,7 @@ seeed_armbian_extension/
 ## Development Convention
 
 - Keep `seeed_armbian_extension.sh` focused on flag checks and `enable_extension` dispatching.
-- Put feature implementation in sub-extension scripts (for example `rk-cryptroot-verbosity.sh`, `ota-support.sh`).
+- Put feature implementation in sub-extension scripts (for example `rk-auto-decryption-disk.sh`, `ota-support.sh`).
 
 ## Related Document
 

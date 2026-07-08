@@ -3,10 +3,6 @@ if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${CRYPTROOT_ENABLE}" != "yes" ]];
 	export CRYPTROOT_ENABLE=yes
 fi
 
-if [[ "${CRYPTROOT_ENABLE}" == "yes" ]]; then
-	enable_extension "seeed_armbian_extension/rk_secure-disk-encryption/rk-cryptroot-verbosity"
-fi
-
 if [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]; then
 	display_alert "Cryptroot" "Enable RK to automatically unlock encrypted containers" "info"
 	export CRYPTROOT_SSH_UNLOCK=no
