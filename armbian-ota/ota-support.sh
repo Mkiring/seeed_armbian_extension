@@ -675,60 +675,7 @@ function pre_package_uboot_image__build_fw_env_tool(){
         return 0
     fi
 
-    display_alert "A/B partition OTA" "Building fw_env tool from u-boot source" "info"
-
-    local RK_SDK_TOOLS="${SRC}/cache/sources/rockchip_sdk_tools"
-    if [[ ! -d "${RK_SDK_TOOLS}" ]]; then
-        display_alert "A/B partition OTA" "rockchip_sdk_tools missing, fetching" "info"
-        fetch_from_repo "${RKBIN_GIT_URL:-"https://github.com/ackPeng/rockchip_sdk_tools.git"}" "rockchip_sdk_tools" "branch:${RKSDK_TOOLS_BRANCH:-"main"}" || {
-            display_alert "A/B partition OTA" "Failed to fetch rockchip_sdk_tools; AB_PART_OTA requires fw_env build" "err"
-            return 1
-        }
-    fi
-
-    local uboot_src="${SRC}/cache/sources/${BOOTSOURCEDIR}"
-    if [[ ! -d "${uboot_src}" ]]; then
-        display_alert "A/B partition OTA" "u-boot source not found: ${uboot_src}; AB_PART_OTA requires fw_env build" "err"
-        return 1
-    fi
-
-    if [[ ! -f "${uboot_src}/make.sh" ]]; then
-        display_alert "A/B partition OTA" "make.sh not found in u-boot source; AB_PART_OTA requires fw_env build" "err"
-        return 1
-    fi
-
-    local prebuilts_source="${RK_SDK_TOOLS}/other_build_tool_chain/prebuilts"
-    local prebuilts_dest="${uboot_src}/../prebuilts"
-    if [[ -d "${prebuilts_source}" && ! -d "${prebuilts_dest}" ]]; then
-        cp -rf "${prebuilts_source}" "${prebuilts_dest}" || {
-            display_alert "A/B partition OTA" "Failed to copy prebuilts; AB_PART_OTA requires fw_env build" "err"
-            return 1
-        }
-    fi
-
-    local rkbin_source="${RK_SDK_TOOLS}/rkbin"
-    local rkbin_dest="${uboot_src}/../rkbin"
-    if [[ -d "${rkbin_source}" && ! -d "${rkbin_dest}" ]]; then
-        cp -rf "${rkbin_source}" "${rkbin_dest}" || {
-            display_alert "A/B partition OTA" "Failed to copy rkbin; AB_PART_OTA requires fw_env build" "err"
-            return 1
-        }
-    fi
-
-    (
-        cd "${uboot_src}" || exit 1
-        bash ./make.sh env
-    ) || {
-        display_alert "A/B partition OTA" "Failed to run 'bash ./make.sh env'; AB_PART_OTA requires fw_env build" "err"
-        return 1
-    }
-
-    local fw_env_src="${uboot_src}/tools/env/fw_printenv"
-    if [[ ! -f "${fw_env_src}" ]]; then
-        display_alert "A/B partition OTA" "fw_printenv not generated at ${fw_env_src} after make.sh env" "err"
-        return 1
-    fi
-
+    display_alert "A/B partition OTA" "Using distro libubootenv-tool for fw_env tools" "info"
     return 0
 }
 
@@ -739,18 +686,6 @@ function pre_umount_final_image__899_install_fw_env_tool() {
 
     display_alert "A/B partition OTA" "Installing fw_env tools into rootfs" "info"
     local root_dir="${MOUNT}"
-    local uboot_src="${SRC}/cache/sources/${BOOTSOURCEDIR}"
-    local fw_env_src="${uboot_src}/tools/env/fw_printenv"
-
-    # Build fw_printenv if not already available (e.g. u-boot was cached)
-    if [[ ! -f "${fw_env_src}" ]]; then
-        display_alert "A/B partition OTA" "fw_printenv not found, building from u-boot source" "info"
-        pre_package_uboot_image__build_fw_env_tool || {
-            display_alert "A/B partition OTA" "Failed to build fw_printenv" "err"
-            return 1
-        }
-    fi
-
     local fw_printenv="${root_dir}/usr/bin/fw_printenv"
     local fw_setenv="${root_dir}/usr/bin/fw_setenv"
     local fw_env_config="${root_dir}/etc/fw_env.config"
@@ -758,22 +693,12 @@ function pre_umount_final_image__899_install_fw_env_tool() {
     local fw_env_offset="${AB_FW_ENV_OFFSET:-0x3f8000}"
     local fw_env_size="${AB_FW_ENV_SIZE:-0x8000}"
 
-    if [[ ! -f "${fw_env_src}" ]]; then
-        display_alert "A/B partition OTA" "fw_printenv binary not found: ${fw_env_src}; AB_PART_OTA requires this binary" "err"
+    if [[ ! -x "${fw_printenv}" || ! -x "${fw_setenv}" ]]; then
+        display_alert "A/B partition OTA" "fw_printenv/fw_setenv missing in rootfs; install libubootenv-tool" "err"
         return 1
     fi
 
-    mkdir -p "${root_dir}/usr/bin" "${root_dir}/etc"
-
-    cp "${fw_env_src}" "${fw_printenv}" || {
-        display_alert "A/B partition OTA" "Failed to install fw_printenv" "err"
-        return 1
-    }
-    cp "${fw_env_src}" "${fw_setenv}" || {
-        display_alert "A/B partition OTA" "Failed to install fw_setenv" "err"
-        return 1
-    }
-    chmod +x "${fw_printenv}" "${fw_setenv}"
+    mkdir -p "${root_dir}/etc"
     echo "${fw_env_device} ${fw_env_offset} ${fw_env_size}" > "${fw_env_config}" || {
         display_alert "A/B partition OTA" "Failed to create fw_env.config" "err"
         return 1
@@ -1140,8 +1065,8 @@ function prepare_image_size__ab_part_ota() {
 
 function extension_prepare_config__install_overlayroot_userdata() {
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        display_alert "A/B partition OTA" "install overlayroot and busybox-static" "info"
-        add_packages_to_image overlayroot busybox-static
+        display_alert "A/B partition OTA" "install overlayroot, busybox-static and libubootenv-tool" "info"
+        add_packages_to_image overlayroot busybox-static libubootenv-tool
 
     fi
 }
