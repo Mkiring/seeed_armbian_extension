@@ -14,6 +14,11 @@ function rk_optee_bootchain_enabled() {
     [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]
 }
 
+function rk_autodecrypt_fit_boot_required() {
+    [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]] ||
+        [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]
+}
+
 function pre_config_uboot_target__generate_fit_keys() {
     # Goal: Generate keys required for FIT signing before U-Boot configuration, plus an optional system encryption key.
     if ! rk_optee_bootchain_enabled; then
@@ -718,7 +723,7 @@ function build_custom_uboot__vendor_fit_secure() {
 
 
 function pre_package_kernel_image__create_resource_img() {
-    if ! rk_full_secure_boot_enabled; then
+    if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
 
@@ -865,7 +870,7 @@ function rk_secure_boot_patch_dtb_bootargs() {
 }
 
 function pre_umount_final_image__package_fit() {
-    if ! rk_full_secure_boot_enabled; then
+    if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
 
@@ -1032,7 +1037,7 @@ function pre_umount_final_image__package_fit() {
 
 function post_umount_final_image__flash_fit_kernel() {
     # After final unmount, write FIT image to boot partition (only in RAW boot mode)
-    if ! rk_full_secure_boot_enabled; then
+    if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
   
@@ -1061,7 +1066,7 @@ function post_umount_final_image__flash_fit_kernel() {
 
 # Modify partition settings to use RAW boot partition
 function pre_prepare_partitions__set_raw_boot_partition() {
-    if ! rk_full_secure_boot_enabled; then
+    if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
 
@@ -1091,7 +1096,7 @@ function pre_prepare_partitions__change_boot_partition_name() {
 
 # Skip standard boot partition mount and copy
 function post_create_partitions__handle_raw_boot() {
-    if ! rk_full_secure_boot_enabled; then
+    if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
 
@@ -1114,7 +1119,7 @@ function post_create_partitions__handle_raw_boot() {
 
 # Clear bootpart variable before mounting rootfs
 function pre_mount_chroot_script__delayed_raw_boot_cleanup() {
-    if ! rk_full_secure_boot_enabled; then
+    if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
 
