@@ -351,11 +351,7 @@ function resolve_rk_secure_extension_dir() {
 }
 
 function resolve_platform_defconfig_path() {
-    # Resolve platform + board specific defconfig from either old or new layout.
-    # Supported layouts:
-    # - secure-boot-config/defconfig/recomputer-*.config
-    # - secure-boot-config/rk3576-config/recomputer-rk3576-devkit_defconfig
-    # - secure-boot-config/rk3588-config/recomputer-rk3588-devkit_defconfig
+    # Resolve platform + board specific defconfig from the current secure-boot-config layout.
     local secure_config_dir="$1"
     local platform board candidate
 
@@ -372,25 +368,16 @@ function resolve_platform_defconfig_path() {
             *)
                 ;;
         esac
-
-        candidate="${secure_config_dir}/defconfig/${board}_defconfig"
-        [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
     fi
 
     case "${platform}" in
         rk3576)
-            for candidate in \
-                "${secure_config_dir}/rk3576-config/recomputer-rk3576-devkit_defconfig" \
-                "${secure_config_dir}/defconfig/recomputer-rk3576-devkit_defconfig"; do
-                [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
-            done
+            candidate="${secure_config_dir}/rk3576-config/recomputer-rk3576-devkit_defconfig"
+            [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
             ;;
         rk3588)
-            for candidate in \
-                "${secure_config_dir}/rk3588-config/recomputer-rk3588-devkit_defconfig" \
-                "${secure_config_dir}/defconfig/recomputer-rk3588-devkit_defconfig"; do
-                [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
-            done
+            candidate="${secure_config_dir}/rk3588-config/recomputer-rk3588-devkit_defconfig"
+            [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
             ;;
         *)
             ;;
@@ -417,9 +404,6 @@ function resolve_platform_its_template() {
         *)
             ;;
     esac
-
-    candidate="${secure_config_dir}/fit_kernel.its"
-    [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
 
     echo ""
 }

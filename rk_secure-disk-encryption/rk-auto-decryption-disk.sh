@@ -58,8 +58,7 @@ function rk_autodecrypt_copy_secure_boot_defconfig() {
 
     for candidate in \
         "${script_dir}/secure-boot-config/rk3588-config/${vendor_board}_defconfig" \
-        "${script_dir}/secure-boot-config/rk3576-config/${vendor_board}_defconfig" \
-        "${script_dir}/secure-boot-config/defconfig/${vendor_board}_defconfig"; do
+        "${script_dir}/secure-boot-config/rk3576-config/${vendor_board}_defconfig"; do
         if [[ -f "${candidate}" ]]; then
             src_defconfig="${candidate}"
             break
@@ -113,20 +112,8 @@ function rk_autodecrypt_prepare_defconfig_for_current_tree() {
     vendor_board="$(rk_autodecrypt_detect_vendor_board)"
     target_defconfig="configs/${vendor_board}_defconfig"
 
-    # Rule:
-    # 1) if a dedicated trim hook exists, use it.
-    # 2) otherwise fallback to secure-boot-config defconfig.
-    if [[ "$(type -t rk_autodecrypt_uboot_defconfig_trim_hook || true)" == "function" ]]; then
-        rk_autodecrypt_uboot_defconfig_trim_hook "${target_defconfig}" ||
-            exit_with_error "auto-decrypt defconfig trim hook failed" "${target_defconfig}"
-        display_alert "optee-autodecrypt" "Applied custom defconfig trim hook: rk_autodecrypt_uboot_defconfig_trim_hook" "info"
-        rk_autodecrypt_disable_fit_signature_in_defconfig "${target_defconfig}" ||
-            exit_with_error "failed to disable CONFIG_FIT_SIGNATURE" "${target_defconfig}"
-        return 0
-    fi
-
     rk_autodecrypt_copy_secure_boot_defconfig "${vendor_board}" ||
-        exit_with_error "auto-decrypt defconfig fallback failed" "vendor_board=${vendor_board} secure-boot-config"
+        exit_with_error "auto-decrypt defconfig copy failed" "vendor_board=${vendor_board} secure-boot-config"
     rk_autodecrypt_disable_fit_signature_in_defconfig "${target_defconfig}" ||
         exit_with_error "failed to disable CONFIG_FIT_SIGNATURE" "${target_defconfig}"
 }
@@ -164,72 +151,6 @@ function build_custom_uboot__100_autodecrypt_prepare_defconfig() {
 
     rk_autodecrypt_install_patch_uboot_target_wrapper
     rk_autodecrypt_prepare_defconfig_for_current_tree
-}
-function rk_autodecrypt_refresh_boot_scr_from_boot_cmd() {
-    local boot_cmd="$1"
-    local boot_scr="$2"
-    local mkimage_bin="${RK_AUTODECRYPT_MKIMAGE_BIN:-}"
-    local candidate
-
-    if [[ ! -f "${boot_cmd}" ]]; then
-        return 1
-    fi
-
-    if [[ -z "${mkimage_bin}" ]]; then
-        for candidate in \
-            "$(command -v mkimage 2>/dev/null || true)" \
-            "${SRC}/cache/sources/${BOOTSOURCEDIR}/tools/mkimage"; do
-            [[ -n "${candidate}" && -x "${candidate}" ]] || continue
-            mkimage_bin="${candidate}"
-            break
-        done
-    fi
-
-    [[ -n "${mkimage_bin}" ]] ||
-        exit_with_error "mkimage not found for boot.cmd -> boot.scr regeneration" "${boot_cmd}"
-
-    if [[ "$(type -t run_host_command_logged || true)" == "function" ]]; then
-        run_host_command_logged "${mkimage_bin}" -C none -A arm -T script -d "${boot_cmd}" "${boot_scr}" ||
-            exit_with_error "failed to regenerate boot.scr from boot.cmd" "${boot_scr}"
-    else
-        "${mkimage_bin}" -C none -A arm -T script -d "${boot_cmd}" "${boot_scr}" ||
-            exit_with_error "failed to regenerate boot.scr from boot.cmd" "${boot_scr}"
-    fi
-
-    display_alert "optee-autodecrypt" "Regenerated boot.scr from boot.cmd via mkimage" "info"
-    return 0
-}
-
-function pre_umount_final_image__120_adjust_boot_cmd_load_addr_for_autodecrypt() {
-    if ! rk_autodecrypt_nonsecure_mode_enabled; then
-        return 0
-    fi
-
-    local root_dir="${MOUNT}"
-    local boot_cmd="${root_dir}/boot/boot.cmd"
-    local boot_scr="${root_dir}/boot/boot.scr"
-
-    [[ -d "${root_dir}" ]] || return 0
-    [[ -f "${boot_cmd}" ]] || {
-        display_alert "optee-autodecrypt" "boot.cmd not found, skip load_addr adjustment: ${boot_cmd}" "debug"
-        return 0
-    }
-
-    if grep -qE '^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"?0x0?5000000"?[[:space:]]*$' "${boot_cmd}"; then
-        display_alert "optee-autodecrypt" "boot.cmd load_addr already set to safe address 0x05000000" "debug"
-        rk_autodecrypt_refresh_boot_scr_from_boot_cmd "${boot_cmd}" "${boot_scr}"
-        return 0
-    fi
-
-    if grep -qE '^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"?0x0?9000000"?[[:space:]]*$' "${boot_cmd}"; then
-        sed -i -E 's|^[[:space:]]*setenv[[:space:]]+load_addr[[:space:]]+"?0x0?9000000"?[[:space:]]*$|setenv load_addr "0x05000000"|' "${boot_cmd}" ||
-            exit_with_error "failed to update boot.cmd load_addr" "${boot_cmd}"
-        display_alert "optee-autodecrypt" "Updated /boot/boot.cmd load_addr: 0x9000000 -> 0x05000000" "info"
-        rk_autodecrypt_refresh_boot_scr_from_boot_cmd "${boot_cmd}" "${boot_scr}"
-        return 0
-    fi
-
-    display_alert "optee-autodecrypt" "No matching load_addr=0x9000000 line found in boot.cmd, left unchanged" "warn"
 }
 
 function pre_update_initramfs__300_optee_inject() {
