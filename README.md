@@ -4,13 +4,14 @@ This repository contains Armbian extensions focused on:
 
 - OTA updates (Recovery OTA / A/B Partition OTA)
 - Disk encryption (LUKS) with automatic unlock (OP-TEE)
+- Rockchip secure U-Boot / OP-TEE bootchain support
 
 ## Repository Role
 
 `seeed_armbian_extension.sh` is the extension entry script. It only enables sub-extensions based on environment variables and does not implement core features directly.
 
 - `armbian-ota/`: OTA packaging and runtime tools
-- `rk_secure-disk-encryption/`: encryption and auto-decryption implementation
+- `rk_secure-disk-encryption/`: encryption, auto-decryption, and secure boot implementation
 
 ## Feature Matrix
 
@@ -20,6 +21,8 @@ This repository contains Armbian extensions focused on:
 | A/B OTA | `OTA_ENABLE=yes AB_PART_OTA=yes` | Dual-slot OTA with rollback support |
 | LUKS root | `CRYPTROOT_ENABLE=yes` | Enables encrypted root filesystem |
 | Auto-decrypt | `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes` | Automatically unlocks encrypted root at boot |
+| Secure U-Boot | `RK_SECURE_UBOOT_ENABLE=yes` | Enables Rockchip secure U-Boot flow; forces `CRYPTROOT_ENABLE=yes` |
+| OP-TEE bootchain | `RK_OPTEE_BOOT_ENABLE=yes` | Enables OP-TEE bootchain packaging without the full secure-boot overlay |
 
 ## Current Entry Behavior
 
@@ -29,7 +32,11 @@ Current relevant logic in `seeed_armbian_extension.sh`:
 2. When `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes`:
    - `CRYPTROOT_SSH_UNLOCK=no`
    - Enables `rk_secure-disk-encryption/rk-auto-decryption-disk`
-3. When `OTA_ENABLE=yes`, it enables `armbian-ota/ota-support`.
+3. When `RK_SECURE_UBOOT_ENABLE=yes`:
+   - Forces `CRYPTROOT_ENABLE=yes`
+   - Enables `rk_secure-disk-encryption/rk-secure-boot`
+4. When `RK_OPTEE_BOOT_ENABLE=yes`, it enables `rk_secure-disk-encryption/rk-secure-boot` in OP-TEE bootchain mode.
+5. When `OTA_ENABLE=yes`, it enables `armbian-ota/ota-support`.
 
 ## Quick Build Examples
 
@@ -56,6 +63,34 @@ export RK_AUTO_DECRYP=yes
 export CRYPTROOT_PASSPHRASE='your-64-char-passphrase'
 ./compile.sh
 ```
+
+### 4) Secure U-Boot + encrypted auto-decrypt firmware
+
+```bash
+export RK_SECURE_UBOOT_ENABLE=yes
+export RK_AUTO_DECRYP=yes
+export CRYPTROOT_PASSPHRASE='your-64-char-passphrase'
+./compile.sh
+```
+
+### 5) OP-TEE bootchain firmware
+
+```bash
+export RK_OPTEE_BOOT_ENABLE=yes
+./compile.sh
+```
+
+## Secure Boot Extension Layout
+
+`rk_secure-disk-encryption/rk-secure-boot.sh` is organized by related responsibilities:
+
+1. Source fetching and mode predicates.
+2. Platform, board, DTB, rkbin, defconfig, and ITS template resolution.
+3. U-Boot build helpers for FIT keys, secure config overlays, OP-TEE BL32 FIT nodes, SPI loader images, and package artifacts.
+4. FIT image helpers for kernel bootargs, DTB bootargs injection, and `/boot` fstab cleanup.
+5. Armbian partition, build, packaging, and final image hooks.
+
+Supported platform detection currently targets RK3576 and RK3588 boards, with board-specific secure boot config selected from `secure-boot-config/`.
 
 ## OTA Runtime Usage
 
@@ -102,6 +137,8 @@ seeed_armbian_extension/
 │   └── ab_ota/                               # A/B OTA userspace/systemd
 └── rk_secure-disk-encryption/
     ├── rk-auto-decryption-disk.sh            # Auto-decryption workflow
+    ├── rk-secure-boot.sh                     # Secure U-Boot / OP-TEE bootchain hooks
+    ├── secure-boot-config/                   # Defconfigs, ITS templates, patches
     └── auto-decryption-config/               # initramfs hook and decrypt scripts
 ```
 
@@ -109,6 +146,7 @@ seeed_armbian_extension/
 
 - Keep `seeed_armbian_extension.sh` focused on flag checks and `enable_extension` dispatching.
 - Put feature implementation in sub-extension scripts (for example `rk-auto-decryption-disk.sh`, `ota-support.sh`).
+- Keep `rk-secure-boot.sh` grouped by responsibility so hook functions and their helpers remain easy to trace.
 
 ## Related Document
 

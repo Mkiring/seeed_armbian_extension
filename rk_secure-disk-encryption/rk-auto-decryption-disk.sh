@@ -1,13 +1,19 @@
+#
+# Shared Helpers
+#
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rk-common.sh"
+
+#
+# Source-Time Setup
+#
+
 function rk_auto_decryption_enable_optee_bootchain() {
     if [[ "${CRYPTROOT_ENABLE}" != "yes" || "${RK_AUTO_DECRYP}" != "yes" ]]; then
         return 0
     fi
 
-    if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]]; then
-        return 0
-    fi
-
-    if [[ "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
+    if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
         return 0
     fi
 
@@ -17,10 +23,42 @@ function rk_auto_decryption_enable_optee_bootchain() {
 
 rk_auto_decryption_enable_optee_bootchain
 
+#
+# Mode And Path Helpers
+#
 
 function rk_autodecrypt_nonsecure_mode_enabled() {
-    [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" != "yes" ]]
+    rk_autodecrypt_enabled && ! rk_full_secure_boot_enabled
 }
+
+function rk_autodecrypt_resolve_extension_dir() {
+    rk_resolve_extension_dir "auto-decryption-config"
+}
+
+function rk_autodecrypt_run_host_command() {
+    rk_run_host_command "$@"
+}
+
+function rk_autodecrypt_ensure_sdk_tools() {
+    RK_AUTODECRYPT_SDK_TOOLS="$(rk_sdk_tools_root)"
+    rk_ensure_sdk_tools "optee"
+}
+
+function rk_autodecrypt_ensure_pycryptodome() {
+    if python3 - <<'PY' >/dev/null 2>&1
+import Crypto
+PY
+    then
+        return 0
+    fi
+
+    rk_autodecrypt_run_host_command apt-get install -y python3-pycryptodome ||
+        exit_with_error "failed to install python3-pycryptodome" "apt-get"
+}
+
+#
+# U-Boot Defconfig Helpers
+#
 
 function rk_autodecrypt_detect_vendor_board() {
     if [[ -n "${UBOOT_VENDOR_BOARD}" ]]; then
@@ -28,50 +66,37 @@ function rk_autodecrypt_detect_vendor_board() {
         return 0
     fi
 
-    if [[ "$(type -t detect_rk_secure_boot_board || true)" == "function" ]]; then
-        local detected_board
-        detected_board="$(detect_rk_secure_boot_board)"
-        if [[ -n "${detected_board}" && "${detected_board}" != "unknown" ]]; then
-            echo "${detected_board}"
-            return 0
-        fi
+    local detected_board
+    detected_board="$(rk_detect_vendor_board)"
+    if [[ -n "${detected_board}" && "${detected_board}" != "unknown" ]]; then
+        echo "${detected_board}"
+        return 0
     fi
 
-    local boot_soc
-    boot_soc="$(echo "${BOOT_SOC:-}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${boot_soc}" == *"3576"* ]]; then
-        echo "recomputer-rk3576-devkit"
-    elif [[ "${boot_soc}" == *"3588"* ]]; then
-        echo "recomputer-rk3588-devkit"
-    else
-        echo "unknown"
-    fi
+    echo "unknown"
 }
 
 function rk_autodecrypt_copy_secure_boot_defconfig() {
     local vendor_board="$1"
     local target_defconfig="configs/${vendor_board}_defconfig"
-    local script_dir candidate src_defconfig
+    local extension_dir candidate src_defconfig
 
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    extension_dir="$(rk_autodecrypt_resolve_extension_dir)"
     src_defconfig=""
 
     for candidate in \
-        "${script_dir}/secure-boot-config/rk3588-config/${vendor_board}_defconfig" \
-        "${script_dir}/secure-boot-config/rk3576-config/${vendor_board}_defconfig"; do
+        "${extension_dir}/secure-boot-config/rk3588-config/${vendor_board}_defconfig" \
+        "${extension_dir}/secure-boot-config/rk3576-config/${vendor_board}_defconfig"; do
         if [[ -f "${candidate}" ]]; then
             src_defconfig="${candidate}"
             break
         fi
     done
 
-    if [[ -z "${src_defconfig}" ]]; then
-        return 1
-    fi
+    [[ -n "${src_defconfig}" ]] || return 1
 
     cp -f "${src_defconfig}" "${target_defconfig}" || return 1
     display_alert "optee-autodecrypt" "Applied secure-boot-config defconfig fallback: $(basename "${src_defconfig}") -> ${target_defconfig}" "info"
-    return 0
 }
 
 function rk_autodecrypt_disable_fit_signature_in_defconfig() {
@@ -79,21 +104,15 @@ function rk_autodecrypt_disable_fit_signature_in_defconfig() {
     local disable_list="${RK_AUTODECRYPT_DISABLE_CONFIGS:-CONFIG_FIT_SIGNATURE}"
     local symbol
 
-    if [[ ! -f "${target_defconfig}" ]]; then
-        return 1
-    fi
+    [[ -f "${target_defconfig}" ]] || return 1
 
     for symbol in ${disable_list}; do
         if [[ -x scripts/config ]]; then
-            if [[ "$(type -t run_host_command_logged || true)" == "function" ]]; then
-                run_host_command_logged scripts/config --file "${target_defconfig}" --set-val "${symbol}" n || return 1
-            else
-                scripts/config --file "${target_defconfig}" --set-val "${symbol}" n || return 1
-            fi
+            rk_autodecrypt_run_host_command scripts/config --file "${target_defconfig}" --set-val "${symbol}" n || return 1
             continue
         fi
 
-        # Fallback when scripts/config is unavailable in the current u-boot tree.
+        # Fallback when scripts/config is unavailable in the current U-Boot tree.
         if grep -q "^${symbol}=" "${target_defconfig}"; then
             sed -i "s/^${symbol}=.*/${symbol}=n/" "${target_defconfig}" || return 1
         elif grep -q "^# ${symbol} is not set" "${target_defconfig}"; then
@@ -104,7 +123,6 @@ function rk_autodecrypt_disable_fit_signature_in_defconfig() {
     done
 
     display_alert "optee-autodecrypt" "Disabled configs in ${target_defconfig}: ${disable_list}" "info"
-    return 0
 }
 
 function rk_autodecrypt_prepare_defconfig_for_current_tree() {
@@ -132,7 +150,7 @@ function rk_autodecrypt_install_patch_uboot_target_wrapper() {
     patch_uboot_target() {
         __rk_autodecrypt_patch_uboot_target_original "$@" || return $?
 
-        if [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" != "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
+        if rk_autodecrypt_nonsecure_mode_enabled && [[ "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
             rk_autodecrypt_prepare_defconfig_for_current_tree
         fi
     }
@@ -140,74 +158,41 @@ function rk_autodecrypt_install_patch_uboot_target_wrapper() {
     display_alert "optee-autodecrypt" "Installed post-patch defconfig hook wrapper on patch_uboot_target" "info"
 }
 
-function build_custom_uboot__100_autodecrypt_prepare_defconfig() {
-    if ! rk_autodecrypt_nonsecure_mode_enabled; then
-        return 0
-    fi
+#
+# OP-TEE Initramfs Helpers
+#
 
-    if [[ "${RK_OPTEE_BOOT_ENABLE}" != "yes" ]]; then
-        return 0
-    fi
-
-    rk_autodecrypt_install_patch_uboot_target_wrapper
-    rk_autodecrypt_prepare_defconfig_for_current_tree
-}
-
-function pre_update_initramfs__300_optee_inject() {
-    local RK_SDK_TOOLS="${SRC}/cache/sources/rockchip_sdk_tools"
-    if [[ ! -d "${RK_SDK_TOOLS}" ]]; then
-        display_alert "optee" "rockchip_sdk_tools source directory not found, downloading" "info"
-        fetch_from_repo "${RKBIN_GIT_URL:-"https://github.com/ackPeng/rockchip_sdk_tools.git"}" "rockchip_sdk_tools" "branch:${RKSDK_TOOLS_BRANCH:-"main"}"
-    fi
-
-    if ! python3 - <<'PY' >/dev/null 2>&1
-import Crypto
-PY
-    then
-        if [[ "$(type -t run_host_command_logged || true)" == "function" ]]; then
-            run_host_command_logged apt-get install -y python3-pycryptodome ||
-                exit_with_error "failed to install python3-pycryptodome" "apt-get"
-        else
-            apt-get install -y python3-pycryptodome ||
-                exit_with_error "failed to install python3-pycryptodome" "apt-get"
-        fi
-    fi
-
-    # Inject OP-TEE related binaries and TAs before generating initrd, and create initramfs hooks.
-    local root_dir="${MOUNT}"
-    [[ -d "${root_dir}" ]] || { display_alert "optee" "root_dir does not exist: ${root_dir}" "err"; return 0; }
+function rk_autodecrypt_install_optee_client() {
+    local root_dir="$1"
+    local sdk_tools="$2"
+    local optee_bin_dir="${sdk_tools}/external/security/bin/optee_v2/lib/arm64"
 
     display_alert "optee" "Installing OP-TEE client from library" "info"
-
-    # Install tee-supplicant and libteec.so from cache
-    local optee_bin_dir="${RK_SDK_TOOLS}/external/security/bin/optee_v2/lib/arm64"
-
-    if [[ -d "${optee_bin_dir}" ]]; then
-        mkdir -p "${root_dir}/usr/bin" ||
-            exit_with_error "Failed to create usr/bin" "${root_dir}/usr/bin"
-        mkdir -p "${root_dir}/usr/lib" ||
-            exit_with_error "Failed to create usr/lib" "${root_dir}/usr/lib"
-
-        install -m 0755 "${optee_bin_dir}/tee-supplicant" "${root_dir}/usr/bin/tee-supplicant" ||
-            exit_with_error "Failed to install tee-supplicant" "${optee_bin_dir}/tee-supplicant"
-        install -m 0644 "${optee_bin_dir}/libteec.so" "${root_dir}/usr/lib/libteec.so" ||
-            exit_with_error "Failed to install libteec.so" "${optee_bin_dir}/libteec.so"
-        install -m 0644 "${optee_bin_dir}/libteec.so.1" "${root_dir}/usr/lib/libteec.so.1" ||
-            exit_with_error "Failed to install libteec.so.1" "${optee_bin_dir}/libteec.so.1"
-        install -m 0644 "${optee_bin_dir}/libteec.so.1.0" "${root_dir}/usr/lib/libteec.so.1.0" ||
-            exit_with_error "Failed to install libteec.so.1.0" "${optee_bin_dir}/libteec.so.1.0"
-        install -m 0644 "${optee_bin_dir}/libteec.so.1.0.0" "${root_dir}/usr/lib/libteec.so.1.0.0" ||
-            exit_with_error "Failed to install libteec.so.1.0.0" "${optee_bin_dir}/libteec.so.1.0.0"
-    else
+    if [[ ! -d "${optee_bin_dir}" ]]; then
         display_alert "optee" "OP-TEE client binary directory not found: ${optee_bin_dir}" "err"
         return 1
     fi
 
-    # Compile rk_tee_user_v2
+    mkdir -p "${root_dir}/usr/bin" "${root_dir}/usr/lib" ||
+        exit_with_error "Failed to create OP-TEE client directories" "${root_dir}"
+
+    install -m 0755 "${optee_bin_dir}/tee-supplicant" "${root_dir}/usr/bin/tee-supplicant" ||
+        exit_with_error "Failed to install tee-supplicant" "${optee_bin_dir}/tee-supplicant"
+
+    local lib
+    for lib in libteec.so libteec.so.1 libteec.so.1.0 libteec.so.1.0.0; do
+        install -m 0644 "${optee_bin_dir}/${lib}" "${root_dir}/usr/lib/${lib}" ||
+            exit_with_error "Failed to install ${lib}" "${optee_bin_dir}/${lib}"
+    done
+}
+
+function rk_autodecrypt_build_and_install_tee_user() {
+    local root_dir="$1"
+    local sdk_tools="$2"
+    local rk_tee_build_dir="${sdk_tools}/external/security/rk_tee_user/v2"
+    local keybox_app_path ta_file_path
+
     display_alert "optee" "Starting compilation of rk_tee_user_v2" "info"
-
-    local rk_tee_build_dir="${RK_SDK_TOOLS}/external/security/rk_tee_user/v2"
-
     if [[ ! -d "${rk_tee_build_dir}" ]]; then
         display_alert "optee" "rk_tee_user_v2 source directory not found: ${rk_tee_build_dir}" "err"
         return 1
@@ -221,16 +206,11 @@ PY
         return 1
     }
 
-    # Check build artifacts
-    local keybox_app_path="${rk_tee_build_dir}/out/extra_app/keybox_app"
-    local ta_file_path="${rk_tee_build_dir}/out/ta/extra_app/8c6cf810-685d-4654-ae71-8031beee467e.ta"
-
+    keybox_app_path="${rk_tee_build_dir}/out/extra_app/keybox_app"
+    ta_file_path="${rk_tee_build_dir}/out/ta/extra_app/8c6cf810-685d-4654-ae71-8031beee467e.ta"
     [[ -f "${keybox_app_path}" ]] || exit_with_error "keybox_app not found after build" "${keybox_app_path}"
     [[ -f "${ta_file_path}" ]] || exit_with_error "TA file not found after build" "${ta_file_path}"
 
-    display_alert "optee" "rk_tee_user_v2 compiled successfully" "info"
-
-    # Install TA files
     mkdir -p "${root_dir}/lib/optee_armtz" ||
         exit_with_error "Failed to create optee_armtz" "${root_dir}/lib/optee_armtz"
     install -m 0755 "${keybox_app_path}" "${root_dir}/usr/bin/keybox_app" ||
@@ -238,209 +218,226 @@ PY
     install -m 0644 "${ta_file_path}" "${root_dir}/lib/optee_armtz/8c6cf810-685d-4654-ae71-8031beee467e.ta" ||
         exit_with_error "Failed to install OP-TEE TA" "${ta_file_path}"
 
-    display_alert "optee" "OP-TEE client installation completed" "info"
+    display_alert "optee" "rk_tee_user_v2 compiled and installed successfully" "info"
+}
 
-    # Install initramfs hook to ensure OP-TEE components are available in initramfs
+function rk_autodecrypt_install_initramfs_file() {
+    local src="$1"
+    local dst="$2"
+    local label="$3"
+
+    mkdir -p "$(dirname "${dst}")" ||
+        exit_with_error "Failed to create initramfs directory" "$(dirname "${dst}")"
+
+    [[ -f "${src}" ]] || exit_with_error "${label} source file not found" "${src}"
+    cp "${src}" "${dst}" || {
+        display_alert "optee" "Failed to copy ${label}" "err"
+        return 1
+    }
+    chmod +x "${dst}"
+    display_alert "optee" "${label} installation completed" "info"
+}
+
+function rk_autodecrypt_install_initramfs_hooks() {
+    local root_dir="$1"
+    local extension_dir
+    extension_dir="$(rk_autodecrypt_resolve_extension_dir)"
+
     display_alert "optee" "Installing install-optee initramfs hook" "info"
+    rk_autodecrypt_install_initramfs_file \
+        "${extension_dir}/auto-decryption-config/install-optee" \
+        "${root_dir}/etc/initramfs-tools/hooks/install-optee" \
+        "install-optee hook" || return 1
 
-    # # Create initramfs hooks directory
-    # mkdir -p "${root_dir}/etc/initramfs-tools/hooks"
+    display_alert "optee" "Installing decryption-disk script" "info"
+    rk_autodecrypt_install_initramfs_file \
+        "${extension_dir}/auto-decryption-config/decryption-disk.sh" \
+        "${root_dir}/etc/initramfs-tools/scripts/init-top/0-decryption-disk" \
+        "decryption-disk script" || return 1
+}
 
-    # Resolve extension root robustly across different Armbian extension layouts.
-    local extension_dir=""
-    local candidate=""
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    for candidate in \
-        "${script_dir}" \
-        "${SRC}/extensions/seeed_armbian_extension/rk_secure-disk-encryption" \
-        "${SRC}/extensions/rk_secure-disk-encryption"; do
-        if [[ -d "${candidate}/auto-decryption-config" ]]; then
-            extension_dir="${candidate}"
-            break
-        fi
-    done
-    [[ -n "${extension_dir}" ]] || extension_dir="${script_dir}"
+#
+# Secure Storage Helpers
+#
 
-    # Copy install-optee hook file
-    local hook_src="${extension_dir}/auto-decryption-config/install-optee"
-    local hook_dst="${root_dir}/etc/initramfs-tools/hooks/install-optee"
-    mkdir -p "$(dirname "${hook_dst}")" ||
-        exit_with_error "Failed to create initramfs hooks directory" "$(dirname "${hook_dst}")"
+function rk_secure_storage_format_partition() {
+    local sec_dev="$1"
 
-    if [[ -f "${hook_src}" ]]; then
-        cp "${hook_src}" "${hook_dst}" || {
-            display_alert "optee" "Failed to copy install-optee hook" "err"
-            return 1
-        }
-        chmod +x "${hook_dst}"
-        display_alert "optee" "install-optee hook installation completed" "info"
-    else
-        exit_with_error "install-optee source file not found" "${hook_src}"
+    if [[ "${SECURE_STORAGE_SECURITY_FS_TYPE}" == "none" ]]; then
+        return 0
     fi
 
-    # Copy decryption-disk.sh script to initramfs
-    display_alert "optee" "Installing decryption-disk script" "info"
-
-    # # Create init-top directory
-    # mkdir -p "${root_dir}/etc/initramfs-tools/scripts/init-top"
-
-    # Copy decryption-disk.sh script
-    local decryption_src="${extension_dir}/auto-decryption-config/decryption-disk.sh"
-    local decryption_dst="${root_dir}/etc/initramfs-tools/scripts/init-top/0-decryption-disk"
-    mkdir -p "$(dirname "${decryption_dst}")" ||
-        exit_with_error "Failed to create initramfs init-top directory" "$(dirname "${decryption_dst}")"
-
-    if [[ -f "${decryption_src}" ]]; then
-        cp "${decryption_src}" "${decryption_dst}" || {
-            display_alert "optee" "Failed to copy decryption-disk script" "err"
-            return 1
-        }
-        chmod +x "${decryption_dst}"
-        display_alert "optee" "decryption-disk script installation completed" "info"
+    display_alert "secure-storage" "mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} on security (${sec_dev})" "info"
+    if command -v mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} >/dev/null 2>&1; then
+        mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} -q "${sec_dev}" ||
+            display_alert "secure-storage" "security mkfs failed" "err"
     else
-        exit_with_error "decryption-disk.sh source file not found" "${decryption_src}"
+        display_alert "secure-storage" "mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} not found" "err"
     fi
 }
 
+function rk_secure_storage_write_passphrase() {
+    local sec_dev="$1"
+    local read_back
+
+    if [[ "${CRYPTROOT_ENABLE}" != "yes" || -z "${CRYPTROOT_PASSPHRASE}" ]]; then
+        return 0
+    fi
+
+    display_alert "secure-storage" "Writing CRYPTROOT_PASSPHRASE to security partition" "info"
+    wait_for_disk_sync "before writing to security partition"
+
+    printf "%s" "${CRYPTROOT_PASSPHRASE}" | dd of="${sec_dev}" bs=1 count="${#CRYPTROOT_PASSPHRASE}" conv=fsync 2>/dev/null || {
+        display_alert "secure-storage" "Failed to write password to security partition" "err"
+        return 1
+    }
+
+    sleep 1
+    read_back="$(dd if="${sec_dev}" bs="${#CRYPTROOT_PASSPHRASE}" count=1 2>/dev/null)"
+    if [[ "${read_back}" == "${CRYPTROOT_PASSPHRASE}" ]]; then
+        display_alert "secure-storage" "Password written and verified successfully" "info"
+    else
+        display_alert "secure-storage" "Password write verification failed" "warn"
+    fi
+
+    sync
+    blockdev --flushbufs "${sec_dev}" 2>/dev/null || true
+}
+
+#
+# U-Boot Hooks
+#
+
+function build_custom_uboot__100_autodecrypt_prepare_defconfig() {
+    if ! rk_autodecrypt_nonsecure_mode_enabled || [[ "${RK_OPTEE_BOOT_ENABLE}" != "yes" ]]; then
+        return 0
+    fi
+
+    rk_autodecrypt_install_patch_uboot_target_wrapper
+    rk_autodecrypt_prepare_defconfig_for_current_tree
+}
+
+#
+# Initramfs Hooks
+#
+
+function pre_update_initramfs__300_optee_inject() {
+    local root_dir="${MOUNT}"
+
+    rk_autodecrypt_ensure_sdk_tools
+    rk_autodecrypt_ensure_pycryptodome
+
+    [[ -d "${root_dir}" ]] || {
+        display_alert "optee" "root_dir does not exist: ${root_dir}" "err"
+        return 0
+    }
+
+    rk_autodecrypt_install_optee_client "${root_dir}" "${RK_AUTODECRYPT_SDK_TOOLS}" || return 1
+    rk_autodecrypt_build_and_install_tee_user "${root_dir}" "${RK_AUTODECRYPT_SDK_TOOLS}" || return 1
+    display_alert "optee" "OP-TEE client installation completed" "info"
+    rk_autodecrypt_install_initramfs_hooks "${root_dir}" || return 1
+}
+
+#
+# Partition Hooks
+#
 
 function pre_prepare_partitions__secure_storage_partitions() {
-	USE_HOOK_FOR_PARTITION="yes"
-	SECURE_STORAGE_SECURITY_SIZE=${SECURE_STORAGE_SECURITY_SIZE:-4}
-	SECURE_STORAGE_SECURITY_FS_TYPE=${SECURE_STORAGE_SECURITY_FS_TYPE:-none}
-	display_alert "secure-storage" " security(${SECURE_STORAGE_SECURITY_SIZE}MiB) partitions" "info"
+    USE_HOOK_FOR_PARTITION="yes"
+    SECURE_STORAGE_SECURITY_SIZE=${SECURE_STORAGE_SECURITY_SIZE:-4}
+    SECURE_STORAGE_SECURITY_FS_TYPE=${SECURE_STORAGE_SECURITY_FS_TYPE:-none}
+    display_alert "secure-storage" " security(${SECURE_STORAGE_SECURITY_SIZE}MiB) partitions" "info"
 }
 
 function create_partition_table__secure_storage() {
-	# In AB mode, partition table is owned by create_partition_table__ab_part_ota.
-	# Keep this hook as a no-op to avoid overriding AB layout.
-	if [[ "${AB_PART_OTA}" == "yes" ]]; then
-		if [[ -n "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]]; then
-			display_alert "secure-storage" "AB mode detected, reusing security partition index ${SECURE_STORAGE_SECURITY_PART_INDEX}" "info"
-		else
-			display_alert "secure-storage" "AB mode detected but security partition index is unset" "warn"
-		fi
-		return 0
-	fi
+    if [[ "${AB_PART_OTA}" == "yes" ]]; then
+        if [[ -n "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]]; then
+            display_alert "secure-storage" "AB mode detected, reusing security partition index ${SECURE_STORAGE_SECURITY_PART_INDEX}" "info"
+        else
+            display_alert "secure-storage" "AB mode detected but security partition index is unset" "warn"
+        fi
+        return 0
+    fi
 
-	local next=${OFFSET} # Starting MiB
-	local p_index=1
-	local script="label: ${IMAGE_PARTITION_TABLE:-gpt}\n"
-	if [[ "${IMAGE_PARTITION_TABLE:-gpt}" == "gpt" ]]; then
-		# Reduce GPT table entry count to lower SPL allocation pressure during early GPT parsing.
-		local gpt_table_length="${SECURE_STORAGE_GPT_TABLE_LENGTH:-64}"
-		script+="table-length: ${gpt_table_length}\n"
-	fi
+    local next=${OFFSET}
+    local p_index=1
+    local script="label: ${IMAGE_PARTITION_TABLE:-gpt}\n"
+    if [[ "${IMAGE_PARTITION_TABLE:-gpt}" == "gpt" ]]; then
+        local gpt_table_length="${SECURE_STORAGE_GPT_TABLE_LENGTH:-64}"
+        script+="table-length: ${gpt_table_length}\n"
+    fi
 
-	# BIOS (if exists)
-	if [[ -n "${BIOSSIZE}" && ${BIOSSIZE} -gt 0 ]]; then
-		[[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]] || exit_with_error "BIOS partition only supports GPT" "BIOSSIZE=${BIOSSIZE}"
-		script+="${p_index} : name=\"bios\", start=${next}MiB, size=${BIOSSIZE}MiB, type=21686148-6449-6E6F-744E-656564454649\n"
-		next=$((next + BIOSSIZE)); p_index=$((p_index+1))
-	fi
-	# EFI
-	if [[ -n "${UEFISIZE}" && ${UEFISIZE} -gt 0 ]]; then
-		local efi_type="C12A7328-F81F-11D2-BA4B-00A0C93EC93B" # EFI System
-		script+="${p_index} : name=\"efi\", start=${next}MiB, size=${UEFISIZE}MiB, type=${efi_type}\n"
-		next=$((next + UEFISIZE)); p_index=$((p_index+1))
-	fi
-	# /boot (XBOOTLDR)
-	if [[ -n "${BOOTSIZE}" && ${BOOTSIZE} -gt 0 && ( -n "${BOOTFS_TYPE}" || "${BOOTPART_REQUIRED}" == "yes" ) ]]; then
-		local boot_type="BC13C2FF-59E6-4262-A352-B275FD6F7172"
-		script+="${p_index} : name=\"boot\", start=${next}MiB, size=${BOOTSIZE}MiB, type=${boot_type}\n"
-		next=$((next + BOOTSIZE)); p_index=$((p_index+1))
-	fi
-	# security partition
-	local sec_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
-	script+="${p_index} : name=\"security\", start=${next}MiB, size=${SECURE_STORAGE_SECURITY_SIZE}MiB, type=${sec_type}\n"
-	next=$((next + SECURE_STORAGE_SECURITY_SIZE)); local security_part_index=${p_index}; p_index=$((p_index+1))
-	# rootfs remaining space
-	local root_type
-	if [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]]; then
-		root_type="${PARTITION_TYPE_UUID_ROOT:-0FC63DAF-8483-4772-8E79-3D69D8477DE4}" # Use generic Linux guid if not defined
-	else
-		root_type="83"
-	fi
-	script+="${p_index} : name=\"rootfs\", start=${next}MiB, type=${root_type}\n"
-	# Update rootpart sequence number for subsequent logic
-	rootpart=${p_index}
+    if [[ -n "${BIOSSIZE}" && ${BIOSSIZE} -gt 0 ]]; then
+        [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]] || exit_with_error "BIOS partition only supports GPT" "BIOSSIZE=${BIOSSIZE}"
+        script+="${p_index} : name=\"bios\", start=${next}MiB, size=${BIOSSIZE}MiB, type=21686148-6449-6E6F-744E-656564454649\n"
+        next=$((next + BIOSSIZE)); p_index=$((p_index + 1))
+    fi
+    if [[ -n "${UEFISIZE}" && ${UEFISIZE} -gt 0 ]]; then
+        local efi_type="C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+        script+="${p_index} : name=\"efi\", start=${next}MiB, size=${UEFISIZE}MiB, type=${efi_type}\n"
+        next=$((next + UEFISIZE)); p_index=$((p_index + 1))
+    fi
+    if [[ -n "${BOOTSIZE}" && ${BOOTSIZE} -gt 0 && ( -n "${BOOTFS_TYPE}" || "${BOOTPART_REQUIRED}" == "yes" ) ]]; then
+        local boot_type="BC13C2FF-59E6-4262-A352-B275FD6F7172"
+        script+="${p_index} : name=\"boot\", start=${next}MiB, size=${BOOTSIZE}MiB, type=${boot_type}\n"
+        next=$((next + BOOTSIZE)); p_index=$((p_index + 1))
+    fi
 
-	display_alert "secure-storage" "Custom partition table:\n${script}" "debug"
-	echo -e "${script}" | run_host_command_logged sfdisk ${SDCARD}.raw || exit_with_error "secure-storage partition creation failed" "sfdisk"
+    local sec_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+    local security_part_index=${p_index}
+    script+="${p_index} : name=\"security\", start=${next}MiB, size=${SECURE_STORAGE_SECURITY_SIZE}MiB, type=${sec_type}\n"
+    next=$((next + SECURE_STORAGE_SECURITY_SIZE)); p_index=$((p_index + 1))
 
-	SECURE_STORAGE_SECURITY_PART_INDEX=${security_part_index}
+    local root_type
+    if [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]]; then
+        root_type="${PARTITION_TYPE_UUID_ROOT:-0FC63DAF-8483-4772-8E79-3D69D8477DE4}"
+    else
+        root_type="83"
+    fi
+    script+="${p_index} : name=\"rootfs\", start=${next}MiB, type=${root_type}\n"
+    rootpart=${p_index}
+
+    display_alert "secure-storage" "Custom partition table:\n${script}" "debug"
+    echo -e "${script}" | run_host_command_logged sfdisk "${SDCARD}.raw" ||
+        exit_with_error "secure-storage partition creation failed" "sfdisk"
+
+    SECURE_STORAGE_SECURITY_PART_INDEX=${security_part_index}
 }
 
 function post_create_partitions__920_verify_secure_storage_layout() {
-	# Verify security partition exists in the raw image partition table.
-	# NOTE: this hook runs before LOOP is allocated, so do not access ${LOOP}pX here.
-	if [[ -z "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]]; then
-		exit_with_error "secure-storage verification failed" "SECURE_STORAGE_SECURITY_PART_INDEX is empty"
-	fi
+    if [[ -z "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]]; then
+        exit_with_error "secure-storage verification failed" "SECURE_STORAGE_SECURITY_PART_INDEX is empty"
+    fi
 
-	local ptable_dump
-	ptable_dump="$(sfdisk -d "${SDCARD}.raw" 2>/dev/null || true)"
-	if [[ -z "${ptable_dump}" ]]; then
-		exit_with_error "secure-storage verification failed: cannot dump partition table" "${SDCARD}.raw"
-	fi
+    local ptable_dump
+    ptable_dump="$(sfdisk -d "${SDCARD}.raw" 2>/dev/null || true)"
+    if [[ -z "${ptable_dump}" ]]; then
+        exit_with_error "secure-storage verification failed: cannot dump partition table" "${SDCARD}.raw"
+    fi
 
-	if ! grep -q 'name="security"' <<< "${ptable_dump}"; then
-		display_alert "secure-storage" "Partition table dump:" "err"
-		echo "${ptable_dump}" || true
-		exit_with_error "secure-storage verification failed: no security partition name found" "${SDCARD}.raw"
-	fi
+    if ! grep -q 'name="security"' <<< "${ptable_dump}"; then
+        display_alert "secure-storage" "Partition table dump:" "err"
+        echo "${ptable_dump}" || true
+        exit_with_error "secure-storage verification failed: no security partition name found" "${SDCARD}.raw"
+    fi
 
-	if ! grep -Eq "\\.raw${SECURE_STORAGE_SECURITY_PART_INDEX}([[:space:]]|:).*(name=\"security\")" <<< "${ptable_dump}"; then
-		display_alert "secure-storage" "Partition table dump:" "err"
-		echo "${ptable_dump}" || true
-		exit_with_error "secure-storage verification failed: security index mismatch" "expected index=${SECURE_STORAGE_SECURITY_PART_INDEX}"
-	fi
+    if ! grep -Eq "\\.raw${SECURE_STORAGE_SECURITY_PART_INDEX}([[:space:]]|:).*(name=\"security\")" <<< "${ptable_dump}"; then
+        display_alert "secure-storage" "Partition table dump:" "err"
+        echo "${ptable_dump}" || true
+        exit_with_error "secure-storage verification failed: security index mismatch" "expected index=${SECURE_STORAGE_SECURITY_PART_INDEX}"
+    fi
 
-	display_alert "secure-storage" "Security partition table entry verified at index ${SECURE_STORAGE_SECURITY_PART_INDEX}" "info"
+    display_alert "secure-storage" "Security partition table entry verified at index ${SECURE_STORAGE_SECURITY_PART_INDEX}" "info"
 }
 
-
 function format_partitions__secure_storage() {
-	# security partition remains raw unless user specifies FS type
-	if [[ -n "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]]; then
-		local sec_dev="${LOOP}p${SECURE_STORAGE_SECURITY_PART_INDEX}"
-		check_loop_device "${sec_dev}"
-		[[ -b "${sec_dev}" ]] || exit_with_error "secure-storage verification failed: security partition device missing after loop setup" "${sec_dev}"
+    [[ -n "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]] || return 0
 
-		# Format if filesystem type is specified
-		if [[ "${SECURE_STORAGE_SECURITY_FS_TYPE}" != "none" ]]; then
-			display_alert "secure-storage" "mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} on security (${sec_dev})" "info"
-			if command -v mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} >/dev/null 2>&1; then
-				mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} -q "${sec_dev}" || display_alert "secure-storage" "security mkfs failed" "err"
-			else
-				display_alert "secure-storage" "mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} not found" "err"
-			fi
-		fi
+    local sec_dev="${LOOP}p${SECURE_STORAGE_SECURITY_PART_INDEX}"
+    check_loop_device "${sec_dev}"
+    [[ -b "${sec_dev}" ]] ||
+        exit_with_error "secure-storage verification failed: security partition device missing after loop setup" "${sec_dev}"
 
-		# Write password to security partition (only if cryptroot is enabled)
-		if [[ "${CRYPTROOT_ENABLE}" == "yes" && -n "${CRYPTROOT_PASSPHRASE}" ]]; then
-			display_alert "secure-storage" "Writing CRYPTROOT_PASSPHRASE to security partition" "info"
-			# Wait for device to be ready
-			wait_for_disk_sync "before writing to security partition"
-
-			# Use printf to write directly, avoiding temporary files
-			printf "%s" "${CRYPTROOT_PASSPHRASE}" | dd of="${sec_dev}" bs=1 count="${#CRYPTROOT_PASSPHRASE}" conv=fsync 2>/dev/null || {
-				display_alert "secure-storage" "Failed to write password to security partition" "err"
-				return 1
-			}
-
-			# Verify write
-			sleep 1
-			local read_back=$(dd if="${sec_dev}" bs="${#CRYPTROOT_PASSPHRASE}" count=1 2>/dev/null)
-			if [[ "$read_back" == "${CRYPTROOT_PASSPHRASE}" ]]; then
-				display_alert "secure-storage" "Password written and verified successfully" "info"
-			else
-				display_alert "secure-storage" "Password write verification failed" "warn"
-			fi
-
-			# Multiple syncs to ensure data is written to disk
-			sync
-			sync
-			blockdev --flushbufs "${sec_dev}" 2>/dev/null || true
-		fi
-	fi
+    rk_secure_storage_format_partition "${sec_dev}"
+    rk_secure_storage_write_passphrase "${sec_dev}"
 }
