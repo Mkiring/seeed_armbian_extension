@@ -40,6 +40,16 @@ Current relevant logic in `seeed_armbian_extension.sh`:
 
 ## Quick Build Examples
 
+## Source Overrides
+
+`rockchip_sdk_tools` defaults to the Seeed fork:
+
+```bash
+https://github.com/Seeed-Studio/rockchip_sdk_tools.git
+```
+
+Override it with `RKSDK_TOOLS_GIT_URL` and `RKSDK_TOOLS_BRANCH` when needed.
+
 ### 1) Recovery OTA firmware
 
 ```bash

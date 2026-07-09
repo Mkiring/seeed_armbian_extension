@@ -11,7 +11,9 @@ function rk_run_host_command() {
 }
 
 function rk_fetch_sdk_tools() {
-    fetch_from_repo "${RKBIN_GIT_URL:-"https://github.com/ackPeng/rockchip_sdk_tools.git"}" "rockchip_sdk_tools" "branch:${RKSDK_TOOLS_BRANCH:-"main"}"
+    local sdk_tools_url="${RKSDK_TOOLS_GIT_URL:-${RKBIN_GIT_URL:-"https://github.com/Seeed-Studio/rockchip_sdk_tools.git"}}"
+
+    fetch_from_repo "${sdk_tools_url}" "rockchip_sdk_tools" "branch:${RKSDK_TOOLS_BRANCH:-"main"}"
 }
 
 function rk_sdk_tools_root() {
