@@ -153,14 +153,24 @@ function rk_secure_boot_run_secondary_fit_signing() {
     local fit_work="$1"
     local uboot_dir="$2"
 
+    rm -f "${uboot_dir}/fit/boot.itb" "${uboot_dir}/boot-final.img" 2>/dev/null || true
+
     if [[ -x "${uboot_dir}/scripts/fit.sh" ]]; then
         display_alert "fit-post-initrd" "Executing secondary signing script fit.sh" "info"
         (
             cd "${uboot_dir}" || exit 1
             cp "${fit_work}/boot-final.img" .
             ./scripts/fit.sh --boot_img "${fit_work}/boot-final.img" || exit 1
-        ) || display_alert "fit-post-initrd" "fit.sh execution failed, trying fallback image path" "warn"
+        ) || {
+            if rk_full_secure_boot_enabled; then
+                exit_with_error "FIT signing failed: fit.sh execution failed" "${uboot_dir}/scripts/fit.sh"
+            fi
+            display_alert "fit-post-initrd" "fit.sh execution failed, using unsigned fallback image" "warn"
+        }
     else
+        if rk_full_secure_boot_enabled; then
+            exit_with_error "FIT signing failed: fit.sh missing" "${uboot_dir}/scripts/fit.sh"
+        fi
         display_alert "fit-post-initrd" "fit.sh not found, using boot-final.img as fallback" "warn"
     fi
 }

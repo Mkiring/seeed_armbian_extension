@@ -139,42 +139,38 @@ function rk_secure_uboot_config_fragment_path() {
     return 1
 }
 function rk_apply_kconfig_fragment() {
-    local config_tool="$1"
+    local _config_tool="$1"
     local fragment="$2"
     shift 2
 
-    local line symbol value
+    local target_config=".config"
+    local merge_config="scripts/kconfig/merge_config.sh"
+    local line
 
     [[ -f "${fragment}" ]] || exit_with_error "Kconfig fragment missing" "${fragment}"
-    [[ -x "${config_tool}" ]] || exit_with_error "scripts/config missing; cannot apply Kconfig fragment" "${config_tool}"
 
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line}" ]] || continue
-
-        if [[ "${line}" =~ ^#\ (CONFIG_[A-Za-z0-9_]+)\ is\ not\ set$ ]]; then
-            rk_run_host_command "${config_tool}" "$@" --disable "${BASH_REMATCH[1]}" || return 1
-            continue
-        fi
-
-        [[ "${line}" =~ ^(CONFIG_[A-Za-z0-9_]+)=(.*)$ ]] || continue
-        symbol="${BASH_REMATCH[1]}"
-        value="${BASH_REMATCH[2]}"
-
-        case "${value}" in
-            y)
-                rk_run_host_command "${config_tool}" "$@" --enable "${symbol}" || return 1
-                ;;
-            n)
-                rk_run_host_command "${config_tool}" "$@" --disable "${symbol}" || return 1
-                ;;
-            \"*\")
-                value="${value#\"}"
-                value="${value%\"}"
-                rk_run_host_command "${config_tool}" "$@" --set-str "${symbol}" "${value}" || return 1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --file)
+                [[ $# -ge 2 ]] || exit_with_error "Missing --file value for Kconfig fragment merge" "${fragment}"
+                target_config="$2"
+                shift 2
                 ;;
             *)
-                rk_run_host_command "${config_tool}" "$@" --set-val "${symbol}" "${value}" || return 1
+                exit_with_error "Unsupported Kconfig fragment merge argument" "$1"
                 ;;
         esac
+    done
+
+    [[ -f "${target_config}" ]] || exit_with_error "Kconfig target missing; cannot apply fragment" "${target_config}"
+    [[ -x "${merge_config}" ]] || exit_with_error "merge_config.sh missing; cannot apply Kconfig fragment" "${merge_config}"
+
+    KCONFIG_CONFIG="${target_config}" rk_run_host_command "${merge_config}" -m "${target_config}" "${fragment}" ||
+        exit_with_error "Kconfig fragment merge failed" "${fragment}"
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ "${line}" =~ ^CONFIG_[A-Za-z0-9_]+= ]] || [[ "${line}" =~ ^#\ CONFIG_[A-Za-z0-9_]+\ is\ not\ set$ ]] || continue
+        grep -Fxq "${line}" "${target_config}" ||
+            exit_with_error "Kconfig fragment merge verification failed" "missing '${line}' in ${target_config}"
     done < "${fragment}"
 }
