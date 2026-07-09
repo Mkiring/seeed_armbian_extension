@@ -666,6 +666,42 @@ function rk_secure_boot_remove_boot_fstab_entries() {
     fi
 }
 
+function rk_secure_boot_disable_kernel_root_symlinks() {
+    local root_dir="$1"
+    local conf_file="${root_dir}/etc/kernel-img.conf"
+
+    display_alert "secure-uboot" "Disabling Debian kernel root symlinks for RAW FIT boot" "info"
+
+    [[ -n "${root_dir}" ]] || {
+        display_alert "secure-uboot" "Cannot disable kernel symlinks: root dir is empty" "warn"
+        return 0
+    }
+
+    mkdir -p "${root_dir}/etc" || {
+        display_alert "secure-uboot" "Cannot create ${root_dir}/etc" "warn"
+        return 0
+    }
+
+    touch "${conf_file}" || {
+        display_alert "secure-uboot" "Cannot create ${conf_file}" "warn"
+        return 0
+    }
+    sed -i -E '/^[[:space:]]*do_symlinks[[:space:]]*=/d' "${conf_file}" || true
+    cat >> "${conf_file}" <<'EOF'
+
+# RAW FIT images boot from a non-filesystem boot partition.
+do_symlinks = No
+EOF
+}
+
+function pre_install_kernel_debs__300_disable_kernel_root_symlinks_for_raw_fit() {
+    if ! rk_autodecrypt_fit_boot_required; then
+        return 0
+    fi
+
+    rk_secure_boot_disable_kernel_root_symlinks "${SDCARD}"
+}
+
 #
 # Partition Hooks
 #

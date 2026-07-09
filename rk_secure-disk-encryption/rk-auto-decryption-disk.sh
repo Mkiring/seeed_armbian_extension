@@ -379,6 +379,9 @@ function create_partition_table__secure_storage() {
     fi
     if [[ -n "${BOOTSIZE}" && ${BOOTSIZE} -gt 0 && ( -n "${BOOTFS_TYPE}" || "${BOOTPART_REQUIRED}" == "yes" ) ]]; then
         local boot_type="BC13C2FF-59E6-4262-A352-B275FD6F7172"
+        if [[ "${BOOT_RAW_MODE}" == "yes" ]]; then
+            boot_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+        fi
         script+="${p_index} : name=\"boot\", start=${next}MiB, size=${BOOTSIZE}MiB, type=${boot_type}\n"
         next=$((next + BOOTSIZE)); p_index=$((p_index + 1))
     fi
