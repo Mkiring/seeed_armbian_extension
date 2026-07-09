@@ -13,53 +13,8 @@ function fetch_sources_tools__rksdk_tools() {
 }
 
 #
-# Mode Predicates
-#
-
-function rk_full_secure_boot_enabled() {
-    [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]]
-}
-
-function rk_optee_bootchain_enabled() {
-    rk_full_secure_boot_enabled || [[ "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]
-}
-
-function rk_autodecrypt_enabled() {
-    [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]
-}
-
-function rk_autodecrypt_fit_boot_required() {
-    rk_full_secure_boot_enabled ||
-        { rk_autodecrypt_enabled && [[ "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; }
-}
-
-#
 # Platform And Path Resolution
 #
-
-function resolve_rockchip_sdk_rkbin_root() {
-    rk_sdk_rkbin_root
-}
-
-function rk_secure_boot_platform_from_name() {
-    rk_platform_from_name "$@"
-}
-
-function rk_secure_boot_default_board() {
-    rk_default_vendor_board "$1"
-}
-
-function detect_rk_secure_boot_platform() {
-    # Return value: rk3576 / rk3588 / unknown
-    # Platform detection prefers BOOT_SOC, then falls back to board names.
-    rk_detect_platform
-}
-
-function detect_rk_secure_boot_board() {
-    # Return value: canonical vendor board name, e.g. recomputer-rk3576-devkit / recomputer-rk3588-devkit / unknown
-    # Board detection is based on BOARD_NAME first, fallback to BOARD.
-    rk_detect_vendor_board
-}
 
 function resolve_platform_rkbin_dir() {
     # Resolve platform-specific rkbin content directory.
@@ -68,8 +23,8 @@ function resolve_platform_rkbin_dir() {
     # 2) rkbin/rk3588_rkbin/{RKTRUST,tools,...}
     # 3) legacy rkbin/{RKTRUST,tools,...}
     local rkbin_root platform rkbin_dir candidate
-    rkbin_root="$(resolve_rockchip_sdk_rkbin_root)"
-    platform="$(detect_rk_secure_boot_platform)"
+    rkbin_root="$(rk_sdk_rkbin_root)"
+    platform="$(rk_detect_platform)"
 
     [[ "${platform}" != "unknown" ]] && rkbin_dir="${rkbin_root}/${platform}_rkbin"
 
@@ -99,37 +54,75 @@ function resolve_platform_rkbin_dir() {
     echo "${rkbin_root}"
 }
 
-function resolve_rk_secure_extension_dir() {
-    # Resolve extension root robustly across different Armbian extension layouts.
-    rk_resolve_extension_dir "secure-boot-config"
-}
+function resolve_platform_its_template() {
+    # Match FIT load addresses to U-Boot's per-SoC ENV_MEM_LAYOUT_SETTINGS.
+    local platform candidate boot_patch_dir
 
-function resolve_platform_defconfig_path() {
-    # Resolve platform + board specific defconfig from the current secure-boot-config layout.
-    local secure_config_dir="$1"
-    local platform board candidate
-
-    platform="$(detect_rk_secure_boot_platform)"
-    board="$(detect_rk_secure_boot_board)"
-
-    if [[ "${platform}" != "unknown" && "${board}" != "unknown" ]]; then
-        candidate="${secure_config_dir}/${platform}-config/${board}_defconfig"
-        [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+    platform="$(rk_detect_platform)"
+    if [[ "${platform}" != "unknown" ]]; then
+        for boot_patch_dir in \
+            "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/fit-kernel" \
+            "${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/fit-kernel"; do
+            candidate="${boot_patch_dir}/${platform}_fit_kernel.its"
+            [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+        done
     fi
 
     echo ""
 }
 
-function resolve_platform_its_template() {
-    # Match FIT load addresses to U-Boot's per-SoC ENV_MEM_LAYOUT_SETTINGS.
-    local secure_config_dir="$1"
-    local platform candidate
+function resolve_platform_bl32_blob() {
+    local platform="$1"
 
-    platform="$(detect_rk_secure_boot_platform)"
-    if [[ "${platform}" != "unknown" ]]; then
-        candidate="${secure_config_dir}/${platform}_fit_kernel.its"
-        [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+    case "${platform}" in
+        rk3576) echo "rk35/rk3576_bl32_v1.08.bin" ;;
+        rk3588) echo "rk35/rk3588_bl32_v1.20.bin" ;;
+        *) echo "" ;;
+    esac
+}
+
+function rk_secure_boot_prepare_tee_bin() {
+    local uboot_workdir="$1"
+    local platform bl32_blob bl32_path
+
+    platform="$(rk_detect_platform)"
+    bl32_blob="$(resolve_platform_bl32_blob "${platform}")"
+    if [[ -z "${bl32_blob}" ]]; then
+        exit_with_error "No BL32 blob mapping found" "BOOT_SOC=${BOOT_SOC:-} BOARD=${BOARD:-}"
     fi
+
+    bl32_path="${SRC}/cache/sources/rkbin-tools/${bl32_blob}"
+    if [[ ! -f "${bl32_path}" ]]; then
+        exit_with_error "BL32 blob missing" "${bl32_path}"
+    fi
+
+    install -m 0644 "${bl32_path}" "${uboot_workdir}/tee.bin" ||
+        exit_with_error "Failed to stage BL32 as tee.bin" "${uboot_workdir}/tee.bin"
+    display_alert "secure-uboot" "Staged BL32 for U-Boot FIT: ${bl32_blob} -> tee.bin" "info"
+}
+
+function rk_secure_boot_secure_bootconfig() {
+    local board
+    board="$(rk_detect_vendor_board)"
+
+    if [[ "${board}" != "unknown" ]]; then
+        echo "${board}-secure_defconfig"
+        return 0
+    fi
+
+    echo ""
+}
+
+function rk_secure_boot_secure_defconfig_path() {
+    local bootconfig="$1"
+    local candidate boot_patch_dir
+
+    for boot_patch_dir in \
+        "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/defconfig" \
+        "${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig"; do
+        candidate="${boot_patch_dir}/${bootconfig}"
+        [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+    done
 
     echo ""
 }
@@ -158,8 +151,8 @@ function resolve_kernel_dtb_path() {
         display_alert "secure-uboot" "RK_SECURE_KERNEL_DTB not found: ${override}" "warn"
     fi
 
-    platform="$(detect_rk_secure_boot_platform)"
-    board="$(detect_rk_secure_boot_board)"
+    platform="$(rk_detect_platform)"
+    board="$(rk_detect_vendor_board)"
 
     if [[ "${platform}" != "unknown" && "${board}" != "unknown" ]]; then
         for candidate in \
@@ -176,9 +169,17 @@ function resolve_kernel_dtb_path() {
 # U-Boot Build Helpers
 #
 
-function pre_config_uboot_target__generate_fit_keys() {
+function pre_config_uboot_target__rk_secure_boot_prepare() {
     # Goal: Generate keys required for FIT signing before U-Boot configuration, plus an optional system encryption key.
     if ! rk_optee_bootchain_enabled; then
+        return 0
+    fi
+
+    if [[ "${RK_OPTEE_BOOT_ENABLE}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" != "yes" ]]; then
+        enable_optee_bootchain_bl32_fit_node
+    fi
+
+    if [[ "${DISABLE_FIT_KEY_GEN}" == "yes" ]]; then
         return 0
     fi
 
@@ -192,10 +193,11 @@ function pre_config_uboot_target__generate_fit_keys() {
         keys_dir="${UBOOT_DIR}/keys"
     fi
 
-    rkbin_root="$(resolve_rockchip_sdk_rkbin_root)"
+    rkbin_root="$(rk_sdk_rkbin_root)"
     rkbin_dir="$(resolve_platform_rkbin_dir)"
     echo "rkbin_root = ${rkbin_root}"
     echo "rkbin_dir  = ${rkbin_dir}"
+    rk_secure_boot_prepare_tee_bin "${uboot_workdir}"
 
     # Find rk_sign_tool executable (prefer PATH)
     rk_sign_tool="$(command -v rk_sign_tool 2>/dev/null || true)"
@@ -240,116 +242,29 @@ function pre_config_uboot_target__generate_fit_keys() {
     display_alert "secure-uboot" "FIT keys generated: ${UBOOT_FIT_KEYS_DIR}" "info"
 }
 
-
-function setup_vendor_build_environment() {
-    if [[ "${DISABLE_FIT_KEY_GEN}" != "yes" ]]; then
-        pre_config_uboot_target__generate_fit_keys || display_alert "secure-uboot" "FIT key generation failed" "warn"
-    fi
-}
-
-function apply_secure_boot_config() {
-    local extension_dir secure_config_dir
-    extension_dir="$(resolve_rk_secure_extension_dir)"
-    secure_config_dir="${extension_dir}/secure-boot-config"
-
-    if [[ ! -d "${secure_config_dir}" ]]; then
-        display_alert "secure-uboot" "secure-boot-config directory does not exist: ${secure_config_dir}" "debug"
+function extension_finish_config__rk_secure_bootconfig() {
+    if ! rk_full_secure_boot_enabled; then
         return 0
     fi
 
-    display_alert "secure-uboot" "Applying secure-boot-config files and patches" "info"
-
-    # 1. defconfig files (platform-specific)
-    display_alert "secure-uboot" "Applying defconfig files" "info"
-    mkdir -p configs
-    local defconfig_count=0
-    local selected_defconfig platform board
-    platform="$(detect_rk_secure_boot_platform)"
-    board="$(detect_rk_secure_boot_board)"
-    selected_defconfig="$(resolve_platform_defconfig_path "${secure_config_dir}")"
-
-    if [[ -n "${selected_defconfig}" ]]; then
-        cp -f "${selected_defconfig}" configs/ && defconfig_count=$((defconfig_count + 1))
-        display_alert "secure-uboot" "Applied defconfig: $(basename "${selected_defconfig}") (BOOT_SOC=${BOOT_SOC} BOARD_NAME=${BOARD_NAME:-${BOARD:-}})" "info"
-    else
-        exit_with_error "No matching defconfig found for platform/board" "BOOT_SOC=${BOOT_SOC} BOARD_NAME=${BOARD_NAME:-${BOARD:-}} platform=${platform} board=${board}"
+    local secure_bootconfig secure_defconfig its_template
+    secure_bootconfig="$(rk_secure_boot_secure_bootconfig)"
+    if [[ -z "${secure_bootconfig}" ]]; then
+        exit_with_error "No secure U-Boot defconfig mapping found" "BOOT_SOC=${BOOT_SOC} BOARD_NAME=${BOARD_NAME:-${BOARD:-}}"
     fi
 
-    if [[ "${defconfig_count}" -lt 1 ]]; then
-        exit_with_error "No defconfig files found under secure-boot-config" "${secure_config_dir}"
-    fi
-    display_alert "secure-uboot" "Applied ${defconfig_count} defconfig file(s)" "debug"
-
-    # 2. Device tree files
-    if [[ -d "${secure_config_dir}/dt" ]]; then
-        display_alert "secure-uboot" "Applying device tree files" "info"
-        mkdir -p arch/arm/dts
-        local dt_count=0
-        for dt_file in "${secure_config_dir}/dt"/*; do
-            [[ -e "${dt_file}" ]] || continue
-            cp -rf "${dt_file}" arch/arm/dts/ && dt_count=$((dt_count + 1))
-        done
-        display_alert "secure-uboot" "Applied ${dt_count} device tree files" "debug"
+    secure_defconfig="$(rk_secure_boot_secure_defconfig_path "${secure_bootconfig}")"
+    if [[ -z "${secure_defconfig}" ]]; then
+        exit_with_error "Secure U-Boot defconfig missing" "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/defconfig/${secure_bootconfig}"
     fi
 
-    # 3. board directory
-    if [[ -d "${secure_config_dir}/board" ]]; then
-        display_alert "secure-uboot" "Applying board-level configuration files" "info"
-        local board_count=0
-        # Recursively copy the whole board directory structure
-        cp -rf "${secure_config_dir}/board"/* . 2>/dev/null && board_count=$((board_count + 1))
-        display_alert "secure-uboot" "Applied board-level configuration files" "debug"
+    its_template="$(resolve_platform_its_template)"
+    if [[ -z "${its_template}" ]]; then
+        exit_with_error "Secure kernel FIT ITS template missing" "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/fit-kernel"
     fi
 
-    # 4. Patch files (if any)
-    if compgen -G "${secure_config_dir}"/*.patch > /dev/null; then
-        display_alert "secure-uboot" "Applying secure boot patches" "info"
-        local patch_applied=0
-        local patch_failed=0
-        for patch_file in "${secure_config_dir}"/*.patch; do
-            [[ -f "${patch_file}" ]] || continue
-            local patch_name
-            patch_name=$(basename "${patch_file}")
-
-            # Check if patch can be applied
-            if git apply --check "${patch_file}" 2>/dev/null; then
-                if git apply "${patch_file}"; then
-                    patch_applied=$((patch_applied + 1))
-                    display_alert "secure-uboot" "Patch applied: ${patch_name}" "debug"
-                else
-                    patch_failed=$((patch_failed + 1))
-                    display_alert "secure-uboot" "Failed to apply patch: ${patch_name}" "err"
-                fi
-            else
-                # Fallback to patch(1)
-                if patch -p1 < "${patch_file}" 2>/dev/null; then
-                    patch_applied=$((patch_applied + 1))
-                else
-                    patch_failed=$((patch_failed + 1))
-                    display_alert "secure-uboot" "Patch application failed (patch): ${patch_name}" "err"
-                fi
-            fi
-        done
-
-        display_alert "secure-uboot" "Patch application completed: Success=${patch_applied} Failed=${patch_failed}" "info"
-    fi
-
-    # 5. Handle other configuration files
-    local config_files=(
-        "include/configs"
-        "scripts"
-        "include"
-    )
-
-    for config_subdir in "${config_files[@]}"; do
-        if [[ -d "${secure_config_dir}/${config_subdir}" ]]; then
-            display_alert "secure-uboot" "Applying configuration directory: ${config_subdir}" "info"
-            mkdir -p "${config_subdir}"
-            cp -rf "${secure_config_dir}/${config_subdir}"/* "${config_subdir}/" 2>/dev/null || true
-        fi
-    done
-
-    display_alert "secure-uboot" "secure-boot-config application completed" "info"
+    display_alert "secure-uboot" "Using secure U-Boot defconfig: ${secure_bootconfig}" "info"
+    declare -g BOOTCONFIG="${secure_bootconfig}"
 }
 
 function enable_optee_bootchain_bl32_fit_node() {
@@ -381,7 +296,7 @@ function rk_secure_boot_verify_fit_images() {
     local fit_image="$1"
     local fit_info
 
-    [[ -f "${fit_image}" ]] || exit_with_error "FIT image missing after vendor build" "${fit_image}"
+    [[ -f "${fit_image}" ]] || exit_with_error "FIT image missing after U-Boot build" "${fit_image}"
 
     if ! command -v dumpimage >/dev/null 2>&1; then
         display_alert "secure-uboot" "dumpimage not found, skip FIT image content verification" "warn"
@@ -402,55 +317,13 @@ function rk_secure_boot_verify_fit_images() {
     display_alert "secure-uboot" "FIT image validation passed (${fit_image})" "info"
 }
 
-function generate_uboot_metadata() {
-    local dst_dir="${1}"
-    local vendor_board="${2}"
-
-    cat > "${dst_dir}/u-boot-metadata-target-1.sh" <<VENDOR_META
-declare -a UBOOT_TARGET_BINS=($(ls "${dst_dir}" 2>/dev/null | sed 's/^/"/;s/$/"/' | tr '\n' ' '))
-declare UBOOT_TARGET_MAKE='${vendor_board}'
-declare UBOOT_TARGET_CONFIG='vendor-final.config'
-VENDOR_META
-}
-
-function collect_vendor_artifacts() {
-    local vendor_board="${1}"
-    local dst_dir="${uboottempdir}/usr/lib/${uboot_name}"
-
-    mkdir -p "${dst_dir}" || exit_with_error "Failed to create packaging directory" "${dst_dir}"
-
-    # Possible artifacts list
-    local artifacts=(
-        "rkspi_loader.img"
-        "idbloader.img"
-        "u-boot.bin"
-        "u-boot-nodtb.bin"
-        "u-boot.dtb"
-        "u-boot.itb"
-        "u-boot.its"
-        "spl/u-boot-spl.bin"
-        "tpl/u-boot-tpl.bin"
-    )
-
-    local copied=0
-    for artifact in "${artifacts[@]}"; do
-        if [[ -f "${artifact}" ]]; then
-            cp -v "${artifact}" "${dst_dir}/" 2>&1 | grep -v -- '->' || true
-            copied=$((copied+1))
-        fi
-    done
-
-    if [[ ${copied} -gt 0 ]]; then
-        display_alert "secure-uboot" "Copied ${copied} artifacts to ${dst_dir}" "info"
+function check_uboot_produced_binary_file__rk_secure_boot_fit() {
+    if ! rk_optee_bootchain_enabled; then
+        return 0
     fi
 
-    # Save final config
-    if [[ -f .config ]]; then
-        cp .config "${dst_dir}/vendor-final.config"
-    fi
-
-    # Generate metadata
-    generate_uboot_metadata "${dst_dir}" "${vendor_board}"
+    [[ "${base_binfile}" == "u-boot.itb" ]] || return 0
+    rk_secure_boot_verify_fit_images "${binfile}"
 }
 
 #
@@ -460,7 +333,7 @@ function collect_vendor_artifacts() {
 function rk_secure_boot_kernel_bootargs() {
     local console_args root_args extra_args
 
-    case "$(detect_rk_secure_boot_platform 2>/dev/null || echo unknown)" in
+    case "$(rk_detect_platform 2>/dev/null || echo unknown)" in
         rk3588)
             console_args="earlycon=uart8250,mmio32,0xfeb50000 console=ttyFIQ0 irqchip.gicv3_pseudo_nmi=0"
             ;;
@@ -518,8 +391,8 @@ function rk_secure_boot_resolve_mkimage() {
     rkbin_dir="$(resolve_platform_rkbin_dir)"
     if [[ -x "${rkbin_dir}/tools/mkimage" ]]; then
         RK_SECURE_BOOT_MKIMAGE="${rkbin_dir}/tools/mkimage"
-    elif [[ -x "$(resolve_rockchip_sdk_rkbin_root)/tools/mkimage" ]]; then
-        RK_SECURE_BOOT_MKIMAGE="$(resolve_rockchip_sdk_rkbin_root)/tools/mkimage"
+    elif [[ -x "$(rk_sdk_rkbin_root)/tools/mkimage" ]]; then
+        RK_SECURE_BOOT_MKIMAGE="$(rk_sdk_rkbin_root)/tools/mkimage"
     fi
 
     [[ -x "${RK_SECURE_BOOT_MKIMAGE}" ]] ||
@@ -549,13 +422,11 @@ function rk_secure_boot_prepare_fit_workdir() {
 
 function rk_secure_boot_apply_fit_template() {
     local fit_work="$1"
-    local extension_dir secure_config_dir its_template
+    local its_template
 
-    extension_dir="$(resolve_rk_secure_extension_dir)"
-    secure_config_dir="${extension_dir}/secure-boot-config"
-    its_template="$(resolve_platform_its_template "${secure_config_dir}")"
+    its_template="$(resolve_platform_its_template)"
     if [[ ! -f "${its_template}" ]]; then
-        exit_with_error "FIT packaging failed: ITS template missing" "${secure_config_dir}"
+        exit_with_error "FIT packaging failed: ITS template missing" "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/fit-kernel"
     fi
     display_alert "fit-post-initrd" "Using ITS template: ${its_template}" "info"
 
@@ -777,138 +648,6 @@ function pre_mount_chroot_script__delayed_raw_boot_cleanup() {
         display_alert "secure-uboot" "Delayed cleanup: Clearing bootpart variable" "debug"
         bootpart=""
     fi
-}
-
-#
-# Build And Packaging Hooks
-#
-
-function build_custom_uboot__vendor_fit_secure() {
-    # Use Rockchip vendor make.sh to build secure FIT version U-Boot.
-    if ! rk_optee_bootchain_enabled; then
-        return 0
-    fi
-
-    # Conditional restriction: Rockchip series (rockchip64 / rk35xx / downstream naming) or forced.
-    if [[ ! "${LINUXFAMILY}" =~ ^(rockchip|rockchip64|rk35|rk35xx) ]]; then
-        display_alert "secure-uboot" "LINUXFAMILY=${LINUXFAMILY} does not match Rockchip, skipping vendor FIT U-Boot build" "debug"
-        return 0
-    fi
-
-    # Check for make.sh (vendor build flag)
-    if [[ ! -f ./make.sh ]]; then
-        display_alert "secure-uboot" "Vendor make.sh not found, falling back to standard build process" "warn"
-        return 0
-    fi
-
-    # Prevent duplicate execution
-    if [[ "${EXTENSION_BUILT_UBOOT}" == "yes" ]]; then
-        display_alert "secure-uboot" "Marked EXTENSION_BUILT_UBOOT by other steps, skipping" "debug"
-        return 0
-    fi
-
-    display_alert "secure-uboot" "Starting vendor FIT U-Boot build" "info"
-
-    # Use standard patch process instead of manual copying
-    display_alert "secure-uboot" "Applying standard patch process" "info"
-
-    # Ensure uboot_git_revision is set (required by patch_uboot_target)
-    declare -g uboot_git_revision
-    if [[ -z "${uboot_git_revision}" ]]; then
-        uboot_git_revision="$(git rev-parse HEAD)"
-    fi
-
-    # Apply standard patch process (this will automatically handle all patches in BOOTPATCHDIR)
-    # Including: board_recomputer-rk3588/, target_*, common directories
-    patch_uboot_target
-
-    if rk_full_secure_boot_enabled; then
-        # Full secure boot mode: apply secure defconfig/patch set (FIT-centric boot flow)
-        apply_secure_boot_config
-    else
-        # OP-TEE bootchain mode: keep vendor default boot behavior, only ensure build chain is available
-        display_alert "secure-uboot" "OP-TEE bootchain mode: skipping secure-boot defconfig/patch overlay" "info"
-        if [[ -f .config ]]; then
-            display_alert "secure-uboot" "OP-TEE bootchain mode: removing stale .config to avoid secure FIT boot behavior carry-over" "info"
-            rm -f .config || exit_with_error "Failed to remove stale .config" "$(pwd)/.config"
-        fi
-        enable_optee_bootchain_bl32_fit_node
-    fi
-    setup_vendor_build_environment
-
-    # Copy rkbin to the parent directory of u-boot
-    local rkbin_source
-    rkbin_source="$(resolve_platform_rkbin_dir)"
-    local rkbin_dest="../rkbin"
-    if [[ -d "${rkbin_source}" ]]; then
-        display_alert "secure-uboot" "Copying platform rkbin (${rkbin_source}) to ${rkbin_dest}" "info"
-        rm -rf "${rkbin_dest}" 2>/dev/null || true
-        mkdir -p "${rkbin_dest}" || {
-            display_alert "secure-uboot" "Failed to create ${rkbin_dest}" "err"
-            return 1
-        }
-        cp -rf "${rkbin_source}/." "${rkbin_dest}/" || {
-            display_alert "secure-uboot" "Failed to copy rkbin" "err"
-            return 1
-        }
-    else
-        exit_with_error "secure-uboot rkbin source directory does not exist (or platform unresolved)" "${rkbin_source}"
-    fi
-
-    # Copy prebuilts to the parent directory of u-boot
-    local prebuilts_source="${SRC}/cache/sources/rockchip_sdk_tools/other_build_tool_chain/prebuilts"
-    local prebuilts_dest="../prebuilts"
-    if [[ -d "${prebuilts_source}" ]]; then
-        display_alert "secure-uboot" "Copying prebuilts to ${prebuilts_dest}" "info"
-        rm -rf "${prebuilts_dest}" 2>/dev/null || true
-        cp -rf "${prebuilts_source}" "${prebuilts_dest}" || {
-            display_alert "secure-uboot" "Failed to copy prebuilts" "err"
-            return 1
-        }
-    else
-        display_alert "secure-uboot" "prebuilts source directory does not exist: ${prebuilts_source}" "warn"
-    fi
-
-    # Build using vendor make.sh
-    display_alert "secure-uboot" "Starting vendor u-boot compilation" "info"
-    local vendor_board
-    if [[ -n "${UBOOT_VENDOR_BOARD}" ]]; then
-        vendor_board="${UBOOT_VENDOR_BOARD}"
-    else
-        case "$(detect_rk_secure_boot_platform)" in
-            rk3576) vendor_board="recomputer-rk3576-devkit" ;;
-            rk3588) vendor_board="recomputer-rk3588-devkit" ;;
-            *) vendor_board="recomputer-rk3588-devkit" ;;
-        esac
-    fi
-    bash ./make.sh "${vendor_board}" --spl-new || exit_with_error "vendor u-boot compilation failed" "make.sh"
-
-    # Requires idblock support: generate idblock.bin
-    display_alert "secure-uboot" "Generating idblock.bin" "info"
-    bash ./make.sh --idblock || display_alert "secure-uboot" "idblock generation failed (continuing)" "warn"
-
-    # Copy key files
-    cp idblock.bin idbloader.img || true
-    if [[ -f fit/uboot.itb ]]; then
-        cp fit/uboot.itb u-boot.itb
-    fi
-    if [[ -f fit/u-boot.its ]]; then
-        cp fit/u-boot.its u-boot.its
-    fi
-    rk_secure_boot_verify_fit_images "u-boot.itb"
-
-    [[ -f rkspi_loader.img ]] ||
-        exit_with_error "rkspi_loader.img missing after U-Boot postprocess" "expected rk-uboot-postprocess/rockchip64_common.inc output"
-    display_alert "secure-uboot" "Using rkspi_loader.img from U-Boot postprocess" "info"
-
-    # Collect artifacts to Armbian packaging directory
-    collect_vendor_artifacts "${vendor_board}"
-
-    # Mark as built
-    EXTENSION_BUILT_UBOOT=yes
-    uboot_target_counter=1
-    display_alert "secure-uboot" "vendor FIT secure U-Boot build completed" "info"
-    return 0
 }
 
 function pre_package_kernel_image__create_resource_img() {

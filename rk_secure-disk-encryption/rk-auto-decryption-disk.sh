@@ -27,16 +27,8 @@ rk_auto_decryption_enable_optee_bootchain
 # Mode And Path Helpers
 #
 
-function rk_autodecrypt_nonsecure_mode_enabled() {
-    rk_autodecrypt_enabled && ! rk_full_secure_boot_enabled
-}
-
 function rk_autodecrypt_resolve_extension_dir() {
     rk_resolve_extension_dir "auto-decryption-config"
-}
-
-function rk_autodecrypt_run_host_command() {
-    rk_run_host_command "$@"
 }
 
 function rk_autodecrypt_ensure_sdk_tools() {
@@ -52,7 +44,7 @@ PY
         return 0
     fi
 
-    rk_autodecrypt_run_host_command apt-get install -y python3-pycryptodome ||
+    rk_run_host_command apt-get install -y python3-pycryptodome ||
         exit_with_error "failed to install python3-pycryptodome" "apt-get"
 }
 
@@ -79,24 +71,11 @@ function rk_autodecrypt_detect_vendor_board() {
 function rk_autodecrypt_copy_secure_boot_defconfig() {
     local vendor_board="$1"
     local target_defconfig="configs/${vendor_board}_defconfig"
-    local extension_dir candidate src_defconfig
+    local src_defconfig="configs/${vendor_board}-secure_defconfig"
 
-    extension_dir="$(rk_autodecrypt_resolve_extension_dir)"
-    src_defconfig=""
-
-    for candidate in \
-        "${extension_dir}/secure-boot-config/rk3588-config/${vendor_board}_defconfig" \
-        "${extension_dir}/secure-boot-config/rk3576-config/${vendor_board}_defconfig"; do
-        if [[ -f "${candidate}" ]]; then
-            src_defconfig="${candidate}"
-            break
-        fi
-    done
-
-    [[ -n "${src_defconfig}" ]] || return 1
-
+    [[ -f "${src_defconfig}" ]] || return 1
     cp -f "${src_defconfig}" "${target_defconfig}" || return 1
-    display_alert "optee-autodecrypt" "Applied secure-boot-config defconfig fallback: $(basename "${src_defconfig}") -> ${target_defconfig}" "info"
+    display_alert "optee-autodecrypt" "Applied secure defconfig fallback: $(basename "${src_defconfig}") -> ${target_defconfig}" "info"
 }
 
 function rk_autodecrypt_disable_fit_signature_in_defconfig() {
@@ -108,7 +87,7 @@ function rk_autodecrypt_disable_fit_signature_in_defconfig() {
 
     for symbol in ${disable_list}; do
         if [[ -x scripts/config ]]; then
-            rk_autodecrypt_run_host_command scripts/config --file "${target_defconfig}" --set-val "${symbol}" n || return 1
+            rk_run_host_command scripts/config --file "${target_defconfig}" --set-val "${symbol}" n || return 1
             continue
         fi
 
@@ -131,7 +110,7 @@ function rk_autodecrypt_prepare_defconfig_for_current_tree() {
     target_defconfig="configs/${vendor_board}_defconfig"
 
     rk_autodecrypt_copy_secure_boot_defconfig "${vendor_board}" ||
-        exit_with_error "auto-decrypt defconfig copy failed" "vendor_board=${vendor_board} secure-boot-config"
+        exit_with_error "auto-decrypt secure defconfig copy failed" "vendor_board=${vendor_board} source=configs/${vendor_board}-secure_defconfig"
     rk_autodecrypt_disable_fit_signature_in_defconfig "${target_defconfig}" ||
         exit_with_error "failed to disable CONFIG_FIT_SIGNATURE" "${target_defconfig}"
 }

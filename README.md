@@ -11,7 +11,18 @@ This repository contains Armbian extensions focused on:
 `seeed_armbian_extension.sh` is the extension entry script. It only enables sub-extensions based on environment variables and does not implement core features directly.
 
 - `armbian-ota/`: OTA packaging and runtime tools
-- `rk_secure-disk-encryption/`: encryption, auto-decryption, and secure boot implementation
+- `rk_secure-disk-encryption/`: encryption, auto-decryption, and secure boot image hooks
+
+U-Boot secure defconfigs, the ATF + OP-TEE FIT generator, and kernel FIT ITS templates are maintained in the Armbian build tree:
+
+```text
+/home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/
+├── defconfig/*-secure_defconfig
+├── arch/arm/mach-rockchip/make_fit_atf_optee.sh
+└── fit-kernel/*_fit_kernel.its
+```
+
+This keeps board bootloader changes in the normal Armbian U-Boot patch flow. The extension selects and stages those assets during secure builds, but does not carry its own copied `secure-boot-config/` tree.
 
 ## Feature Matrix
 
@@ -40,6 +51,14 @@ Current relevant logic in `seeed_armbian_extension.sh`:
 
 ## Quick Build Examples
 
+Run board builds from the Armbian build tree:
+
+```bash
+cd /home/mingzq/armbian/build
+```
+
+When the host has a global HTTP proxy, clear it for reproducible rootfs and chroot APT work. `APT_PROXY_ADDR=none` also tells the Armbian helpers not to inject an APT proxy.
+
 ## Source Overrides
 
 `rockchip_sdk_tools` defaults to the Seeed fork:
@@ -53,41 +72,40 @@ Override it with `RKSDK_TOOLS_GIT_URL` and `RKSDK_TOOLS_BRANCH` when needed.
 ### 1) Recovery OTA firmware
 
 ```bash
-export OTA_ENABLE=yes
-./compile.sh
+./build.sh recovery -b recomputer-rk3576-devkit
 ```
 
 ### 2) A/B OTA firmware
 
 ```bash
-export OTA_ENABLE=yes
-export AB_PART_OTA=yes
-./compile.sh
+./build.sh ab -b recomputer-rk3576-devkit
 ```
 
-### 3) Encrypted + auto-decrypt firmware
+### 3) OP-TEE encrypted auto-decrypt firmware
 
 ```bash
-export CRYPTROOT_ENABLE=yes
-export RK_AUTO_DECRYP=yes
-export CRYPTROOT_PASSPHRASE='your-64-char-passphrase'
-./compile.sh
+CRYPTROOT_PASSPHRASE='your-64-char-passphrase' \
+./build.sh optee --minimal -b recomputer-rk3576-devkit
 ```
 
-### 4) Secure U-Boot + encrypted auto-decrypt firmware
+### 4) Secure U-Boot + encrypted recovery image
 
 ```bash
-export RK_SECURE_UBOOT_ENABLE=yes
-export RK_AUTO_DECRYP=yes
-export CRYPTROOT_PASSPHRASE='your-64-char-passphrase'
-./compile.sh
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+SEEED_RK_EXTENSION_OFFLINE=yes \
+OFFLINE_WORK=yes \
+APT_PROXY_ADDR=none \
+CRYPTROOT_PASSPHRASE="$(< /home/mingzq/.config/armbian/rk3576-cryptroot-passphrase.txt)" \
+./build.sh recovery secure-boot --minimal -b recomputer-rk3576-devkit
 ```
 
-### 5) OP-TEE bootchain firmware
+This enables recovery OTA, LUKS root, RK auto-decrypt, secure U-Boot, and RK Maskrom usbplug build through the `build.sh` wrapper.
+
+### 5) Secure A/B OTA firmware
 
 ```bash
-export RK_OPTEE_BOOT_ENABLE=yes
-./compile.sh
+CRYPTROOT_PASSPHRASE='your-64-char-passphrase' \
+./build.sh ab secure-boot -b recomputer-rk3576-devkit
 ```
 
 ## Secure Boot Extension Layout
@@ -95,12 +113,19 @@ export RK_OPTEE_BOOT_ENABLE=yes
 `rk_secure-disk-encryption/rk-secure-boot.sh` is organized by related responsibilities:
 
 1. Source fetching and mode predicates.
-2. Platform, board, DTB, rkbin, defconfig, and ITS template resolution.
-3. U-Boot build helpers for FIT keys, secure config overlays, OP-TEE BL32 FIT nodes, SPI loader images, and package artifacts.
+2. Platform, board, DTB, rkbin, secure `BOOTCONFIG`, and ITS template resolution.
+3. U-Boot preparation hooks for FIT keys, secure `BOOTCONFIG`, OP-TEE BL32 FIT nodes, and produced `u-boot.itb` validation.
 4. FIT image helpers for kernel bootargs, DTB bootargs injection, and `/boot` fstab cleanup.
 5. Armbian partition, build, packaging, and final image hooks.
 
-Supported platform detection currently targets RK3576 and RK3588 boards, with board-specific secure boot config selected from `secure-boot-config/`.
+Supported platform detection currently targets RK3576 and RK3588 boards. Secure U-Boot uses `*-secure_defconfig`, the ATF+OP-TEE FIT generator, and kernel FIT ITS templates from the Armbian U-Boot patch overlay.
+
+Secure build responsibility is split as follows:
+
+- Armbian build U-Boot patch overlay: secure defconfig, `make_fit_atf_optee.sh`, FIT kernel ITS templates, and U-Boot patch application.
+- `rk-secure-boot.sh`: switches `BOOTCONFIG` to the secure defconfig, stages BL32 as `tee.bin`, validates the produced `u-boot.itb`, injects encrypted-root bootargs, and rebuilds the final kernel FIT after initramfs generation.
+- `rk-auto-decryption-disk.sh`: prepares the runtime auto-decrypt path for encrypted rootfs.
+- `armbian-ota/ota-support.sh`: creates recovery or A/B OTA payloads from the final image rootfs/boot content.
 
 ## OTA Runtime Usage
 
@@ -148,7 +173,6 @@ seeed_armbian_extension/
 └── rk_secure-disk-encryption/
     ├── rk-auto-decryption-disk.sh            # Auto-decryption workflow
     ├── rk-secure-boot.sh                     # Secure U-Boot / OP-TEE bootchain hooks
-    ├── secure-boot-config/                   # Defconfigs, ITS templates, patches
     └── auto-decryption-config/               # initramfs hook and decrypt scripts
 ```
 
@@ -156,7 +180,8 @@ seeed_armbian_extension/
 
 - Keep `seeed_armbian_extension.sh` focused on flag checks and `enable_extension` dispatching.
 - Put feature implementation in sub-extension scripts (for example `rk-auto-decryption-disk.sh`, `ota-support.sh`).
-- Keep `rk-secure-boot.sh` grouped by responsibility so hook functions and their helpers remain easy to trace.
+- Keep U-Boot source patches, secure defconfigs, FIT generators, and ITS templates in `/home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/`.
+- Keep `rk-secure-boot.sh` focused on Armbian hooks, board/platform selection, artifact staging, validation, and final image integration.
 
 ## Related Document
 
