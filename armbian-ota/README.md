@@ -37,7 +37,8 @@ extensions/armbian-ota/
 │   │   ├── persist.sh                      # Shared userdata persistence helper
 │   │   └── preserve.sh                     # Shared local config preserve helper
 │   └── policy/
-│       └── preserve-list.txt                   # Default local config preserve list
+│       ├── persist-map.txt                 # Default persistent bind mount map
+│       └── preserve-list.txt               # Default local config preserve list
 │
 ├── ab/                                 # AB Partition OTA mode
 │   ├── backend.sh                          # AB OTA backend
@@ -119,21 +120,22 @@ The `/userdata` backing store differs by OTA mode:
   No `/userdata/.persist/home -> /home` bind mount is installed in this mode.
 - **Recovery OTA (encrypted or not)**: the image is a single rootfs partition
   with no `armbi_usrdata`, so `/userdata` is a plain directory on the rootfs.
-  The fstab carries only the `/home` bind mount (no `LABEL=armbi_usrdata` line and no
+  Persistent bind mounts are generated from `/etc/armbian-ota/persist-map.txt`
+  (default source: `runtime/policy/persist-map.txt`), with no
   `userdata.mount` ordering, which would otherwise wait for a non-existent
   device and fail with "Dependency failed"). Because recovery OTA rewrites the
   whole rootfs, `/userdata/.persist` is added to
   `/etc/armbian-ota/preserve-list.txt` so the preserve step backs it up before the
   rewrite and restores it after.
 
-For Recovery OTA, the persistent bind mount is:
+For Recovery OTA, the default persistent bind mount map is:
 
 | Source | Target |
 |--------|--------|
 | `/userdata/.persist/home` | `/home` |
 
-At image build time `ota_init_userdata_persist` seeds `/userdata/.persist/home`
-from the rootfs for Recovery OTA so the bind mount has a valid source on first
+At image build time `ota_init_userdata_persist` seeds each persist source from
+its target path for Recovery OTA so the bind mount has a valid source on first
 boot. Seeding is idempotent: existing preserved data always wins.
 
 Local device configuration is preserved with `/etc/armbian-ota/preserve-list.txt`;

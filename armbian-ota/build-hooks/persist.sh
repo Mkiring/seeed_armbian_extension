@@ -5,6 +5,8 @@
 function ota_configure_persist_fstab() {
     local root_dir="$1"
     local fstab="${root_dir}/etc/fstab"
+    local persist_map="${OTA_SUPPORT_DIR}/runtime/policy/persist-map.txt"
+    local raw line persist_src mount_target
 
     [[ -f "${fstab}" ]] || {
         display_alert "OTA persist" "fstab not found, skip persist bind mounts" "warn"
@@ -27,33 +29,57 @@ function ota_configure_persist_fstab() {
 
 # BEGIN armbian-ota persist
 # recovery OTA: /userdata is a rootfs directory preserved by /etc/armbian-ota/preserve-list.txt
-/userdata/.persist/home                /home           none  bind,nofail  0  0
+EOF
+
+    if [[ -f "${persist_map}" ]]; then
+        while IFS= read -r raw || [[ -n "${raw}" ]]; do
+            line="$(echo "${raw}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [[ -n "${line}" && "${line}" != \#* ]] || continue
+            persist_src="${line%%[[:space:]]*}"
+            mount_target="${line#${persist_src}}"
+            mount_target="$(echo "${mount_target}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            mount_target="${mount_target%%[[:space:]]*}"
+            [[ "${persist_src}" == /* && "${mount_target}" == /* ]] || continue
+            mkdir -p "${root_dir}${persist_src}" "${root_dir}${mount_target}"
+            printf '%-40s %-15s none  bind,nofail  0  0\n' "${persist_src}" "${mount_target}" >> "${fstab}"
+        done < "${persist_map}"
+    else
+        mkdir -p "${root_dir}/userdata/.persist/home" "${root_dir}/home"
+        printf '%-40s %-15s none  bind,nofail  0  0\n' "/userdata/.persist/home" "/home" >> "${fstab}"
+    fi
+
+    cat >> "${fstab}" <<EOF
 # END armbian-ota persist
 EOF
 
-    display_alert "OTA persist" "Configured /userdata/.persist/home bind mount in fstab (recovery mode)" "info"
+    display_alert "OTA persist" "Configured persist bind mounts in fstab (recovery mode)" "info"
 }
 
-# Seed <persist>/home from the rootfs /home.
-# Idempotent: copies only when the persist home is empty, so data already
+# Seed persist sources from their target paths.
+# Idempotent: copies only when the persist source is empty, so data already
 # preserved on the persist target (partition or directory) always wins.
 
-function ota_seed_persist_dir() {
+function ota_seed_persist_path() {
     local root_dir="$1"
-    local persist="$2"
+    local persist_src="$2"
+    local mount_target="$3"
+    local persist="${root_dir}${persist_src}"
+    local target="${root_dir}${mount_target}"
 
-    mkdir -p "${persist}/home"
+    mkdir -p "${persist}"
 
-    if [[ -d "${root_dir}/home" && -z "$(find "${persist}/home" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
-        cp -a "${root_dir}/home/." "${persist}/home/" 2>/dev/null || \
-            display_alert "OTA persist" "Failed to initialize /home persist data" "warn"
+    if [[ -d "${target}" && -z "$(find "${persist}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+        cp -a "${target}/." "${persist}/" 2>/dev/null || \
+            display_alert "OTA persist" "Failed to initialize ${mount_target} persist data" "warn"
     fi
 
-    chmod 755 "${persist}" "${persist}/home" 2>/dev/null || true
+    chmod 755 "${persist}" 2>/dev/null || true
 }
 
 function ota_init_userdata_persist() {
     local root_dir="$1"
+    local persist_map="${OTA_SUPPORT_DIR}/runtime/policy/persist-map.txt"
+    local raw line persist_src mount_target
 
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
         display_alert "OTA persist" "Skip /userdata/.persist initialization in A/B overlayroot mode" "info"
@@ -64,8 +90,21 @@ function ota_init_userdata_persist() {
     # /userdata/.persist as a plain directory on the rootfs so the fstab bind
     # mounts have valid sources on first boot. Across OTA it is preserved by
     # /etc/armbian-ota/preserve-list.txt (see ota_preserve_backup_archive).
-    ota_seed_persist_dir "${root_dir}" "${root_dir}/userdata/.persist"
-    display_alert "OTA persist" "Seeded /userdata/.persist directory (recovery OTA)" "info"
+    if [[ -f "${persist_map}" ]]; then
+        while IFS= read -r raw || [[ -n "${raw}" ]]; do
+            line="$(echo "${raw}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [[ -n "${line}" && "${line}" != \#* ]] || continue
+            persist_src="${line%%[[:space:]]*}"
+            mount_target="${line#${persist_src}}"
+            mount_target="$(echo "${mount_target}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            mount_target="${mount_target%%[[:space:]]*}"
+            [[ "${persist_src}" == /* && "${mount_target}" == /* ]] || continue
+            ota_seed_persist_path "${root_dir}" "${persist_src}" "${mount_target}"
+        done < "${persist_map}"
+    else
+        ota_seed_persist_path "${root_dir}" "/userdata/.persist/home" "/home"
+    fi
+    display_alert "OTA persist" "Seeded persist directories (recovery OTA)" "info"
 }
 
 function pre_umount_final_image__897_configure_ota_persist() {

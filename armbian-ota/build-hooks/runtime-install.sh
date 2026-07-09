@@ -14,6 +14,7 @@ function pre_umount_final_image__894_install_ota_runtime() {
     local ab_src="${ota_ext_dir}/ab"
     local recovery_src="${ota_ext_dir}/recovery"
     local default_preserve_list="${runtime_src}/policy/preserve-list.txt"
+    local default_persist_map="${runtime_src}/policy/persist-map.txt"
     local state_template="${runtime_src}/policy/ota-state.env.template"
 
     if [[ ! -d "${runtime_src}" ]]; then
@@ -54,6 +55,19 @@ function pre_umount_final_image__894_install_ota_runtime() {
         else
             cp "${default_preserve_list}" "${root_dir}/etc/armbian-ota/preserve-list.txt" || {
                 display_alert "OTA runtime" "Failed to install default preserve-list.txt" "warn"
+            }
+        fi
+    fi
+
+    if [[ -f "${default_persist_map}" ]]; then
+        mkdir -p "${root_dir}/etc/armbian-ota"
+        if [[ -f "${root_dir}/etc/armbian-ota/persist-map.txt" ]]; then
+            cp "${default_persist_map}" "${root_dir}/etc/armbian-ota/persist-map.txt.default" || {
+                display_alert "OTA runtime" "Failed to install default persist-map.txt.default" "warn"
+            }
+        else
+            cp "${default_persist_map}" "${root_dir}/etc/armbian-ota/persist-map.txt" || {
+                display_alert "OTA runtime" "Failed to install default persist-map.txt" "warn"
             }
         fi
     fi

@@ -1,8 +1,9 @@
 # OTA local configuration preserve whitelist (absolute paths)
 # Lines starting with # are comments.
 #
-# Keep the preserve list itself across OTA.
+# Keep OTA policy files themselves across OTA.
 /etc/armbian-ota/preserve-list.txt
+/etc/armbian-ota/persist-map.txt
 
 # Keep account databases across OTA. These files must remain normal files at
 # runtime because useradd/groupadd replace them via rename.

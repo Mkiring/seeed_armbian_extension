@@ -28,6 +28,11 @@ Typical usage:
    cp -a runtime/lib/preserve.sh /usr/share/armbian-ota/preserve.sh
    mkdir -p /etc/armbian-ota
    cp -a runtime/policy/ota-state.env.template /etc/armbian-ota/ota-state.env.template
+   if [ -f /etc/armbian-ota/persist-map.txt ]; then
+       cp -a runtime/policy/persist-map.txt /etc/armbian-ota/persist-map.txt.default
+   else
+       cp -a runtime/policy/persist-map.txt /etc/armbian-ota/persist-map.txt
+   fi
    if [ -f /etc/armbian-ota/preserve-list.txt ]; then
        cp -a runtime/policy/preserve-list.txt /etc/armbian-ota/preserve-list.txt.default
    else
