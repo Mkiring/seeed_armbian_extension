@@ -27,7 +27,7 @@ HAS_RECOVERY_BACKEND=0
 load_backend() {
     local mode="$1" src
 
-    for src in "${OTA_RUNTIME_DIR}/backend-${mode}.sh" "${OTA_SOURCE_ROOT:+${OTA_SOURCE_ROOT}/${mode}/runtime/backend.sh}"; do
+    for src in "${OTA_RUNTIME_DIR}/backend-${mode}.sh" "${OTA_SOURCE_ROOT:+${OTA_SOURCE_ROOT}/${mode}/backend.sh}"; do
         [ -f "${src}" ] || continue
         . "${src}"
         case "${mode}" in

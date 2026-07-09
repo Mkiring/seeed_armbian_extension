@@ -14,11 +14,17 @@ Payload still includes `ota_tools/` as a fallback/offline bundle.
 
 ```
 extensions/armbian-ota/
-├── ota-support.sh                          # Main entry point
+├── ota-support.sh                          # Main build hook entry point
+├── build-hooks/                            # Build-time hook implementation
+│   ├── image-naming.sh                     # Image/package naming helpers
+│   ├── payload-tools.sh                    # Offline ota_tools payload assembly
+│   ├── ab-partitions.sh                    # A/B partition hooks
+│   ├── runtime-install.sh                  # Rootfs runtime/tool install hooks
+│   ├── persist.sh                          # Persist fstab and seed hooks
+│   └── package-create.sh                   # OTA package creation hook
 │
 ├── recovery/                           # Recovery OTA mode
-│   ├── runtime/
-│   │   └── backend.sh                      # Recovery OTA backend
+│   ├── backend.sh                          # Recovery OTA backend
 │   ├── initramfs_hooks/
 │   │   ├── 99-copy-tools                   # Initramfs hook for recovery OTA
 │   │   └── 99-ota-apply                    # Recovery OTA apply script
@@ -34,8 +40,7 @@ extensions/armbian-ota/
 │       └── preserve-list.txt                   # Default local config preserve list
 │
 ├── ab/                                 # AB Partition OTA mode
-│   ├── runtime/
-│   │   └── backend.sh                      # AB OTA backend
+│   ├── backend.sh                          # AB OTA backend
 │   ├── lib/
 │   │   ├── armbian-ota-health-check        # First boot health check
 │   │   ├── armbian-ota-init-uboot          # U-Boot environment initializer
@@ -256,10 +261,11 @@ fw_setenv ota_in_progress 0
 1. For Recovery OTA: Modify files in `recovery/`
 2. For AB OTA: Modify files in `ab/`
 3. For shared functionality: Use `runtime/`
+4. For build-time hook logic: Use `build-hooks/`
 
 ### Build Hook Entry Points
 
-In `ota-support.sh`:
+In `ota-support.sh` and `build-hooks/*.sh`:
 - Runtime/assets installation: `pre_umount_final_image__89x_*`
 - OTA package creation: `pre_umount_final_image__901_*`
 - U-Boot env tool build: `pre_package_uboot_image__*`

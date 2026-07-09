@@ -138,7 +138,7 @@ Secure build responsibility is split as follows:
 - `rk-common.sh`: resolves extension-owned secure U-Boot assets and applies Kconfig fragments through `scripts/config`.
 - `rk-secure-boot.sh`: applies the secure U-Boot config fragment, stages BL32 as `tee.bin`, stages `make_fit_atf_optee.sh`, validates the produced `u-boot.itb`, injects encrypted-root bootargs, and rebuilds the final kernel FIT after initramfs generation.
 - `rk-auto-decryption-disk.sh`: prepares the runtime auto-decrypt path for encrypted rootfs, builds and installs the OP-TEE keybox user app and TA, and installs initramfs unlock hooks.
-- `armbian-ota/ota-support.sh`: creates recovery or A/B OTA payloads from the final image rootfs/boot content.
+- `armbian-ota/ota-support.sh`: Armbian extension entry point for OTA build hooks; implementation lives in `armbian-ota/build-hooks/`.
 
 ## OTA Runtime Usage
 
@@ -179,8 +179,9 @@ Current implementation highlights:
 seeed_armbian_extension/
 ├── seeed_armbian_extension.sh                # Entry: extension orchestration only
 ├── armbian-ota/
-│   ├── ota-support.sh                        # OTA build and packaging logic
-│   ├── runtime/                              # Unified armbian-ota CLI and backends
+│   ├── ota-support.sh                        # OTA build hook entry point
+│   ├── build-hooks/                          # OTA build-time hook implementation
+│   ├── runtime/                              # Unified armbian-ota CLI and shared libs
 │   ├── recovery/                             # Recovery OTA backend
 │   └── ab/                                   # A/B OTA userspace/systemd
 └── rk_secure-disk-encryption/
@@ -188,6 +189,7 @@ seeed_armbian_extension/
     ├── rk-auto-decryption-disk.sh            # Auto-decryption workflow
     ├── rk-secure-boot.sh                     # Secure U-Boot / OP-TEE bootchain hooks
     ├── auto-decryption-config/               # initramfs hook and decrypt scripts
+    ├── secure-boot/                          # Secure boot implementation modules
     └── u-boot/
         ├── fit-generator/                    # ATF + OP-TEE U-Boot FIT generator
         ├── fit-kernel/                       # Final kernel FIT ITS templates
@@ -197,11 +199,11 @@ seeed_armbian_extension/
 ## Development Convention
 
 - Keep `seeed_armbian_extension.sh` focused on flag checks and `enable_extension` dispatching.
-- Put feature implementation in sub-extension scripts (for example `rk-auto-decryption-disk.sh`, `ota-support.sh`).
+- Put feature implementation in sub-extension scripts or focused build hook files (for example `rk-auto-decryption-disk.sh`, `armbian-ota/build-hooks/*.sh`).
 - Keep board U-Boot source patches and base defconfigs in `/home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/`.
 - Keep secure boot fragments, kernel FIT ITS templates, and extension-owned FIT generator files in `rk_secure-disk-encryption/u-boot/`.
 - Keep shared Rockchip helpers in `rk-common.sh`; avoid duplicating extension path resolution in feature scripts.
-- Keep `rk-secure-boot.sh` focused on Armbian hooks, board/platform selection, artifact staging, validation, and final image integration.
+- Keep `rk-secure-boot.sh` focused on Armbian hook wrappers; put secure boot implementation modules in `rk_secure-disk-encryption/secure-boot/`.
 
 ## Related Document
 
