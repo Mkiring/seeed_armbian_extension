@@ -1,6 +1,14 @@
-if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${CRYPTROOT_ENABLE}" != "yes" ]]; then
-	display_alert "Secure U-Boot" "RK_SECURE_UBOOT_ENABLE requires CRYPTROOT_ENABLE=yes, forcing enable" "warn"
+if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
+	exit_with_error "RK_SECURE_UBOOT_ENABLE and RK_OPTEE_BOOT_ENABLE are mutually exclusive" "use secure-boot or secure-rootfs, not both"
+fi
+
+if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
 	export CRYPTROOT_ENABLE=yes
+	export RK_AUTO_DECRYP=yes
+fi
+
+if [[ "${RK_AUTO_DECRYP}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" != "yes" && "${RK_OPTEE_BOOT_ENABLE}" != "yes" ]]; then
+	exit_with_error "RK_AUTO_DECRYP requires an explicit boot security mode" "set RK_OPTEE_BOOT_ENABLE=yes or RK_SECURE_UBOOT_ENABLE=yes"
 fi
 
 if [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]; then

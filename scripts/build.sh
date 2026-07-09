@@ -24,10 +24,7 @@ BUILD_DESKTOP="yes"
 # Feature flags. Empty OTA_ENABLE means "honor board config default".
 OTA_ENABLE=""
 AB_PART_OTA="no"
-CRYPTROOT_ENABLE="no"
-RK_AUTO_DECRYP="no"
-RK_SECURE_UBOOT_ENABLE="no"
-RK_OPTEE_BOOT_ENABLE="no"
+SECURITY_PROFILE="none"
 
 RK_COMPILE_USBPLUG="yes"
 
@@ -46,8 +43,8 @@ Usage: $(basename "$0") [profile ...] [options]
 Profiles (feature switches, can be combined; default: plain desktop build):
   recovery      Recovery OTA
   ab            A/B dual-partition OTA
-  secure-boot   Secure U-Boot + encryption + auto-decrypt
-  optee         OP-TEE boot + encryption + auto-decrypt
+  secure-rootfs LUKS root + OP-TEE/SSKR automatic unlock
+  secure-boot   Secure U-Boot + secure-rootfs
 
 Options:
   Build mode:
@@ -79,6 +76,7 @@ Examples:
   $(basename "$0") --minimal                    # No desktop, minimal system
   $(basename "$0") --kernel -c                  # Kernel only, clear cache
   $(basename "$0") recovery                     # Recovery OTA only
+  $(basename "$0") secure-rootfs --minimal      # Encrypted rootfs with automatic unlock
   $(basename "$0") recovery secure-boot         # Recovery OTA + secure boot
   $(basename "$0") ab secure-boot -d xfce       # A/B OTA + secure boot with XFCE
   $(basename "$0") ab -b recomputer-rk3588-devkit
@@ -123,15 +121,11 @@ apply_profile() {
             OTA_ENABLE="yes"
             AB_PART_OTA="yes"
             ;;
-        secure-boot)
-            CRYPTROOT_ENABLE="yes"
-            RK_AUTO_DECRYP="yes"
-            RK_SECURE_UBOOT_ENABLE="yes"
+        secure-rootfs)
+            SECURITY_PROFILE="secure-rootfs"
             ;;
-        optee)
-            CRYPTROOT_ENABLE="yes"
-            RK_AUTO_DECRYP="yes"
-            RK_OPTEE_BOOT_ENABLE="yes"
+        secure-boot)
+            SECURITY_PROFILE="secure-boot"
             ;;
         *)
             die "Unknown profile '$profile'. Run '$(basename "$0") --help' for available profiles."
@@ -142,17 +136,28 @@ apply_profile() {
 append_security_args() {
     local require_passphrase="${1:-no}"
 
-    if [[ "$CRYPTROOT_ENABLE" == "yes" ]]; then
-        if [[ "$require_passphrase" == "yes" ]]; then
-            [[ -z "$CRYPTROOT_PASSPHRASE" ]] && die "CRYPTROOT_PASSPHRASE is required for encrypted builds. Set it in environment."
-            BUILD_CMD+=(CRYPTROOT_ENABLE=yes CRYPTROOT_PASSPHRASE="$CRYPTROOT_PASSPHRASE")
-        else
-            BUILD_CMD+=(CRYPTROOT_ENABLE=yes)
-        fi
+    [[ "$SECURITY_PROFILE" == "none" ]] && return 0
+
+    if [[ "$require_passphrase" == "yes" ]]; then
+        [[ -z "$CRYPTROOT_PASSPHRASE" ]] && die "CRYPTROOT_PASSPHRASE is required for encrypted builds. Set it in environment."
+        BUILD_CMD+=(CRYPTROOT_ENABLE=yes CRYPTROOT_PASSPHRASE="$CRYPTROOT_PASSPHRASE")
+    else
+        BUILD_CMD+=(CRYPTROOT_ENABLE=yes)
     fi
-    [[ "$RK_AUTO_DECRYP" == "yes" ]] && BUILD_CMD+=(RK_AUTO_DECRYP=yes)
-    [[ "$RK_SECURE_UBOOT_ENABLE" == "yes" ]] && BUILD_CMD+=(RK_SECURE_UBOOT_ENABLE=yes)
-    [[ "$RK_OPTEE_BOOT_ENABLE" == "yes" ]] && BUILD_CMD+=(RK_OPTEE_BOOT_ENABLE=yes)
+
+    BUILD_CMD+=(RK_AUTO_DECRYP=yes)
+
+    case "$SECURITY_PROFILE" in
+        secure-rootfs)
+            BUILD_CMD+=(RK_OPTEE_BOOT_ENABLE=yes)
+            ;;
+        secure-boot)
+            BUILD_CMD+=(RK_SECURE_UBOOT_ENABLE=yes)
+            ;;
+        *)
+            die "Unknown security profile '$SECURITY_PROFILE'."
+            ;;
+    esac
     return 0
 }
 
@@ -194,7 +199,7 @@ profile_is_selected() {
 
 validate_profile_name() {
     case "$1" in
-        recovery|ab|secure-boot|optee)
+        recovery|ab|secure-rootfs|secure-boot)
             return 0
             ;;
         *)
@@ -307,8 +312,8 @@ done
 if profile_is_selected "recovery" && profile_is_selected "ab"; then
     die "Profiles 'recovery' and 'ab' are mutually exclusive."
 fi
-if profile_is_selected "secure-boot" && profile_is_selected "optee"; then
-    die "Profiles 'secure-boot' and 'optee' overlap; use 'secure-boot' for full secure boot or 'optee' for OP-TEE without full secure boot."
+if profile_is_selected "secure-boot" && profile_is_selected "secure-rootfs"; then
+    die "Profiles 'secure-boot' and 'secure-rootfs' overlap; secure-boot already includes secure-rootfs."
 fi
 
 for profile in "${PROFILES[@]}"; do
@@ -370,14 +375,18 @@ echo " Release        : $RELEASE"
 if [[ "$BUILD_DESKTOP" == "yes" && "$BUILD_KERNEL_ONLY" != "yes" && "$BUILD_UBOOT_ONLY" != "yes" ]]; then
     echo " Desktop        : $DESKTOP_ENVIRONMENT ($DESKTOP_TIER)"
 fi
-if [[ -n "$OTA_ENABLE" || "$CRYPTROOT_ENABLE" == "yes" ]]; then
+if [[ -n "$OTA_ENABLE" || "$SECURITY_PROFILE" != "none" ]]; then
     if [[ "$BUILD_KERNEL_ONLY" != "yes" && "$BUILD_UBOOT_ONLY" != "yes" ]]; then
         echo " OTA            : ${OTA_ENABLE:-board default}"
         echo " A/B OTA        : $AB_PART_OTA"
     fi
-    echo " Encryption     : $CRYPTROOT_ENABLE"
-    echo " Secure Boot    : $RK_SECURE_UBOOT_ENABLE"
-    echo " OP-TEE         : $RK_OPTEE_BOOT_ENABLE"
+    if [[ "$SECURITY_PROFILE" != "none" ]]; then
+        echo " Security       : $SECURITY_PROFILE"
+        echo " Encryption     : yes"
+        echo " Auto-decrypt   : yes"
+        [[ "$SECURITY_PROFILE" == "secure-boot" ]] && echo " Secure Boot    : yes" || echo " Secure Boot    : no"
+        echo " OP-TEE chain   : yes"
+    fi
 fi
 if [[ "$RK_COMPILE_USBPLUG" == "yes" ]]; then
     echo " USBPLUG        : compiled from source (Maskrom recovery)"

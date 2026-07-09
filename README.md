@@ -31,23 +31,24 @@ This keeps board bootloader changes in the normal Armbian U-Boot patch flow. The
 | Recovery OTA | `OTA_ENABLE=yes` and `AB_PART_OTA` unset | Single-system OTA applied in initramfs after reboot |
 | A/B OTA | `OTA_ENABLE=yes AB_PART_OTA=yes` | Dual-slot OTA with rollback support |
 | LUKS root | `CRYPTROOT_ENABLE=yes` | Enables encrypted root filesystem |
-| Auto-decrypt | `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes` | Automatically unlocks encrypted root at boot |
-| Secure U-Boot | `RK_SECURE_UBOOT_ENABLE=yes` | Enables Rockchip secure U-Boot flow; forces `CRYPTROOT_ENABLE=yes` |
-| OP-TEE bootchain | `RK_OPTEE_BOOT_ENABLE=yes` | Enables OP-TEE bootchain packaging without the full secure-boot overlay |
+| Secure rootfs | `RK_OPTEE_BOOT_ENABLE=yes` | Enables LUKS root, OP-TEE/SSKR automatic unlock, and OP-TEE bootchain packaging |
+| Secure boot | `RK_SECURE_UBOOT_ENABLE=yes` | Enables secure rootfs plus Rockchip secure U-Boot flow |
 
 ## Current Entry Behavior
 
 Current relevant logic in `seeed_armbian_extension.sh`:
 
 1. It validates `CRYPTROOT_PASSPHRASE` length when encryption is enabled; the passphrase must be exactly 64 characters or the build exits with error.
-2. When `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes`:
+2. `RK_SECURE_UBOOT_ENABLE=yes` and `RK_OPTEE_BOOT_ENABLE=yes` are mutually exclusive.
+3. When `RK_SECURE_UBOOT_ENABLE=yes` or `RK_OPTEE_BOOT_ENABLE=yes`, it enables:
+   - `CRYPTROOT_ENABLE=yes`
+   - `RK_AUTO_DECRYP=yes`
+4. `RK_AUTO_DECRYP=yes` without `RK_SECURE_UBOOT_ENABLE=yes` or `RK_OPTEE_BOOT_ENABLE=yes` is rejected.
+5. When `CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes`:
    - `CRYPTROOT_SSH_UNLOCK=no`
    - Enables `rk_secure-disk-encryption/rk-auto-decryption-disk`
-3. When `RK_SECURE_UBOOT_ENABLE=yes`:
-   - Forces `CRYPTROOT_ENABLE=yes`
-   - Enables `rk_secure-disk-encryption/rk-secure-boot`
-4. When `RK_OPTEE_BOOT_ENABLE=yes`, it enables `rk_secure-disk-encryption/rk-secure-boot` in OP-TEE bootchain mode.
-5. When `OTA_ENABLE=yes`, it enables `armbian-ota/ota-support`.
+6. When `RK_SECURE_UBOOT_ENABLE=yes` or `RK_OPTEE_BOOT_ENABLE=yes`, it enables `rk_secure-disk-encryption/rk-secure-boot`.
+7. When `OTA_ENABLE=yes`, it enables `armbian-ota/ota-support`.
 
 ## Quick Build Examples
 
@@ -81,11 +82,11 @@ Override it with `RKSDK_TOOLS_GIT_URL` and `RKSDK_TOOLS_BRANCH` when needed.
 ./build.sh ab -b recomputer-rk3576-devkit
 ```
 
-### 3) OP-TEE encrypted auto-decrypt firmware
+### 3) Secure rootfs firmware
 
 ```bash
 CRYPTROOT_PASSPHRASE='your-64-char-passphrase' \
-./build.sh optee --minimal -b recomputer-rk3576-devkit
+./build.sh secure-rootfs --minimal -b recomputer-rk3576-devkit
 ```
 
 ### 4) Secure U-Boot + encrypted recovery image

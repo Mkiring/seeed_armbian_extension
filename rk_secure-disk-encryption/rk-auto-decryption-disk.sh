@@ -5,25 +5,6 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rk-common.sh"
 
 #
-# Source-Time Setup
-#
-
-function rk_auto_decryption_enable_optee_bootchain() {
-    if [[ "${CRYPTROOT_ENABLE}" != "yes" || "${RK_AUTO_DECRYP}" != "yes" ]]; then
-        return 0
-    fi
-
-    if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
-        return 0
-    fi
-
-    display_alert "OP-TEE bootchain" "Enable OP-TEE boot chain for encrypted auto-decryption without secure boot" "info"
-    export RK_OPTEE_BOOT_ENABLE=yes
-}
-
-rk_auto_decryption_enable_optee_bootchain
-
-#
 # Mode And Path Helpers
 #
 
