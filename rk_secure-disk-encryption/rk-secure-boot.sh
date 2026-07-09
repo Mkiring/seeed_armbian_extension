@@ -56,19 +56,7 @@ function resolve_platform_rkbin_dir() {
 
 function resolve_platform_its_template() {
     # Match FIT load addresses to U-Boot's per-SoC ENV_MEM_LAYOUT_SETTINGS.
-    local platform candidate boot_patch_dir
-
-    platform="$(rk_detect_platform)"
-    if [[ "${platform}" != "unknown" ]]; then
-        for boot_patch_dir in \
-            "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/fit-kernel" \
-            "${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/fit-kernel"; do
-            candidate="${boot_patch_dir}/${platform}_fit_kernel.its"
-            [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
-        done
-    fi
-
-    echo ""
+    rk_secure_kernel_fit_template_path || true
 }
 
 function resolve_platform_bl32_blob() {
@@ -99,32 +87,6 @@ function rk_secure_boot_prepare_tee_bin() {
     install -m 0644 "${bl32_path}" "${uboot_workdir}/tee.bin" ||
         exit_with_error "Failed to stage BL32 as tee.bin" "${uboot_workdir}/tee.bin"
     display_alert "secure-uboot" "Staged BL32 for U-Boot FIT: ${bl32_blob} -> tee.bin" "info"
-}
-
-function rk_secure_boot_secure_bootconfig() {
-    local board
-    board="$(rk_detect_vendor_board)"
-
-    if [[ "${board}" != "unknown" ]]; then
-        echo "${board}-secure_defconfig"
-        return 0
-    fi
-
-    echo ""
-}
-
-function rk_secure_boot_secure_defconfig_path() {
-    local bootconfig="$1"
-    local candidate boot_patch_dir
-
-    for boot_patch_dir in \
-        "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/defconfig" \
-        "${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig"; do
-        candidate="${boot_patch_dir}/${bootconfig}"
-        [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
-    done
-
-    echo ""
 }
 
 function resolve_kernel_dtb_path() {
@@ -171,17 +133,22 @@ function resolve_kernel_dtb_path() {
 
 function rk_secure_boot_stage_uboot_fit_generator() {
     local uboot_workdir="$1"
-    local extension_dir generator_src generator_dst
+    local generator_src generator_dst
 
-    extension_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    generator_src="${extension_dir}/u-boot/make_fit_atf_optee.sh"
+    generator_src="$(rk_secure_uboot_fit_generator_path)" ||
+        exit_with_error "Secure U-Boot FIT generator missing" "$(rk_resolve_extension_dir "u-boot/fit-generator")/u-boot/fit-generator/make_fit_atf_optee.sh"
     generator_dst="${uboot_workdir}/arch/arm/mach-rockchip/make_fit_atf_optee.sh"
-
-    [[ -f "${generator_src}" ]] ||
-        exit_with_error "Secure U-Boot FIT generator missing" "${generator_src}"
 
     install -m 0755 "${generator_src}" "${generator_dst}" ||
         exit_with_error "Failed to stage U-Boot FIT generator" "${generator_dst}"
+}
+
+function rk_secure_boot_apply_config_fragment() {
+    local fragment="$1"
+
+    rk_apply_kconfig_fragment scripts/config "${fragment}" ||
+        exit_with_error "Failed to apply secure U-Boot config fragment" "${fragment}"
+    display_alert "secure-uboot" "Applied U-Boot config fragment: ${fragment}" "info"
 }
 
 function pre_config_uboot_target__rk_secure_boot_prepare() {
@@ -212,8 +179,8 @@ function pre_config_uboot_target__rk_secure_boot_prepare() {
 
     rkbin_root="$(rk_sdk_rkbin_root)"
     rkbin_dir="$(resolve_platform_rkbin_dir)"
-    echo "rkbin_root = ${rkbin_root}"
-    echo "rkbin_dir  = ${rkbin_dir}"
+    display_alert "secure-uboot" "rkbin root: ${rkbin_root}" "debug"
+    display_alert "secure-uboot" "platform rkbin: ${rkbin_dir:-<not found>}" "debug"
     rk_secure_boot_prepare_tee_bin "${uboot_workdir}"
 
     # Find rk_sign_tool executable (prefer PATH)
@@ -264,15 +231,15 @@ function post_config_uboot_target__rk_secure_boot_stage_fit_generator() {
         return 0
     fi
 
-    local generator_src generator_dst
-    generator_src="${SRC}/extensions/seeed_armbian_extension/rk_secure-disk-encryption/u-boot/make_fit_atf_optee.sh"
-    generator_dst="$(pwd)/arch/arm/mach-rockchip/make_fit_atf_optee.sh"
+    local fragment
 
-    [[ -f "${generator_src}" ]] ||
-        exit_with_error "Secure U-Boot FIT generator missing" "${generator_src}"
+    rk_secure_boot_stage_uboot_fit_generator "$(pwd)"
 
-    install -m 0755 "${generator_src}" "${generator_dst}" ||
-        exit_with_error "Failed to stage U-Boot FIT generator" "${generator_dst}"
+    if rk_full_secure_boot_enabled; then
+        fragment="$(rk_secure_uboot_config_fragment_path)" ||
+            exit_with_error "No secure U-Boot config fragment mapping found" "BOOT_SOC=${BOOT_SOC:-} BOARD_NAME=${BOARD_NAME:-${BOARD:-}}"
+        rk_secure_boot_apply_config_fragment "${fragment}"
+    fi
 }
 
 function extension_finish_config__rk_secure_bootconfig() {
@@ -280,24 +247,16 @@ function extension_finish_config__rk_secure_bootconfig() {
         return 0
     fi
 
-    local secure_bootconfig secure_defconfig its_template
-    secure_bootconfig="$(rk_secure_boot_secure_bootconfig)"
-    if [[ -z "${secure_bootconfig}" ]]; then
-        exit_with_error "No secure U-Boot defconfig mapping found" "BOOT_SOC=${BOOT_SOC} BOARD_NAME=${BOARD_NAME:-${BOARD:-}}"
-    fi
-
-    secure_defconfig="$(rk_secure_boot_secure_defconfig_path "${secure_bootconfig}")"
-    if [[ -z "${secure_defconfig}" ]]; then
-        exit_with_error "Secure U-Boot defconfig missing" "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/defconfig/${secure_bootconfig}"
-    fi
+    local fragment its_template
+    fragment="$(rk_secure_uboot_config_fragment_path)" ||
+        exit_with_error "Secure U-Boot config fragment missing" "BOOT_SOC=${BOOT_SOC:-} BOARD_NAME=${BOARD_NAME:-${BOARD:-}}"
 
     its_template="$(resolve_platform_its_template)"
     if [[ -z "${its_template}" ]]; then
-        exit_with_error "Secure kernel FIT ITS template missing" "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/fit-kernel"
+        exit_with_error "Secure kernel FIT ITS template missing" "$(rk_resolve_extension_dir "u-boot/fit-kernel")/u-boot/fit-kernel"
     fi
 
-    display_alert "secure-uboot" "Using secure U-Boot defconfig: ${secure_bootconfig}" "info"
-    declare -g BOOTCONFIG="${secure_bootconfig}"
+    display_alert "secure-uboot" "Using base U-Boot defconfig plus secure fragment: ${fragment}" "info"
 }
 
 function enable_optee_bootchain_bl32_fit_node() {
@@ -482,7 +441,7 @@ function rk_secure_boot_apply_fit_template() {
 
     its_template="$(resolve_platform_its_template)"
     if [[ ! -f "${its_template}" ]]; then
-        exit_with_error "FIT packaging failed: ITS template missing" "${SRC}/patch/u-boot/${BOOTPATCHDIR:-}/fit-kernel"
+        exit_with_error "FIT packaging failed: ITS template missing" "$(rk_resolve_extension_dir "u-boot/fit-kernel")/u-boot/fit-kernel"
     fi
     display_alert "fit-post-initrd" "Using ITS template: ${its_template}" "info"
 
@@ -727,22 +686,26 @@ function pre_package_kernel_image__create_resource_img() {
         exit_with_error "Missing resource_tool" "${resource_tool}"
 
     display_alert "Using resource_tool" "${resource_tool}" "debug"
-    
+
     # Create temporary work directory
     local temp_work_dir
     temp_work_dir="$(mktemp -d)" ||
         exit_with_error "Failed to create temporary resource.img work directory" "${TMPDIR:-/tmp}"
-    
+
     # Copy DTB file to work directory and inject bootargs before packing resource.img.
     # Rockchip vendor boot flows may pass the DTB from resource.img rather than the
     # FIT fdt image, so both copies must carry a valid root= argument.
-    local dtb_filename=$(basename "${dtb_path}")
-    cp "${dtb_path}" "${temp_work_dir}/${dtb_filename}"
+    local dtb_filename
+    dtb_filename="$(basename "${dtb_path}")"
+    cp "${dtb_path}" "${temp_work_dir}/${dtb_filename}" ||
+        exit_with_error "Failed to copy DTB for resource.img" "${dtb_path}"
     rk_secure_boot_patch_dtb_bootargs "${temp_work_dir}/${dtb_filename}" "$(rk_secure_boot_kernel_bootargs)"
 
     # Ensure output directory exists and is writable
-    local output_dir=$(dirname "${output_resource_img}")
-    mkdir -p "${output_dir}"
+    local output_dir
+    output_dir="$(dirname "${output_resource_img}")"
+    mkdir -p "${output_dir}" ||
+        exit_with_error "Failed to create resource.img output directory" "${output_dir}"
 
     # Use resource_tool to create resource.img
     (
@@ -770,15 +733,16 @@ function pre_package_kernel_image__create_resource_img() {
             return 1
         fi
     )
-    
+
     # Clean up temporary directory
     rm -rf "${temp_work_dir}"
-    
+
     # Verify generated resource.img
     if [[ -f "${output_resource_img}" && -s "${output_resource_img}" ]]; then
-        local img_size=$(stat -c %s "${output_resource_img}")
+        local img_size
+        img_size="$(stat -c %s "${output_resource_img}")"
         display_alert "Successfully created resource.img" "Size: ${img_size} bytes" "info"
-        
+
         # Optional: Display resource.img content
         "${resource_tool}" --print --image="${output_resource_img}" 2>/dev/null || true
     else

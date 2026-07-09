@@ -109,3 +109,80 @@ function rk_resolve_extension_dir() {
 
     echo "${script_dir}"
 }
+
+function rk_secure_uboot_fit_generator_path() {
+    local extension_dir candidate
+
+    extension_dir="$(rk_resolve_extension_dir "u-boot/fit-generator")"
+    candidate="${extension_dir}/u-boot/fit-generator/make_fit_atf_optee.sh"
+    [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+
+    return 1
+}
+
+function rk_secure_kernel_fit_template_path() {
+    local platform extension_dir candidate
+
+    platform="$(rk_detect_platform)"
+    [[ "${platform}" != "unknown" ]] || return 1
+
+    extension_dir="$(rk_resolve_extension_dir "u-boot/fit-kernel")"
+    candidate="${extension_dir}/u-boot/fit-kernel/${platform}_fit_kernel.its"
+    [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+
+    return 1
+}
+
+function rk_secure_uboot_config_fragment_path() {
+    local platform extension_dir candidate
+
+    platform="$(rk_detect_platform)"
+    [[ "${platform}" != "unknown" ]] || return 1
+
+    extension_dir="$(rk_resolve_extension_dir "u-boot/fragments")"
+    candidate="${extension_dir}/u-boot/fragments/${platform}-secure-autodecrypt.config"
+    [[ -f "${candidate}" ]] && { echo "${candidate}"; return 0; }
+
+    return 1
+}
+
+function rk_apply_kconfig_fragment() {
+    local config_tool="$1"
+    local fragment="$2"
+    shift 2
+
+    local line symbol value
+
+    [[ -f "${fragment}" ]] || exit_with_error "Kconfig fragment missing" "${fragment}"
+    [[ -x "${config_tool}" ]] || exit_with_error "scripts/config missing; cannot apply Kconfig fragment" "${config_tool}"
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ -n "${line}" ]] || continue
+
+        if [[ "${line}" =~ ^#\ (CONFIG_[A-Za-z0-9_]+)\ is\ not\ set$ ]]; then
+            rk_run_host_command "${config_tool}" "$@" --disable "${BASH_REMATCH[1]}" || return 1
+            continue
+        fi
+
+        [[ "${line}" =~ ^(CONFIG_[A-Za-z0-9_]+)=(.*)$ ]] || continue
+        symbol="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+
+        case "${value}" in
+            y)
+                rk_run_host_command "${config_tool}" "$@" --enable "${symbol}" || return 1
+                ;;
+            n)
+                rk_run_host_command "${config_tool}" "$@" --disable "${symbol}" || return 1
+                ;;
+            \"*\")
+                value="${value#\"}"
+                value="${value%\"}"
+                rk_run_host_command "${config_tool}" "$@" --set-str "${symbol}" "${value}" || return 1
+                ;;
+            *)
+                rk_run_host_command "${config_tool}" "$@" --set-val "${symbol}" "${value}" || return 1
+                ;;
+        esac
+    done < "${fragment}"
+}

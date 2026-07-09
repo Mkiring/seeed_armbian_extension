@@ -4,20 +4,13 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rk-common.sh"
 
-#
-# Mode And Path Helpers
-#
-
-function rk_autodecrypt_resolve_extension_dir() {
-    rk_resolve_extension_dir "auto-decryption-config"
-}
-
 function rk_autodecrypt_ensure_sdk_tools() {
     RK_AUTODECRYPT_SDK_TOOLS="$(rk_sdk_tools_root)"
     rk_ensure_sdk_tools "optee"
 }
 
 function rk_autodecrypt_ensure_pycryptodome() {
+    # rk_tee_user/v2 signs OP-TEE TAs with Python Crypto/Cryptodome helpers.
     if python3 - <<'PY' >/dev/null 2>&1
 import Crypto
 PY
@@ -49,40 +42,15 @@ function rk_autodecrypt_detect_vendor_board() {
     echo "unknown"
 }
 
-function rk_autodecrypt_copy_secure_boot_defconfig() {
-    local vendor_board="$1"
-    local target_defconfig="configs/${vendor_board}_defconfig"
-    local src_defconfig="configs/${vendor_board}-secure_defconfig"
-
-    [[ -f "${src_defconfig}" ]] || return 1
-    cp -f "${src_defconfig}" "${target_defconfig}" || return 1
-    display_alert "optee-autodecrypt" "Applied secure defconfig fallback: $(basename "${src_defconfig}") -> ${target_defconfig}" "info"
-}
-
-function rk_autodecrypt_disable_fit_signature_in_defconfig() {
+function rk_autodecrypt_apply_secure_fragment_to_defconfig() {
     local target_defconfig="$1"
-    local disable_list="${RK_AUTODECRYPT_DISABLE_CONFIGS:-CONFIG_FIT_SIGNATURE}"
-    local symbol
+    local fragment
 
     [[ -f "${target_defconfig}" ]] || return 1
 
-    for symbol in ${disable_list}; do
-        if [[ -x scripts/config ]]; then
-            rk_run_host_command scripts/config --file "${target_defconfig}" --set-val "${symbol}" n || return 1
-            continue
-        fi
-
-        # Fallback when scripts/config is unavailable in the current U-Boot tree.
-        if grep -q "^${symbol}=" "${target_defconfig}"; then
-            sed -i "s/^${symbol}=.*/${symbol}=n/" "${target_defconfig}" || return 1
-        elif grep -q "^# ${symbol} is not set" "${target_defconfig}"; then
-            :
-        else
-            printf "%s=n\n" "${symbol}" >> "${target_defconfig}" || return 1
-        fi
-    done
-
-    display_alert "optee-autodecrypt" "Disabled configs in ${target_defconfig}: ${disable_list}" "info"
+    fragment="$(rk_secure_uboot_config_fragment_path)" || return 1
+    rk_apply_kconfig_fragment scripts/config "${fragment}" --file "${target_defconfig}" || return 1
+    display_alert "optee-autodecrypt" "Applied secure config fragment to ${target_defconfig}: ${fragment}" "info"
 }
 
 function rk_autodecrypt_prepare_defconfig_for_current_tree() {
@@ -90,10 +58,8 @@ function rk_autodecrypt_prepare_defconfig_for_current_tree() {
     vendor_board="$(rk_autodecrypt_detect_vendor_board)"
     target_defconfig="configs/${vendor_board}_defconfig"
 
-    rk_autodecrypt_copy_secure_boot_defconfig "${vendor_board}" ||
-        exit_with_error "auto-decrypt secure defconfig copy failed" "vendor_board=${vendor_board} source=configs/${vendor_board}-secure_defconfig"
-    rk_autodecrypt_disable_fit_signature_in_defconfig "${target_defconfig}" ||
-        exit_with_error "failed to disable CONFIG_FIT_SIGNATURE" "${target_defconfig}"
+    rk_autodecrypt_apply_secure_fragment_to_defconfig "${target_defconfig}" ||
+        exit_with_error "auto-decrypt secure config fragment apply failed" "vendor_board=${vendor_board} target=${target_defconfig}"
 }
 
 function rk_autodecrypt_install_patch_uboot_target_wrapper() {
@@ -186,22 +152,25 @@ function rk_autodecrypt_install_initramfs_file() {
     local dst="$2"
     local label="$3"
 
-    mkdir -p "$(dirname "${dst}")" ||
-        exit_with_error "Failed to create initramfs directory" "$(dirname "${dst}")"
+    local dst_dir
+    dst_dir="$(dirname "${dst}")"
+
+    mkdir -p "${dst_dir}" ||
+        exit_with_error "Failed to create initramfs directory" "${dst_dir}"
 
     [[ -f "${src}" ]] || exit_with_error "${label} source file not found" "${src}"
     cp "${src}" "${dst}" || {
         display_alert "optee" "Failed to copy ${label}" "err"
         return 1
     }
-    chmod +x "${dst}"
+    chmod +x "${dst}" || return 1
     display_alert "optee" "${label} installation completed" "info"
 }
 
 function rk_autodecrypt_install_initramfs_hooks() {
     local root_dir="$1"
     local extension_dir
-    extension_dir="$(rk_autodecrypt_resolve_extension_dir)"
+    extension_dir="$(rk_resolve_extension_dir "auto-decryption-config")"
 
     display_alert "optee" "Installing install-optee initramfs hook" "info"
     rk_autodecrypt_install_initramfs_file \
@@ -229,10 +198,13 @@ function rk_secure_storage_format_partition() {
 
     display_alert "secure-storage" "mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} on security (${sec_dev})" "info"
     if command -v mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} >/dev/null 2>&1; then
-        mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} -q "${sec_dev}" ||
+        mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} -q "${sec_dev}" || {
             display_alert "secure-storage" "security mkfs failed" "err"
+            return 1
+        }
     else
         display_alert "secure-storage" "mkfs.${SECURE_STORAGE_SECURITY_FS_TYPE} not found" "err"
+        return 1
     fi
 }
 
@@ -306,7 +278,7 @@ function pre_prepare_partitions__secure_storage_partitions() {
     USE_HOOK_FOR_PARTITION="yes"
     SECURE_STORAGE_SECURITY_SIZE=${SECURE_STORAGE_SECURITY_SIZE:-4}
     SECURE_STORAGE_SECURITY_FS_TYPE=${SECURE_STORAGE_SECURITY_FS_TYPE:-none}
-    display_alert "secure-storage" " security(${SECURE_STORAGE_SECURITY_SIZE}MiB) partitions" "info"
+    display_alert "secure-storage" "security(${SECURE_STORAGE_SECURITY_SIZE}MiB) partitions" "info"
 }
 
 function create_partition_table__secure_storage() {
@@ -319,7 +291,7 @@ function create_partition_table__secure_storage() {
         return 0
     fi
 
-    local next=${OFFSET}
+    local next="${OFFSET}"
     local p_index=1
     local script="label: ${IMAGE_PARTITION_TABLE:-gpt}\n"
     if [[ "${IMAGE_PARTITION_TABLE:-gpt}" == "gpt" ]]; then
@@ -361,7 +333,7 @@ function create_partition_table__secure_storage() {
     rootpart=${p_index}
 
     display_alert "secure-storage" "Custom partition table:\n${script}" "debug"
-    echo -e "${script}" | run_host_command_logged sfdisk "${SDCARD}.raw" ||
+    printf "%b" "${script}" | run_host_command_logged sfdisk "${SDCARD}.raw" ||
         exit_with_error "secure-storage partition creation failed" "sfdisk"
 
     SECURE_STORAGE_SECURITY_PART_INDEX=${security_part_index}
@@ -401,6 +373,6 @@ function format_partitions__secure_storage() {
     [[ -b "${sec_dev}" ]] ||
         exit_with_error "secure-storage verification failed: security partition device missing after loop setup" "${sec_dev}"
 
-    rk_secure_storage_format_partition "${sec_dev}"
-    rk_secure_storage_write_passphrase "${sec_dev}"
+    rk_secure_storage_format_partition "${sec_dev}" || return 1
+    rk_secure_storage_write_passphrase "${sec_dev}" || return 1
 }

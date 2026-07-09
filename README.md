@@ -13,16 +13,14 @@ This repository contains Armbian extensions focused on:
 - `armbian-ota/`: OTA packaging and runtime tools
 - `rk_secure-disk-encryption/`: encryption, auto-decryption, and secure boot image hooks
 
-U-Boot secure defconfigs, the ATF + OP-TEE FIT generator, and kernel FIT ITS templates are maintained in the Armbian build tree:
+U-Boot board defconfigs are maintained in the Armbian build tree:
 
 ```text
 /home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/
-├── defconfig/*-secure_defconfig
-├── arch/arm/mach-rockchip/make_fit_atf_optee.sh
-└── fit-kernel/*_fit_kernel.its
+└── defconfig/*_defconfig
 ```
 
-This keeps board bootloader changes in the normal Armbian U-Boot patch flow. The extension selects and stages those assets during secure builds, but does not carry its own copied `secure-boot-config/` tree.
+This keeps board bootloader changes in the normal Armbian U-Boot patch flow. Secure boot specific U-Boot config fragments, kernel FIT ITS templates, and the ATF + OP-TEE FIT generator live in this extension under `rk_secure-disk-encryption/u-boot/`.
 
 ## Feature Matrix
 
@@ -111,21 +109,35 @@ CRYPTROOT_PASSPHRASE='your-64-char-passphrase' \
 
 ## Secure Boot Extension Layout
 
+Secure boot assets are extension-owned:
+
+```text
+rk_secure-disk-encryption/u-boot/
+├── fit-generator/make_fit_atf_optee.sh
+├── fit-kernel/rk3576_fit_kernel.its
+├── fit-kernel/rk3588_fit_kernel.its
+├── fragments/rk3576-secure-autodecrypt.config
+└── fragments/rk3588-secure-autodecrypt.config
+```
+
+`rk_secure-disk-encryption/rk-common.sh` provides shared platform detection, extension asset path resolution, and Kconfig fragment application helpers.
+
 `rk_secure-disk-encryption/rk-secure-boot.sh` is organized by related responsibilities:
 
 1. Source fetching and mode predicates.
-2. Platform, board, DTB, rkbin, secure `BOOTCONFIG`, and ITS template resolution.
-3. U-Boot preparation hooks for FIT keys, secure `BOOTCONFIG`, OP-TEE BL32 FIT nodes, and produced `u-boot.itb` validation.
+2. Platform, board, DTB, rkbin, secure U-Boot config fragment, and ITS template resolution.
+3. U-Boot preparation hooks for FIT keys, secure config fragment application, OP-TEE BL32 FIT nodes, and produced `u-boot.itb` validation.
 4. FIT image helpers for kernel bootargs, DTB bootargs injection, and `/boot` fstab cleanup.
 5. Armbian partition, build, packaging, and final image hooks.
 
-Supported platform detection currently targets RK3576 and RK3588 boards. Secure U-Boot uses `*-secure_defconfig`, the ATF+OP-TEE FIT generator, and kernel FIT ITS templates from the Armbian U-Boot patch overlay.
+Supported platform detection currently targets RK3576 and RK3588 boards. Secure U-Boot uses the board's normal Armbian defconfig plus a platform-specific fragment from `rk_secure-disk-encryption/u-boot/fragments/`, the ATF+OP-TEE FIT generator from `rk_secure-disk-encryption/u-boot/fit-generator/`, and kernel FIT ITS templates from `rk_secure-disk-encryption/u-boot/fit-kernel/`.
 
 Secure build responsibility is split as follows:
 
-- Armbian build U-Boot patch overlay: secure defconfig, `make_fit_atf_optee.sh`, FIT kernel ITS templates, and U-Boot patch application.
-- `rk-secure-boot.sh`: switches `BOOTCONFIG` to the secure defconfig, stages BL32 as `tee.bin`, validates the produced `u-boot.itb`, injects encrypted-root bootargs, and rebuilds the final kernel FIT after initramfs generation.
-- `rk-auto-decryption-disk.sh`: prepares the runtime auto-decrypt path for encrypted rootfs.
+- Armbian build U-Boot patch overlay: board defconfigs and U-Boot patch application.
+- `rk-common.sh`: resolves extension-owned secure U-Boot assets and applies Kconfig fragments through `scripts/config`.
+- `rk-secure-boot.sh`: applies the secure U-Boot config fragment, stages BL32 as `tee.bin`, stages `make_fit_atf_optee.sh`, validates the produced `u-boot.itb`, injects encrypted-root bootargs, and rebuilds the final kernel FIT after initramfs generation.
+- `rk-auto-decryption-disk.sh`: prepares the runtime auto-decrypt path for encrypted rootfs, builds and installs the OP-TEE keybox user app and TA, and installs initramfs unlock hooks.
 - `armbian-ota/ota-support.sh`: creates recovery or A/B OTA payloads from the final image rootfs/boot content.
 
 ## OTA Runtime Usage
@@ -169,19 +181,26 @@ seeed_armbian_extension/
 ├── armbian-ota/
 │   ├── ota-support.sh                        # OTA build and packaging logic
 │   ├── runtime/                              # Unified armbian-ota CLI and backends
-│   ├── recovery_ota/                         # Recovery OTA (initramfs apply)
-│   └── ab_ota/                               # A/B OTA userspace/systemd
+│   ├── recovery/                             # Recovery OTA backend
+│   └── ab/                                   # A/B OTA userspace/systemd
 └── rk_secure-disk-encryption/
+    ├── rk-common.sh                          # Shared RK helpers and secure asset resolution
     ├── rk-auto-decryption-disk.sh            # Auto-decryption workflow
     ├── rk-secure-boot.sh                     # Secure U-Boot / OP-TEE bootchain hooks
-    └── auto-decryption-config/               # initramfs hook and decrypt scripts
+    ├── auto-decryption-config/               # initramfs hook and decrypt scripts
+    └── u-boot/
+        ├── fit-generator/                    # ATF + OP-TEE U-Boot FIT generator
+        ├── fit-kernel/                       # Final kernel FIT ITS templates
+        └── fragments/                        # Platform secure U-Boot Kconfig fragments
 ```
 
 ## Development Convention
 
 - Keep `seeed_armbian_extension.sh` focused on flag checks and `enable_extension` dispatching.
 - Put feature implementation in sub-extension scripts (for example `rk-auto-decryption-disk.sh`, `ota-support.sh`).
-- Keep U-Boot source patches, secure defconfigs, FIT generators, and ITS templates in `/home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/`.
+- Keep board U-Boot source patches and base defconfigs in `/home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/`.
+- Keep secure boot fragments, kernel FIT ITS templates, and extension-owned FIT generator files in `rk_secure-disk-encryption/u-boot/`.
+- Keep shared Rockchip helpers in `rk-common.sh`; avoid duplicating extension path resolution in feature scripts.
 - Keep `rk-secure-boot.sh` focused on Armbian hooks, board/platform selection, artifact staging, validation, and final image integration.
 
 ## Related Document
