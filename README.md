@@ -120,24 +120,25 @@ rk_secure-disk-encryption/u-boot/
 └── fragments/rk3588-secure-autodecrypt.config
 ```
 
-`rk_secure-disk-encryption/rk-common.sh` provides shared platform detection, extension asset path resolution, and Kconfig fragment application helpers.
+Build hook helper implementation is split into four files under `rk_secure-disk-encryption/build-hooks/`:
 
-`rk_secure-disk-encryption/rk-secure-boot.sh` is organized by related responsibilities:
+- `common.sh`: host command wrapper, SDK tool fetch/path helpers, mode predicates, platform detection, extension asset resolution, and Kconfig fragment application.
+- `auto-decryption.sh`: non-secure OP-TEE bootchain defconfig preparation, OP-TEE client/keybox installation, initramfs hook installation, and secure-storage partition handling.
+- `secure-boot-uboot.sh`: platform/rkbin/BL32 resolution, U-Boot FIT generator staging, secure config fragment application, FIT key preparation, and produced `u-boot.itb` validation.
+- `secure-boot-image.sh`: kernel FIT bootargs, DTB bootargs injection, raw boot partition handling, resource image creation, final FIT packaging, and raw boot partition flashing.
 
-1. Source fetching and mode predicates.
-2. Platform, board, DTB, rkbin, secure U-Boot config fragment, and ITS template resolution.
-3. U-Boot preparation hooks for FIT keys, secure config fragment application, OP-TEE BL32 FIT nodes, and produced `u-boot.itb` validation.
-4. FIT image helpers for kernel bootargs, DTB bootargs injection, and `/boot` fstab cleanup.
-5. Armbian partition, build, packaging, and final image hooks.
+`rk_secure-disk-encryption/rk-secure-boot.sh` is the secure boot extension entry and contains Armbian hook wrappers. It loads `build-hooks/common.sh`, `build-hooks/secure-boot-uboot.sh`, and `build-hooks/secure-boot-image.sh`.
+
+`rk_secure-disk-encryption/rk-auto-decryption-disk.sh` is the auto-decryption extension entry and contains Armbian hook wrappers. It loads `build-hooks/common.sh` and `build-hooks/auto-decryption.sh`.
 
 Supported platform detection currently targets RK3576 and RK3588 boards. Secure U-Boot uses the board's normal Armbian defconfig plus a platform-specific fragment from `rk_secure-disk-encryption/u-boot/fragments/`, the ATF+OP-TEE FIT generator from `rk_secure-disk-encryption/u-boot/fit-generator/`, and kernel FIT ITS templates from `rk_secure-disk-encryption/u-boot/fit-kernel/`.
 
 Secure build responsibility is split as follows:
 
 - Armbian build U-Boot patch overlay: board defconfigs and U-Boot patch application.
-- `rk-common.sh`: resolves extension-owned secure U-Boot assets and applies Kconfig fragments through `scripts/config`.
-- `rk-secure-boot.sh`: applies the secure U-Boot config fragment, stages BL32 as `tee.bin`, stages `make_fit_atf_optee.sh`, validates the produced `u-boot.itb`, injects encrypted-root bootargs, and rebuilds the final kernel FIT after initramfs generation.
-- `rk-auto-decryption-disk.sh`: prepares the runtime auto-decrypt path for encrypted rootfs, builds and installs the OP-TEE keybox user app and TA, and installs initramfs unlock hooks.
+- `build-hooks/common.sh`: shared helpers used by RK extension entries.
+- `rk-secure-boot.sh`: secure boot extension entry; exposes Armbian hooks and loads implementation from `build-hooks/secure-boot-uboot.sh` and `build-hooks/secure-boot-image.sh`.
+- `rk-auto-decryption-disk.sh`: auto-decryption extension entry; exposes Armbian hooks and loads implementation from `build-hooks/auto-decryption.sh`.
 - `armbian-ota/ota-support.sh`: Armbian extension entry point for OTA build hooks; implementation lives in `armbian-ota/build-hooks/`.
 
 ## OTA Runtime Usage
@@ -185,11 +186,14 @@ seeed_armbian_extension/
 │   ├── recovery/                             # Recovery OTA backend
 │   └── ab/                                   # A/B OTA userspace/systemd
 └── rk_secure-disk-encryption/
-    ├── rk-common.sh                          # Shared RK helpers and secure asset resolution
-    ├── rk-auto-decryption-disk.sh            # Auto-decryption workflow
-    ├── rk-secure-boot.sh                     # Secure U-Boot / OP-TEE bootchain hooks
-    ├── auto-decryption-config/               # initramfs hook and decrypt scripts
-    ├── secure-boot/                          # Secure boot implementation modules
+    ├── rk-auto-decryption-disk.sh            # Auto-decryption extension entry
+    ├── rk-secure-boot.sh                     # Secure U-Boot / OP-TEE bootchain extension entry
+    ├── build-hooks/                          # RK build hook implementation modules
+    │   ├── auto-decryption.sh
+    │   ├── common.sh
+    │   ├── secure-boot-image.sh
+    │   └── secure-boot-uboot.sh
+    ├── initramfs/                            # initramfs hook and decrypt scripts
     └── u-boot/
         ├── fit-generator/                    # ATF + OP-TEE U-Boot FIT generator
         ├── fit-kernel/                       # Final kernel FIT ITS templates
@@ -199,11 +203,12 @@ seeed_armbian_extension/
 ## Development Convention
 
 - Keep `seeed_armbian_extension.sh` focused on flag checks and `enable_extension` dispatching.
-- Put feature implementation in sub-extension scripts or focused build hook files (for example `rk-auto-decryption-disk.sh`, `armbian-ota/build-hooks/*.sh`).
+- Keep Armbian extension entry scripts at the feature directory root; put RK build hook implementation in `rk_secure-disk-encryption/build-hooks/*.sh`.
 - Keep board U-Boot source patches and base defconfigs in `/home/mingzq/armbian/build/patch/u-boot/legacy/u-boot-radxa-rk35xx/`.
 - Keep secure boot fragments, kernel FIT ITS templates, and extension-owned FIT generator files in `rk_secure-disk-encryption/u-boot/`.
-- Keep shared Rockchip helpers in `rk-common.sh`; avoid duplicating extension path resolution in feature scripts.
-- Keep `rk-secure-boot.sh` focused on Armbian hook wrappers; put secure boot implementation modules in `rk_secure-disk-encryption/secure-boot/`.
+- Keep shared helper implementation in `rk_secure-disk-encryption/build-hooks/common.sh`.
+- Keep `rk-secure-boot.sh` focused on Armbian hook wrappers; put secure boot implementation in `secure-boot-uboot.sh` and `secure-boot-image.sh`.
+- Keep `rk-auto-decryption-disk.sh` focused on Armbian hook wrappers; put auto-decryption implementation in `auto-decryption.sh`.
 
 ## Related Document
 

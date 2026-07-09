@@ -1,7 +1,4 @@
-#
-# Shared Rockchip secure boot / auto decryption helpers
-#
-
+# Common RK build hook helpers
 function rk_run_host_command() {
     if [[ "$(type -t run_host_command_logged || true)" == "function" ]]; then
         run_host_command_logged "$@"
@@ -9,7 +6,6 @@ function rk_run_host_command() {
         "$@"
     fi
 }
-
 function rk_fetch_sdk_tools() {
     local sdk_tools_url="${RKSDK_TOOLS_GIT_URL:-${RKBIN_GIT_URL:-"https://github.com/Seeed-Studio/rockchip_sdk_tools.git"}}"
 
@@ -34,7 +30,6 @@ function rk_ensure_sdk_tools() {
         rk_fetch_sdk_tools
     fi
 }
-
 function rk_full_secure_boot_enabled() {
     [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]]
 }
@@ -55,7 +50,6 @@ function rk_autodecrypt_fit_boot_required() {
     rk_full_secure_boot_enabled ||
         { rk_autodecrypt_enabled && [[ "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; }
 }
-
 function rk_platform_from_name() {
     local name
     name="$(echo "$*" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
@@ -91,11 +85,10 @@ function rk_detect_platform() {
 function rk_detect_vendor_board() {
     rk_default_vendor_board "$(rk_detect_platform)"
 }
-
 function rk_resolve_extension_dir() {
     local required_subdir="$1"
     local script_dir candidate
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
     for candidate in \
         "${script_dir}" \
@@ -145,7 +138,6 @@ function rk_secure_uboot_config_fragment_path() {
 
     return 1
 }
-
 function rk_apply_kconfig_fragment() {
     local config_tool="$1"
     local fragment="$2"

@@ -21,7 +21,7 @@ if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes"
 	if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]]; then
 		display_alert "Secure U-Boot" "Enable Secure Boot Extensions" "info"
 	else
-		display_alert "OP-TEE bootchain" "Enable rk-secure-boot extension in OP-TEE bootchain mode" "info"
+		display_alert "OP-TEE bootchain" "Enable secure boot build hooks in OP-TEE bootchain mode" "info"
 	fi
 	enable_extension "seeed_armbian_extension/rk_secure-disk-encryption/rk-secure-boot"
 fi
