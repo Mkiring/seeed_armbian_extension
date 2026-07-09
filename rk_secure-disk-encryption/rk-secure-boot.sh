@@ -169,6 +169,21 @@ function resolve_kernel_dtb_path() {
 # U-Boot Build Helpers
 #
 
+function rk_secure_boot_stage_uboot_fit_generator() {
+    local uboot_workdir="$1"
+    local extension_dir generator_src generator_dst
+
+    extension_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    generator_src="${extension_dir}/u-boot/make_fit_atf_optee.sh"
+    generator_dst="${uboot_workdir}/arch/arm/mach-rockchip/make_fit_atf_optee.sh"
+
+    [[ -f "${generator_src}" ]] ||
+        exit_with_error "Secure U-Boot FIT generator missing" "${generator_src}"
+
+    install -m 0755 "${generator_src}" "${generator_dst}" ||
+        exit_with_error "Failed to stage U-Boot FIT generator" "${generator_dst}"
+}
+
 function pre_config_uboot_target__rk_secure_boot_prepare() {
     # Goal: Generate keys required for FIT signing before U-Boot configuration, plus an optional system encryption key.
     if ! rk_optee_bootchain_enabled; then
@@ -192,6 +207,8 @@ function pre_config_uboot_target__rk_secure_boot_prepare() {
         uboot_workdir="${UBOOT_DIR}"
         keys_dir="${UBOOT_DIR}/keys"
     fi
+
+    rk_secure_boot_stage_uboot_fit_generator "${uboot_workdir}"
 
     rkbin_root="$(rk_sdk_rkbin_root)"
     rkbin_dir="$(resolve_platform_rkbin_dir)"
@@ -240,6 +257,22 @@ function pre_config_uboot_target__rk_secure_boot_prepare() {
     # Export path for later stages/packaging
     export UBOOT_FIT_KEYS_DIR="${keys_dir}"
     display_alert "secure-uboot" "FIT keys generated: ${UBOOT_FIT_KEYS_DIR}" "info"
+}
+
+function post_config_uboot_target__rk_secure_boot_stage_fit_generator() {
+    if [[ "${RK_SECURE_UBOOT_ENABLE:-no}" != "yes" && "${RK_OPTEE_BOOT_ENABLE:-no}" != "yes" ]]; then
+        return 0
+    fi
+
+    local generator_src generator_dst
+    generator_src="${SRC}/extensions/seeed_armbian_extension/rk_secure-disk-encryption/u-boot/make_fit_atf_optee.sh"
+    generator_dst="$(pwd)/arch/arm/mach-rockchip/make_fit_atf_optee.sh"
+
+    [[ -f "${generator_src}" ]] ||
+        exit_with_error "Secure U-Boot FIT generator missing" "${generator_src}"
+
+    install -m 0755 "${generator_src}" "${generator_dst}" ||
+        exit_with_error "Failed to stage U-Boot FIT generator" "${generator_dst}"
 }
 
 function extension_finish_config__rk_secure_bootconfig() {
