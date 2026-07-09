@@ -384,6 +384,29 @@ function rk_secure_boot_find_ramdisk() {
     fi
 }
 
+function rk_secure_boot_find_kernel_image() {
+    local boot_dir="$1"
+    local ramdisk_path="$2"
+    local kernel_version=""
+    local kernel_path=""
+
+    case "$(basename "${ramdisk_path}")" in
+        initrd.img-*) kernel_version="$(basename "${ramdisk_path}" | sed 's/^initrd\.img-//')" ;;
+    esac
+
+    if [[ -n "${kernel_version}" && -f "${boot_dir}/vmlinuz-${kernel_version}" ]]; then
+        kernel_path="${boot_dir}/vmlinuz-${kernel_version}"
+    elif compgen -G "${boot_dir}/vmlinuz-"* > /dev/null; then
+        kernel_path="$(ls -1t ${boot_dir}/vmlinuz-* | head -1)"
+    fi
+
+    [[ -n "${kernel_path}" && -f "${kernel_path}" ]] ||
+        exit_with_error "FIT packaging failed: installed kernel image missing" "${boot_dir}/vmlinuz-*"
+
+    RK_SECURE_BOOT_KERNEL_IMAGE_PATH="${kernel_path}"
+    display_alert "fit-post-initrd" "Using installed kernel image: ${RK_SECURE_BOOT_KERNEL_IMAGE_PATH}" "info"
+}
+
 function rk_secure_boot_resolve_mkimage() {
     local rkbin_dir
 
@@ -738,7 +761,7 @@ function pre_umount_final_image__package_fit() {
 
     local boot_dir="${MOUNT}/boot"  # Use real /boot from mount point
     local kernel_src="${SRC}/cache/sources/${LINUXSOURCEDIR}"
-    local kernel_img_path="${kernel_src}/arch/arm64/boot/Image"
+    local kernel_img_path
     local resource_path="${kernel_src}/resource.img"
     local fit_work="${TMPDIR:-/tmp}/fit-final-$$"
     local dtb_path
@@ -747,6 +770,8 @@ function pre_umount_final_image__package_fit() {
     [[ -d "${boot_dir}" ]] || exit_with_error "FIT packaging failed: /boot does not exist" "${boot_dir}"
 
     rk_secure_boot_find_ramdisk "${boot_dir}"
+    rk_secure_boot_find_kernel_image "${boot_dir}" "${RK_SECURE_BOOT_RAMDISK_PATH}"
+    kernel_img_path="${RK_SECURE_BOOT_KERNEL_IMAGE_PATH}"
 
     dtb_path="$(resolve_kernel_dtb_path "${kernel_src}")"
     display_alert "fit-post-initrd" "Embedding DTB into FIT: ${dtb_path} (name=$(basename "${dtb_path}" 2>/dev/null || echo unknown))" "info"
