@@ -152,27 +152,36 @@ function rk_secure_boot_resolve_uboot_dir() {
 function rk_secure_boot_run_secondary_fit_signing() {
     local fit_work="$1"
     local uboot_dir="$2"
+    local fit_padding="0x1000"
 
     rm -f "${uboot_dir}/fit/boot.itb" "${uboot_dir}/boot-final.img" 2>/dev/null || true
 
-    if [[ -x "${uboot_dir}/scripts/fit.sh" ]]; then
-        display_alert "fit-post-initrd" "Executing secondary signing script fit.sh" "info"
-        (
-            cd "${uboot_dir}" || exit 1
-            cp "${fit_work}/boot-final.img" .
-            ./scripts/fit.sh --boot_img "${fit_work}/boot-final.img" || exit 1
-        ) || {
-            if rk_full_secure_boot_enabled; then
-                exit_with_error "FIT signing failed: fit.sh execution failed" "${uboot_dir}/scripts/fit.sh"
-            fi
-            display_alert "fit-post-initrd" "fit.sh execution failed, using unsigned fallback image" "warn"
-        }
-    else
+    if [[ ! -x "${uboot_dir}/tools/mkimage" ]]; then
         if rk_full_secure_boot_enabled; then
-            exit_with_error "FIT signing failed: fit.sh missing" "${uboot_dir}/scripts/fit.sh"
+            exit_with_error "FIT signing failed: mkimage missing" "${uboot_dir}/tools/mkimage"
         fi
-        display_alert "fit-post-initrd" "fit.sh not found, using boot-final.img as fallback" "warn"
+        display_alert "fit-post-initrd" "mkimage not found, using unsigned fallback image" "warn"
+        return 0
     fi
+
+    if grep -q '^CONFIG_FIT_ENABLE_RSA4096_SUPPORT=y' "${uboot_dir}/.config" 2>/dev/null; then
+        fit_padding="0x1200"
+    fi
+
+    display_alert "fit-post-initrd" "Signing final FIT from boot-final.its" "info"
+    (
+        cd "${uboot_dir}" || exit 1
+        mkdir -p fit
+        ./tools/mkimage -f "${fit_work}/boot-final.its" -k keys/ -K u-boot.dtb -E -p "${fit_padding}" -r fit/boot.itb || exit 1
+        if [[ -x ./tools/fit_check_sign ]]; then
+            ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
+        fi
+    ) || {
+        if rk_full_secure_boot_enabled; then
+            exit_with_error "FIT signing failed: mkimage signing failed" "${fit_work}/boot-final.its"
+        fi
+        display_alert "fit-post-initrd" "FIT signing failed, using unsigned fallback image" "warn"
+    }
 }
 
 function rk_secure_boot_stage_final_fit() {
