@@ -12,27 +12,7 @@ recovery_hook_status() {
 }
 
 recovery_require_tools() {
-    ota_require_runtime tar sha256sum update-initramfs mount umount sed grep awk
-}
-
-recovery_install_initramfs_hooks() {
-    local asset_dir copy_tools_src ota_apply_src kver
-
-    asset_dir="$(installed_recovery_asset_dir)"
-    copy_tools_src="${asset_dir}/initramfs_hooks/99-copy-tools"
-    ota_apply_src="${asset_dir}/initramfs_hooks/99-ota-apply"
-
-    [ -f "${copy_tools_src}" ] || error_exit "Missing recovery hook template: ${copy_tools_src}"
-    [ -f "${ota_apply_src}" ] || error_exit "Missing recovery apply template: ${ota_apply_src}"
-
-    mkdir -p /etc/initramfs-tools/hooks /etc/initramfs-tools/scripts/init-premount
-    cp "${copy_tools_src}" "${RECOVERY_COPY_TOOLS_HOOK}" || error_exit "Failed to install 99-copy-tools"
-    cp "${ota_apply_src}" "${RECOVERY_OTA_APPLY_HOOK}" || error_exit "Failed to install 99-ota-apply"
-    chmod 755 "${RECOVERY_COPY_TOOLS_HOOK}" "${RECOVERY_OTA_APPLY_HOOK}"
-
-    kver="$(detect_kver)"
-    log_info "Rebuilding initramfs for kernel ${kver}"
-    update-initramfs -u -k "${kver}" || error_exit "Failed to rebuild initramfs"
+    ota_require_runtime tar sha256sum mount umount sed grep awk
 }
 
 recovery_verify_payload() {
@@ -57,7 +37,6 @@ recovery_start_ota() {
 
     extract_ota_package "${package_path}" "${OTA_WORK_DIR}"
     recovery_verify_payload
-    recovery_install_initramfs_hooks
     recovery_mark_prepared "${package_path}"
 
     log_info "Recovery OTA prepared successfully"

@@ -262,31 +262,6 @@ verify_payload_archives() {
     fi
 }
 
-detect_kver() {
-    local files newest base
-    files=(/boot/initrd.img-*)
-
-    if [ ! -e "${files[0]}" ]; then
-        error_exit "No initrd.img-* found under /boot"
-    fi
-
-    if [ "${#files[@]}" -eq 1 ]; then
-        base="$(basename "${files[0]}")"
-        echo "${base#initrd.img-}"
-        return 0
-    fi
-
-    if [ -f "/boot/initrd.img-$(uname -r)" ]; then
-        echo "$(uname -r)"
-        return 0
-    fi
-
-    newest="$(ls -1t /boot/initrd.img-* 2>/dev/null | head -n1 || true)"
-    [ -n "${newest}" ] || error_exit "Failed to determine kernel version"
-    base="$(basename "${newest}")"
-    echo "${base#initrd.img-}"
-}
-
 extract_ota_package() {
     local package_path="$1"
     local dest_dir="$2"
@@ -298,16 +273,4 @@ extract_ota_package() {
 
 runtime_dir() {
     echo "${OTA_RUNTIME_DIR}"
-}
-
-installed_recovery_asset_dir() {
-    local dir
-    dir="$(runtime_dir)"
-    if [ -d "${dir}/recovery" ]; then
-        echo "${dir}/recovery"
-    elif [ -n "${OTA_SOURCE_ROOT:-}" ] && [ -d "${OTA_SOURCE_ROOT}/recovery" ]; then
-        echo "${OTA_SOURCE_ROOT}/recovery"
-    else
-        echo "${dir}/../recovery"
-    fi
 }

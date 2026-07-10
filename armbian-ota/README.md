@@ -268,6 +268,7 @@ fw_setenv ota_in_progress 0
 ### Build Hook Entry Points
 
 In `ota-support.sh` and `build-hooks/*.sh`:
+- Recovery initramfs hook installation: `pre_update_initramfs__*`
 - Runtime/assets installation: `pre_umount_final_image__89x_*`
 - OTA package creation: `pre_umount_final_image__901_*`
 - U-Boot env tool build: `pre_package_uboot_image__*`

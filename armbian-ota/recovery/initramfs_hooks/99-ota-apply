@@ -132,6 +132,7 @@ STATE_FILE="${STATE_DIR}/ota-state.env"
 OTA_DIR="${ROOT_MNT}/ota_work"
 ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
 BOOT_TAR="${OTA_DIR}/boot.tar.gz"
+BOOT_ITB="${OTA_DIR}/boot.itb"
 PRESERVE_LIST="${ROOT_MNT}/etc/armbian-ota/preserve-list.txt"
 PRESERVE_TAR="${OTA_DIR}/ota-preserve.tar"
 PRESERVE_TMP_LIST="${LOGDIR}/ota-preserve.list"
@@ -162,6 +163,91 @@ get_luks_uuid_for_root() {
     blkid -t TYPE=crypto_LUKS -s UUID -o value 2>/dev/null | head -n1
 }
 
+get_partname_for_dev() {
+    dev="$1"
+    base="$(basename "${dev}")"
+    uevent="/sys/class/block/${base}/uevent"
+
+    [ -f "${uevent}" ] || return 1
+    sed -n 's/^PARTNAME=//p' "${uevent}" | head -n1
+}
+
+find_raw_boot_dev() {
+    for uevent in /sys/class/block/*/uevent; do
+        [ -f "${uevent}" ] || continue
+        devname="$(sed -n 's/^DEVNAME=//p' "${uevent}" | head -n1)"
+        partname="$(sed -n 's/^PARTNAME=//p' "${uevent}" | head -n1)"
+        [ -n "${devname}" ] || continue
+        [ "${partname}" = "boot" ] || continue
+        printf '/dev/%s\n' "${devname}"
+        return 0
+    done
+    return 1
+}
+
+blockdev_size_bytes() {
+    dev="$1"
+    base="$(basename "${dev}")"
+    sectors_file="/sys/class/block/${base}/size"
+
+    [ -f "${sectors_file}" ] || return 1
+    sectors="$(cat "${sectors_file}" 2>/dev/null)"
+    [ -n "${sectors}" ] || return 1
+    echo $((sectors * 512))
+}
+
+file_size_bytes() {
+    file="$1"
+
+    wc -c < "${file}" 2>/dev/null | awk '{print $1}'
+}
+
+is_fit_image() {
+    file="$1"
+
+    magic="$(dd if="${file}" bs=4 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    [ "${magic}" = "d00dfeed" ]
+}
+
+write_raw_boot_itb() {
+    image="$1"
+    target="$2"
+
+    [ -f "${image}" ] || return 0
+    [ -b "${target}" ] || {
+        log "ERROR: boot.itb target is not a block device: ${target}"
+        return 1
+    }
+
+    partname="$(get_partname_for_dev "${target}" || true)"
+    [ "${partname}" = "boot" ] || {
+        log "ERROR: refusing to write boot.itb to ${target}: PARTNAME=${partname:-<empty>}"
+        return 1
+    }
+
+    if ! is_fit_image "${image}"; then
+        log "ERROR: refusing to write invalid FIT image: ${image}"
+        return 1
+    fi
+
+    image_size="$(file_size_bytes "${image}")"
+    target_size="$(blockdev_size_bytes "${target}")"
+    if [ -z "${image_size}" ] || [ -z "${target_size}" ] || [ "${image_size}" -gt "${target_size}" ]; then
+        log "ERROR: boot.itb size check failed: image=${image_size:-unknown}, target=${target_size:-unknown}"
+        return 1
+    fi
+
+    log "writing raw FIT boot image ${image} (${image_size} bytes) -> ${target} (${target_size} bytes)"
+    start_heartbeat "writing boot.itb to ${target}"
+    if ! dd if="${image}" of="${target}" bs=4M conv=fsync 2>>"${LOGFILE}"; then
+        stop_heartbeat
+        log "ERROR: failed to write boot.itb to ${target}"
+        return 1
+    fi
+    stop_heartbeat
+    sync
+}
+
 # ===== detect firmware mode and root/boot devices =====
 ROOT_UUID=""
 BOOT_UUID=""
@@ -173,11 +259,10 @@ AUTO_DECRYPT_MODE=0
 # which previously made blkid miss LABEL=armbi_root and silently skip OTA.
 udevadm settle --timeout=10 2>/dev/null || true
 
-# Detect auto-decrypt by LUKS container + mapper presence (NOT by security partition).
-# Covers secure-boot (OP-TEE unlock, no security part) and AB+non-secure-boot
-# (security-part raw key) alike. Plaintext root has no LUKS container -> standard mode, no wait.
-if blkid -t TYPE=crypto_LUKS >/dev/null 2>&1; then
-    log "crypto_LUKS container detected, waiting for /dev/mapper/armbian-root"
+# Detect auto-decrypt by mapper first. Some minimal images do not ship blkid in
+# the real rootfs, but initramfs only needs the already-opened mapper.
+if [ -e /dev/mapper/armbian-root ] || blkid -t TYPE=crypto_LUKS >/dev/null 2>&1; then
+    log "auto-decrypt candidate detected, waiting for /dev/mapper/armbian-root"
     timeout=30
     elapsed=0
     while [ ! -e /dev/mapper/armbian-root ] && [ "${elapsed}" -lt "${timeout}" ]; do
@@ -280,6 +365,19 @@ if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
     exit 0
 fi
 
+if [ ! -f "${STATE_FILE}" ]; then
+    log "no OTA state file at ${STATE_FILE}, unmount and skip"
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    exit 0
+fi
+
+if ! grep -q '^OTA_MODE=recovery$' "${STATE_FILE}" 2>/dev/null ||
+   ! grep -q '^STATUS=prepared$' "${STATE_FILE}" 2>/dev/null; then
+    log "OTA state is not recovery/prepared, unmount and skip"
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    exit 0
+fi
+
 # check OTA payload: rootfs.tar.gz is required, boot.tar.gz is optional
 if [ ! -d "${OTA_DIR}" ] || [ ! -f "${ROOTFS_TAR}" ]; then
     log "no rootfs OTA payload at ${OTA_DIR}, unmount and skip"
@@ -289,8 +387,10 @@ fi
 
 HAS_BOOT_TAR=0
 [ -f "${BOOT_TAR}" ] && HAS_BOOT_TAR=1
+HAS_BOOT_ITB=0
+[ -f "${BOOT_ITB}" ] && HAS_BOOT_ITB=1
 
-log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}"
+log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}"
 
 # initialize /userdata/.persist before cleaning old rootfs
 if command -v ota_persist_init_userdata >/dev/null 2>&1; then
@@ -399,6 +499,26 @@ if [ "$DO_BOOT_OTA" -eq 1 ]; then
     stop_heartbeat
 
     sync
+fi
+
+if [ "${HAS_BOOT_ITB}" -eq 1 ]; then
+    RAW_BOOT_DEV="$(find_raw_boot_dev || true)"
+    if [ -z "${RAW_BOOT_DEV}" ]; then
+        log "ERROR: boot.itb present but no PARTNAME=boot raw boot partition found"
+        if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
+            umount "${BOOT_MNT}" 2>/dev/null || true
+        fi
+        umount "${ROOT_MNT}" 2>/dev/null || true
+        exit 0
+    fi
+    if ! write_raw_boot_itb "${BOOT_ITB}" "${RAW_BOOT_DEV}"; then
+        log "ERROR: raw boot.itb update failed, abort OTA"
+        if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
+            umount "${BOOT_MNT}" 2>/dev/null || true
+        fi
+        umount "${ROOT_MNT}" 2>/dev/null || true
+        exit 0
+    fi
 fi
 
 # ===== 7) fix UUIDs in armbianEnv.txt and new rootfs /etc/fstab =====

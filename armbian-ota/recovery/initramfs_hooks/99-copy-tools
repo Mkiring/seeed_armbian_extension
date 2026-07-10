@@ -4,78 +4,64 @@
 
 set -e
 
-
 . /usr/share/initramfs-tools/hook-functions
 
 echo "[99-copy-tools] adding OTA runtime tools into initramfs..." >&2
 
-# ===== rm =====
-if [ -x /usr/bin/rm ]; then
-    copy_exec /usr/bin/rm /usr/bin
-fi
+copy_exec_first() {
+    dest="$1"
+    shift
 
-# ===== cp =====
-if [ -x /usr/bin/cp ]; then
-    copy_exec /usr/bin/cp /usr/bin
-fi
+    for candidate in "$@"; do
+        if [ -x "${candidate}" ]; then
+            copy_exec "${candidate}" "${dest}"
+            return 0
+        fi
+    done
+    return 0
+}
 
-# ===== tar =====
-if [ -x /usr/bin/tar ]; then
-    copy_exec /usr/bin/tar /usr/bin
-fi
+copy_ota_lib() {
+    lib="$1"
+    src="/usr/share/armbian-ota/${lib}"
+    dest="${DESTDIR}/usr/share/armbian-ota/${lib}"
 
-# ===== gzip / gunzip =====
-if [ -x /usr/bin/gzip ]; then
-    copy_exec /usr/bin/gzip /usr/bin
-    copy_exec /usr/bin/gunzip /usr/bin
-fi
+    [ -f "${src}" ] || return 0
+    mkdir -p "$(dirname "${dest}")"
+    cp -p "${src}" "${dest}"
+}
 
-# ===== sed =====
-if [ -x /usr/bin/sed ]; then
-    copy_exec /usr/bin/sed /usr/bin
-fi
+while read -r dest candidates; do
+    [ -n "${dest}" ] || continue
+    copy_exec_first "${dest}" ${candidates}
+done <<'EOF'
+/usr/bin /usr/bin/rm /bin/rm
+/usr/bin /usr/bin/cp /bin/cp
+/usr/bin /usr/bin/tar /bin/tar
+/usr/bin /usr/bin/gzip /bin/gzip
+/usr/bin /usr/bin/gunzip /bin/gunzip
+/usr/bin /usr/bin/sed /bin/sed
+/usr/bin /usr/bin/find /bin/find
+/usr/bin /usr/bin/grep /bin/grep
+/usr/bin /usr/bin/head /bin/head
+/usr/bin /usr/bin/cat /bin/cat
+/usr/bin /usr/bin/basename /bin/basename
+/usr/bin /usr/bin/tail /bin/tail
+/usr/bin /usr/bin/date /bin/date
+/usr/bin /usr/bin/sync /bin/sync
+/usr/bin /usr/bin/awk /bin/awk
+/usr/bin /usr/bin/wc /bin/wc
+/usr/bin /usr/bin/od /bin/od
+/usr/bin /usr/bin/tr /bin/tr
+/usr/bin /usr/bin/dd /bin/dd
+/usr/bin /usr/bin/mount /bin/mount
+/usr/bin /usr/bin/umount /bin/umount
+/usr/sbin /usr/sbin/blkid /sbin/blkid
+/usr/bin /usr/bin/udevadm /bin/udevadm
+/usr/bin /usr/bin/sleep /bin/sleep
+/usr/sbin /usr/sbin/reboot /sbin/reboot
+EOF
 
-# ===== find =====
-if [ -x /usr/bin/find ]; then
-    copy_exec /usr/bin/find /usr/bin
-fi
-
-# ===== grep =====
-if [ -x /usr/bin/grep ]; then
-    copy_exec /usr/bin/grep /usr/bin
-fi
-
-# ===== tail =====
-if [ -x /usr/bin/tail ]; then
-    copy_exec /usr/bin/tail /usr/bin
-fi
-
-# ===== date =====
-if [ -x /usr/bin/date ]; then
-    copy_exec /usr/bin/date /usr/bin
-fi
-
-# ===== sync =====
-if [ -x /usr/bin/sync ]; then
-    copy_exec /usr/bin/sync /usr/bin
-fi
-
-# ===== awk =====
-if [ -x /usr/bin/awk ]; then
-    copy_exec /usr/bin/awk /usr/bin
-fi
-
-if [ -f /usr/share/armbian-ota/persist.sh ]; then
-    mkdir -p "${DESTDIR}/usr/share/armbian-ota"
-    cp -p /usr/share/armbian-ota/persist.sh "${DESTDIR}/usr/share/armbian-ota/persist.sh"
-fi
-
-if [ -f /usr/share/armbian-ota/preserve.sh ]; then
-    mkdir -p "${DESTDIR}/usr/share/armbian-ota"
-    cp -p /usr/share/armbian-ota/preserve.sh "${DESTDIR}/usr/share/armbian-ota/preserve.sh"
-fi
-
-if [ -f /usr/share/armbian-ota/state.sh ]; then
-    mkdir -p "${DESTDIR}/usr/share/armbian-ota"
-    cp -p /usr/share/armbian-ota/state.sh "${DESTDIR}/usr/share/armbian-ota/state.sh"
-fi
+copy_ota_lib persist.sh
+copy_ota_lib preserve.sh
+copy_ota_lib state.sh

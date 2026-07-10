@@ -2,12 +2,8 @@
 # Rootfs Runtime Install Hooks
 #
 
-function pre_umount_final_image__894_install_ota_runtime() {
-    if [[ "${OTA_ENABLE}" != "yes" ]]; then
-        return 0
-    fi
-
-    local root_dir="${MOUNT}"
+function ota_install_runtime_to_rootfs() {
+    local root_dir="$1"
     local ota_ext_dir
     ota_ext_dir="${OTA_SUPPORT_DIR}"
     local runtime_src="${ota_ext_dir}/runtime"
@@ -103,6 +99,74 @@ function pre_umount_final_image__894_install_ota_runtime() {
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-recovery.sh"
 
     return 0
+}
+
+function ota_install_recovery_initramfs_hooks() {
+    local root_dir="$1"
+    local ota_ext_dir="${OTA_SUPPORT_DIR}"
+    local recovery_src="${ota_ext_dir}/recovery"
+    local copy_tools_src="${recovery_src}/initramfs_hooks/99-copy-tools"
+    local ota_apply_src="${recovery_src}/initramfs_hooks/99-ota-apply"
+    local cache_stamp="${root_dir}/etc/initramfs-tools/conf.d/armbian-ota-runtime.hash"
+
+    [[ -f "${copy_tools_src}" && -f "${ota_apply_src}" ]] || {
+        display_alert "Recovery OTA initramfs" "Recovery initramfs hook sources are missing" "err"
+        return 1
+    }
+
+    display_alert "Recovery OTA initramfs" "Installing recovery OTA hooks into target initramfs" "info"
+    mkdir -p \
+        "${root_dir}/etc/initramfs-tools/hooks" \
+        "${root_dir}/etc/initramfs-tools/scripts/init-premount" \
+        "${root_dir}/etc/initramfs-tools/conf.d"
+
+    cp "${copy_tools_src}" "${root_dir}/etc/initramfs-tools/hooks/99-copy-tools" || {
+        display_alert "Recovery OTA initramfs" "Failed to install 99-copy-tools" "err"
+        return 1
+    }
+    cp "${ota_apply_src}" "${root_dir}/etc/initramfs-tools/scripts/init-premount/99-ota-apply" || {
+        display_alert "Recovery OTA initramfs" "Failed to install 99-ota-apply" "err"
+        return 1
+    }
+    chmod 755 \
+        "${root_dir}/etc/initramfs-tools/hooks/99-copy-tools" \
+        "${root_dir}/etc/initramfs-tools/scripts/init-premount/99-ota-apply"
+
+    {
+        cd "${root_dir}" || exit 1
+        for ota_runtime_file in \
+            "usr/share/armbian-ota/state.sh" \
+            "usr/share/armbian-ota/persist.sh" \
+            "usr/share/armbian-ota/preserve.sh" \
+            "etc/initramfs-tools/hooks/99-copy-tools" \
+            "etc/initramfs-tools/scripts/init-premount/99-ota-apply"
+        do
+            [[ -f "${ota_runtime_file}" ]] || continue
+            sha256sum "${ota_runtime_file}"
+        done
+    } > "${cache_stamp}" || {
+        display_alert "Recovery OTA initramfs" "Failed to write initramfs cache stamp" "err"
+        return 1
+    }
+
+    return 0
+}
+
+function pre_update_initramfs__894_install_recovery_ota_hooks() {
+    if [[ "${OTA_ENABLE}" != "yes" || "${AB_PART_OTA}" == "yes" ]]; then
+        return 0
+    fi
+
+    ota_install_runtime_to_rootfs "${MOUNT}" || return 1
+    ota_install_recovery_initramfs_hooks "${MOUNT}" || return 1
+}
+
+function pre_umount_final_image__894_install_ota_runtime() {
+    if [[ "${OTA_ENABLE}" != "yes" ]]; then
+        return 0
+    fi
+
+    ota_install_runtime_to_rootfs "${MOUNT}"
 }
 
 # Function to install AB OTA manager and related tools
