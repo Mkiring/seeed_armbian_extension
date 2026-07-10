@@ -174,9 +174,6 @@ armbian-ota start Armbian_xxx-OTA.tar.gz
 
 # System will reboot and apply update automatically
 
-# Manual rollback (if needed)
-armbian-ota rollback
-
 # Manually switch to the other boot slot after OTA has completed
 armbian-ota switch-slot
 
@@ -234,11 +231,10 @@ cat /var/log/armbian-ota/health-check.log
 cat /run/initramfs/ab-ota.log
 ```
 
-### Manual Rollback
+### Automatic Rollback
 
-```bash
-armbian-ota rollback
-```
+Rollback is triggered by `armbian-ota-rollback.service` if first boot health checks fail during A/B OTA verification.
+Use `armbian-ota switch-slot [a|b]` for manual slot maintenance after OTA has completed.
 
 ### Check U-Boot Environment
 

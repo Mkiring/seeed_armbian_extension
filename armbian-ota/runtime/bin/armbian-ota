@@ -213,7 +213,6 @@ Usage:
   armbian-ota start <ota-package.tar.gz>
   armbian-ota status
   armbian-ota mark-success
-  armbian-ota rollback
   armbian-ota switch-slot [a|b]
 EOF
         exit 1
