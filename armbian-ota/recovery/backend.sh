@@ -4,12 +4,6 @@ RECOVERY_ROOTFS_TAR="${OTA_WORK_DIR}/rootfs.tar.gz"
 RECOVERY_ROOTFS_SHA="${OTA_WORK_DIR}/rootfs.sha256"
 RECOVERY_BOOT_TAR="${OTA_WORK_DIR}/boot.tar.gz"
 RECOVERY_BOOT_SHA="${OTA_WORK_DIR}/boot.sha256"
-RECOVERY_COPY_TOOLS_HOOK="/etc/initramfs-tools/hooks/99-copy-tools"
-RECOVERY_OTA_APPLY_HOOK="/etc/initramfs-tools/scripts/init-premount/99-ota-apply"
-
-recovery_hook_status() {
-    [ -f "$1" ] && echo "INSTALLED" || echo "MISSING"
-}
 
 recovery_require_tools() {
     ota_require_runtime tar sha256sum mount umount sed grep awk
@@ -72,8 +66,4 @@ recovery_status() {
     else
         echo "  not present"
     fi
-    echo ""
-    echo "Initramfs hooks:"
-    echo "  99-copy-tools: $(recovery_hook_status "${RECOVERY_COPY_TOOLS_HOOK}")"
-    echo "  99-ota-apply: $(recovery_hook_status "${RECOVERY_OTA_APPLY_HOOK}")"
 }
