@@ -17,7 +17,6 @@ extensions/armbian-ota/
 ├── ota-support.sh                          # Main build hook entry point
 ├── build-hooks/                            # Build-time hook implementation
 │   ├── image-naming.sh                     # Image/package naming helpers
-│   ├── payload-tools.sh                    # Offline ota_tools payload assembly
 │   ├── ab-partitions.sh                    # A/B partition hooks
 │   ├── runtime-install.sh                  # Rootfs runtime/tool install hooks
 │   ├── persist.sh                          # Persist fstab and seed hooks

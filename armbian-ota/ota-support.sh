@@ -9,7 +9,6 @@ OTA_SUPPORT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for ota_support_module in \
     image-naming \
-    payload-tools \
     ab-partitions \
     runtime-install \
     persist \
