@@ -326,6 +326,23 @@ ab_get_retry_max() {
     echo "${retry_max}"
 }
 
+ab_log_extract_progress() {
+    local label="$1"
+    local percent next=10
+
+    while read -r percent; do
+        percent="${percent%.*}"
+        case "${percent}" in
+            ''|*[!0-9]*) continue ;;
+        esac
+
+        while [ "${percent}" -ge "${next}" ] && [ "${next}" -le 100 ]; do
+            log_info "${label} extract progress: ${next}%"
+            next=$((next + 10))
+        done
+    done
+}
+
 ab_extract_tar_gz_payload() {
     local archive="$1"
     local target="$2"
@@ -337,17 +354,10 @@ ab_extract_tar_gz_payload() {
     if command -v pv >/dev/null 2>&1; then
         size="$(stat -c '%s' "${archive}" 2>/dev/null || true)"
         if [ -n "${size}" ]; then
-            pv -f -p -t -e -r -b -s "${size}" "${archive}" 2> >(
-                tr '\r' '\n' | while read -r progress; do
-                    [ -n "${progress}" ] && log_info "${label} extract progress: ${progress}"
-                done >&2
-            ) | tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
+            pv -f -n -s "${size}" "${archive}" 2> >(ab_log_extract_progress "${label}" >&2) |
+                tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
         else
-            pv -f -p -t -e -r -b "${archive}" 2> >(
-                tr '\r' '\n' | while read -r progress; do
-                    [ -n "${progress}" ] && log_info "${label} extract progress: ${progress}"
-                done >&2
-            ) | tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
+            pv -f "${archive}" | tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
         fi
         return $?
     fi
