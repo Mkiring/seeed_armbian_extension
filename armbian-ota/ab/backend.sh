@@ -11,8 +11,8 @@ ROOT_A_LABEL="armbi_roota"
 ROOT_B_LABEL="armbi_rootb"
 AB_OTA_BYNAME_DIR="/dev/block/by-name"
 AB_OTA_SYSPW_FILE="/tmp/syspw"
-AB_OTA_TEE_LOG="/tmp/armbian-ota-tee-supplicant.log"
-AB_OTA_KEYBOX_LOG="/tmp/armbian-ota-keybox.log"
+AB_OTA_TEE_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-tee-supplicant.log"
+AB_OTA_KEYBOX_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-keybox.log"
 AB_OTA_TEE_PID=""
 
 ab_get_slot_partlabel_by_fslabel() {
@@ -123,6 +123,7 @@ ab_start_tee_supplicant() {
 
     # A stale tee-supplicant from initramfs may still hold /dev/teepriv0.
     # Restart it in current rootfs namespace so keybox_app can access TA assets.
+    mkdir -p "$(dirname "${AB_OTA_TEE_LOG}")" "$(dirname "${AB_OTA_KEYBOX_LOG}")" 2>/dev/null || true
     pkill -9 -x tee-supplicant >/dev/null 2>&1 || true
     sleep 1
 
@@ -325,6 +326,35 @@ ab_get_retry_max() {
     echo "${retry_max}"
 }
 
+ab_extract_tar_gz_payload() {
+    local archive="$1"
+    local target="$2"
+    local label="$3"
+    local size
+
+    log_info "Extracting ${label} payload"
+
+    if command -v pv >/dev/null 2>&1; then
+        size="$(stat -c '%s' "${archive}" 2>/dev/null || true)"
+        if [ -n "${size}" ]; then
+            pv -f -p -t -e -r -b -s "${size}" "${archive}" 2> >(
+                tr '\r' '\n' | while read -r progress; do
+                    [ -n "${progress}" ] && log_info "${label} extract progress: ${progress}"
+                done >&2
+            ) | tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
+        else
+            pv -f -p -t -e -r -b "${archive}" 2> >(
+                tr '\r' '\n' | while read -r progress; do
+                    [ -n "${progress}" ] && log_info "${label} extract progress: ${progress}"
+                done >&2
+            ) | tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
+        fi
+        return $?
+    fi
+
+    tar --xattrs --acls --numeric-owner -xzf "${archive}" -C "${target}"
+}
+
 ab_require_tools() {
     ota_require_runtime fw_printenv fw_setenv blkid mount umount tar findmnt sed grep awk reboot dd
 }
@@ -498,7 +528,7 @@ ab_update_target_partition() {
         security_dev="$(ab_get_security_part)"
         [ -n "${security_dev}" ] || error_exit "Security partition not found for encrypted AB OTA"
 
-        key_file="$(mktemp)"
+        key_file="$(make_ota_temp_file "ab-key")"
         if ! ab_get_security_passphrase_file "${key_file}"; then
             rm -f "${key_file}" 2>/dev/null || true
             error_exit "Failed to obtain decryption passphrase from security flow (${security_dev})"
@@ -522,7 +552,7 @@ ab_update_target_partition() {
         log_info "Updating slot ${target_slot}: root=${target_root_dev} boot=${target_boot_dev:-<none>}"
     fi
 
-    root_mnt="$(mktemp -d)"
+    root_mnt="$(make_ota_work_dir "ab-root-mnt")"
     mount -t ext4 -o rw "${target_root_mount_dev}" "${root_mnt}" || {
         if [ "${luks_opened}" -eq 1 ] && [ -n "${luks_mapper}" ]; then
             cryptsetup luksClose "${luks_mapper}" >/dev/null 2>&1 || true
@@ -533,7 +563,7 @@ ab_update_target_partition() {
 
     empty_mount_dir "${root_mnt}"
 
-    tar --xattrs --acls --numeric-owner -xzf "${temp_work}/${AB_OTA_ROOTFS_TAR}" -C "${root_mnt}" || {
+    ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_ROOTFS_TAR}" "${root_mnt}" "rootfs" || {
         umount "${root_mnt}" 2>/dev/null || true
         if [ "${luks_opened}" -eq 1 ] && [ -n "${luks_mapper}" ]; then
             cryptsetup luksClose "${luks_mapper}" >/dev/null 2>&1 || true
@@ -553,10 +583,10 @@ ab_update_target_partition() {
     ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
 
     if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
-        boot_mnt="$(mktemp -d)"
+        boot_mnt="$(make_ota_work_dir "ab-boot-mnt")"
         if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
             empty_mount_dir "${boot_mnt}"
-            tar --xattrs --acls --numeric-owner -xzf "${temp_work}/${AB_OTA_BOOT_TAR}" -C "${boot_mnt}" || log_warn "Failed to extract boot payload"
+            ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_BOOT_TAR}" "${boot_mnt}" "boot" || log_warn "Failed to extract boot payload"
             sync
             umount "${boot_mnt}" 2>/dev/null || true
         else
@@ -601,7 +631,7 @@ ab_update_target_partition() {
 
     arm_env=""
     if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ]; then
-        boot_mnt="$(mktemp -d)"
+        boot_mnt="$(make_ota_work_dir "ab-boot-mnt")"
         if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
             arm_env="${boot_mnt}/armbianEnv.txt"
             ab_update_armbian_env "${arm_env}" "${target_root_type}" "${target_root_uuid}"
@@ -642,7 +672,7 @@ ab_start_ota() {
         error_exit "Another AB OTA boot verification is still in progress"
     fi
 
-    temp_work="$(mktemp -d)"
+    temp_work="$(make_ota_work_dir "ab-package")"
     extract_ota_package "${package_path}" "${temp_work}"
     ab_verify_payload "${temp_work}"
 

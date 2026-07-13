@@ -183,7 +183,7 @@ log_info "  root_b: ${root_b_uuid:-<not found>}"
 
 # Save original bootcmd
 if ! fw_printenv -n orig_bootcmd >/dev/null 2>&1; then
-    orig_bootcmd=$(fw_printenv -n bootcmd 2>/dev/null || "")
+    orig_bootcmd="$(fw_printenv -n bootcmd 2>/dev/null || true)"
     if [ -n "$orig_bootcmd" ]; then
         fw_setenv orig_bootcmd "${orig_bootcmd}"
         log_info "Saved original bootcmd"
@@ -231,7 +231,8 @@ fi
 # Set up distro_bootpart variables for each slot
 # ============================================================
 # Create a temporary file with all u-boot environment variables
-TEMP_ENV=$(mktemp)
+mkdir -p /var/lib/armbian-ota
+TEMP_ENV=$(mktemp /var/lib/armbian-ota/uboot-env.XXXXXX)
 
 # Set partition numbers detected from labels
 echo "distro_bootpart_a ${BOOT_A_PART}" >> "${TEMP_ENV}"

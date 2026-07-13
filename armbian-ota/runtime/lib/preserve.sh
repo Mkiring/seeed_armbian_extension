@@ -166,7 +166,7 @@ ota_preserve_backup_archive() {
     list_file="$2"
     archive="$3"
     tmp_list="$4"
-    log_dir="${5:-/tmp}"
+    log_dir="${5:-${OTA_WORK_DIR:-/tmp}}"
     err_file="${log_dir}/preserve.backup.stderr.log"
     rc=0
 

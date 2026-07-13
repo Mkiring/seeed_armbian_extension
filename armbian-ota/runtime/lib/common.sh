@@ -232,7 +232,7 @@ verify_sha256() {
     tmp_sha=""
 
     if ! grep -qE "[[:space:]]${payload_base}$" "${sha_path}"; then
-        tmp_sha="$(mktemp)"
+        tmp_sha="$(make_ota_temp_file "sha256")"
         awk -v f="${payload_base}" '{print $1"  "f}' "${sha_path}" > "${tmp_sha}" || {
             rm -f "${tmp_sha}"
             error_exit "Failed to rewrite checksum file for ${label}"
@@ -269,6 +269,20 @@ extract_ota_package() {
     rm -rf "${dest_dir}"
     mkdir -p "${dest_dir}"
     tar -xzf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+}
+
+make_ota_work_dir() {
+    local prefix="${1:-work}"
+
+    mkdir -p "${OTA_WORK_DIR}" || error_exit "Failed to create OTA work directory: ${OTA_WORK_DIR}"
+    mktemp -d "${OTA_WORK_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary directory under ${OTA_WORK_DIR}"
+}
+
+make_ota_temp_file() {
+    local prefix="${1:-tmp}"
+
+    mkdir -p "${OTA_WORK_DIR}" || error_exit "Failed to create OTA work directory: ${OTA_WORK_DIR}"
+    mktemp "${OTA_WORK_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary file under ${OTA_WORK_DIR}"
 }
 
 runtime_dir() {
