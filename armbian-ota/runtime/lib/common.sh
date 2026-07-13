@@ -126,15 +126,6 @@ state_mark_status() {
     state_set "STATUS" "$1"
 }
 
-state_clear_runtime_fields() {
-    state_init
-    state_set "PACKAGE_PATH" ""
-    state_set "CURRENT_SLOT" ""
-    state_set "TARGET_SLOT" ""
-    state_set "START_TIME" ""
-    state_set "COMPLETE_TIME" ""
-}
-
 state_mark_prepared() {
     local mode="$1"
     local status="$2"
@@ -283,8 +274,4 @@ make_ota_temp_file() {
 
     mkdir -p "${OTA_WORK_DIR}" || error_exit "Failed to create OTA work directory: ${OTA_WORK_DIR}"
     mktemp "${OTA_WORK_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary file under ${OTA_WORK_DIR}"
-}
-
-runtime_dir() {
-    echo "${OTA_RUNTIME_DIR}"
 }

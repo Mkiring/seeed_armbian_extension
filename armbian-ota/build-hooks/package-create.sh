@@ -89,15 +89,14 @@ function ota_copy_payload_tools() {
 
     if [[ -d "${ab_src}" ]]; then
         mkdir -p "${payload_tools_dir}/ab"
+        cp -a "${ab_src}/backend.sh" "${payload_tools_dir}/ab/" 2>/dev/null || true
         cp -a "${ab_src}/lib" "${payload_tools_dir}/ab/" 2>/dev/null || true
-        cp -a "${ab_src}/runtime" "${payload_tools_dir}/ab/" 2>/dev/null || true
         cp -a "${ab_src}/systemd" "${payload_tools_dir}/ab/" 2>/dev/null || true
     fi
 
     if [[ -d "${recovery_src}" ]]; then
         mkdir -p "${payload_tools_dir}/recovery"
-        cp -a "${recovery_src}/bin" "${payload_tools_dir}/recovery/" 2>/dev/null || true
-        cp -a "${recovery_src}/runtime" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${recovery_src}/backend.sh" "${payload_tools_dir}/recovery/" 2>/dev/null || true
         cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
     fi
 
