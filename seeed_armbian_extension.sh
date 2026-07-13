@@ -31,6 +31,22 @@ if [[ "${OTA_ENABLE}" == "yes" ]]; then
 	enable_extension "seeed_armbian_extension/armbian-ota/ota-support"
 fi
 
+function post_family_config__seeed_ab_nvme_bootscript_env_import() {
+	local bootscript="${SRC}/config/bootscripts/boot-seeed-rk35xx.cmd"
+	local patch_file="${SRC}/extensions/seeed_armbian_extension/patches/bootscripts/boot-seeed-rk35xx-ab-nvme-env.patch"
+
+	[[ -f "${bootscript}" ]] || return 0
+	[[ -f "${patch_file}" ]] || return 0
+
+	if grep -q "ab_env_offset_blocks" "${bootscript}"; then
+		display_alert "Seeed bootscript" "AB NVMe env import already present" "info"
+		return 0
+	fi
+
+	patch -d "${SRC}" -p1 < "${patch_file}" || exit_with_error "Failed to patch Seeed bootscript" "${bootscript}"
+	display_alert "Seeed bootscript" "Enabled AB NVMe env import" "info"
+}
+
 if [[ "yes" == "yes" ]]; then
 	display_alert "Security hardening" "Enable security hardening extension recomputer-security" "info"
 	enable_extension "seeed_armbian_extension/security-hardening/recomputer-security"
