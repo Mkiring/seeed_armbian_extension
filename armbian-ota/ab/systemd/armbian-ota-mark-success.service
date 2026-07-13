@@ -3,7 +3,6 @@ Description=Armbian AB OTA Mark Success
 Documentation=https://docs.armbian.com
 DefaultDependencies=no
 After=armbian-ota-firstboot.service
-Requires=armbian-ota-firstboot.service
 
 [Service]
 Type=oneshot
@@ -18,4 +17,4 @@ StandardError=journal+console
 # This will automatically mark successful boot and clear the flag
 
 [Install]
-WantedBy=multi-user.target
+# Started by armbian-ota-firstboot.service after health check succeeds.

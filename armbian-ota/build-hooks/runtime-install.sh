@@ -210,7 +210,6 @@ function pre_umount_final_image__895_install_ab_tools() {
 
         chroot "${root_dir}" systemctl enable armbian-ota-init-uboot.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-init-uboot.service" "warn"
         chroot "${root_dir}" systemctl enable armbian-ota-firstboot.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-firstboot.service" "warn"
-        chroot "${root_dir}" systemctl enable armbian-ota-mark-success.service || display_alert "A/B partition OTA" "Failed to enable armbian-ota-mark-success.service" "warn"
     fi
 
     return 0

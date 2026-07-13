@@ -1,7 +1,7 @@
 function extension_prepare_config__install_overlayroot_userdata() {
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        display_alert "A/B partition OTA" "install overlayroot, busybox-static and libubootenv-tool" "info"
-        add_packages_to_image overlayroot busybox-static libubootenv-tool
+        display_alert "A/B partition OTA" "install overlayroot, partition resize tools and libubootenv-tool" "info"
+        add_packages_to_image overlayroot busybox-static libubootenv-tool util-linux parted e2fsprogs
 
     fi
 }

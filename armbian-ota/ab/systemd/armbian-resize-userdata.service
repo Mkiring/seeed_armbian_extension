@@ -1,11 +1,18 @@
 [Unit]
 Description=Resize userdata partition to fill disk
 After=local-fs.target
+Wants=systemd-udevd.service
+After=systemd-udevd.service
+StartLimitIntervalSec=30
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
 ExecStart=/usr/lib/armbian/armbian-resize-userdata
 RemainAfterExit=yes
+TimeoutStartSec=120
+Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

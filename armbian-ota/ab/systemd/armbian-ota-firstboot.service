@@ -2,8 +2,7 @@
 Description=Armbian AB OTA First Boot Health Check
 Documentation=https://docs.armbian.com
 DefaultDependencies=no
-After=network-online.target
-Wants=network-online.target
+After=local-fs.target armbian-ota-init-uboot.service
 Before=armbian-ota-mark-success.service
 OnFailure=armbian-ota-rollback.service
 
@@ -11,6 +10,7 @@ OnFailure=armbian-ota-rollback.service
 Type=oneshot
 ExecCondition=/bin/sh -c 'test -f /var/lib/armbian-ota/ota-state.env && grep -q "^OTA_MODE=ab$" /var/lib/armbian-ota/ota-state.env && grep -Eq "^STATUS=(ready_to_boot|boot_verifying)$" /var/lib/armbian-ota/ota-state.env'
 ExecStart=/usr/lib/armbian/armbian-ota-health-check
+ExecStartPost=/bin/systemctl --no-block start armbian-ota-mark-success.service
 RemainAfterExit=yes
 TimeoutStartSec=300
 StandardOutput=journal+console
