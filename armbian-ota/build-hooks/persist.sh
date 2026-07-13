@@ -157,34 +157,3 @@ function pre_umount_final_image__898_config_overlayroot() {
         display_alert "overlayroot" "Removed overlayroot MOTD mount dump" "info"
     fi
 }
-
-function pre_umount_final_image__899_install_fw_env_tool() {
-    if [[ "${AB_PART_OTA}" != "yes" ]]; then
-        return 0
-    fi
-
-    display_alert "A/B partition OTA" "Installing fw_env tools into rootfs" "info"
-    local root_dir="${MOUNT}"
-    local fw_printenv="${root_dir}/usr/bin/fw_printenv"
-    local fw_setenv="${root_dir}/usr/bin/fw_setenv"
-    local fw_env_config="${root_dir}/etc/fw_env.config"
-    local fw_env_device="${AB_FW_ENV_DEVICE:-/dev/mmcblk1}"
-    local fw_env_offset="${AB_FW_ENV_OFFSET:-0x3f8000}"
-    local fw_env_size="${AB_FW_ENV_SIZE:-0x8000}"
-
-    if [[ ! -x "${fw_printenv}" || ! -x "${fw_setenv}" ]]; then
-        display_alert "A/B partition OTA" "fw_printenv/fw_setenv missing in rootfs; install libubootenv-tool" "err"
-        return 1
-    fi
-
-    mkdir -p "${root_dir}/etc"
-    echo "${fw_env_device} ${fw_env_offset} ${fw_env_size}" > "${fw_env_config}" || {
-        display_alert "A/B partition OTA" "Failed to create fw_env.config" "err"
-        return 1
-    }
-    display_alert "A/B partition OTA" "Installed fw_env.config: ${fw_env_device} ${fw_env_offset} ${fw_env_size}" "info"
-
-    return 0
-}
-
-#

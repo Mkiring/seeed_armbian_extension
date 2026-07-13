@@ -7,6 +7,11 @@
 
 set -e
 
+# U-Boot environment location. The device is detected at runtime.
+readonly AB_FW_ENV_OFFSET="0x3f8000"
+readonly AB_FW_ENV_SIZE="0x8000"
+readonly AB_FW_ENV_ERASE_SIZE="0x1000"
+
 FORCE_REINIT=0
 if [ "${1:-}" = "--force" ]; then
     FORCE_REINIT=1
@@ -98,6 +103,50 @@ resolve_physical_part_dev() {
     echo "${dev}"
 }
 
+get_parent_disk_dev() {
+    local dev="$1" pkname base
+    [ -n "${dev}" ] || return 1
+
+    pkname="$(lsblk -no PKNAME "${dev}" 2>/dev/null | head -n1)"
+    if [ -n "${pkname}" ]; then
+        echo "/dev/${pkname}"
+        return 0
+    fi
+
+    base="$(basename "${dev}")"
+    case "${base}" in
+        nvme*n*p[0-9]*)
+            echo "/dev/${base%p[0-9]*}"
+            return 0
+            ;;
+        mmcblk*p[0-9]*)
+            echo "/dev/${base%p[0-9]*}"
+            return 0
+            ;;
+        sd*[0-9]*)
+            echo "/dev/${base%%[0-9]*}"
+            return 0
+            ;;
+    esac
+
+    echo "${dev}"
+}
+
+ensure_fw_env_config() {
+    local boot_part_dev="$1" fw_env_device
+
+    fw_env_device="$(get_parent_disk_dev "${boot_part_dev}")" || {
+        log_error "Failed to detect U-Boot environment device"
+        return 1
+    }
+
+    mkdir -p /etc
+    printf '%s %s %s %s\n' \
+        "${fw_env_device}" "${AB_FW_ENV_OFFSET}" "${AB_FW_ENV_SIZE}" "${AB_FW_ENV_ERASE_SIZE}" \
+        > /etc/fw_env.config
+    log_info "Installed fw_env.config: ${fw_env_device} ${AB_FW_ENV_OFFSET} ${AB_FW_ENV_SIZE} ${AB_FW_ENV_ERASE_SIZE}"
+}
+
 get_part_dev_by_partlabel() {
     local partlabel="$1" dev
     dev="$(blkid -t PARTLABEL="${partlabel}" -o device 2>/dev/null | head -n1)"
@@ -114,6 +163,50 @@ get_part_uuid() {
 get_fs_uuid_by_label() {
     local fslabel="$1"
     blkid -t LABEL="${fslabel}" -o value -s UUID 2>/dev/null | head -n1
+}
+
+get_cmdline_root_uuid() {
+    local token
+
+    for token in $(cat /proc/cmdline 2>/dev/null); do
+        case "${token}" in
+            root=UUID=*)
+                echo "${token#root=UUID=}"
+                return 0
+                ;;
+        esac
+    done
+}
+
+detect_current_slot() {
+    local root_src root_uuid
+
+    root_src="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+    if [ -z "${root_src}" ]; then
+        root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    fi
+
+    root_uuid="$(blkid -o value -s UUID "${root_src}" 2>/dev/null | head -n1)"
+    if [ -z "${root_uuid}" ]; then
+        root_uuid="$(get_cmdline_root_uuid)"
+    fi
+
+    if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_b_uuid}" ]; then
+        echo "b"
+        return 0
+    fi
+
+    echo "a"
+}
+
+set_env_if_missing() {
+    local key="$1" value="$2" current
+
+    current="$(fw_printenv -n "${key}" 2>/dev/null || true)"
+    if [ -z "${current}" ]; then
+        fw_setenv "${key}" "${value}"
+        log_info "Set ${key} to '${value}'"
+    fi
 }
 
 # Detect slot partitions:
@@ -138,21 +231,18 @@ if [ -z "${boot_a_dev}" ] || [ -z "${boot_b_dev}" ] || [ -z "${root_a_dev}" ] ||
     exit 1
 fi
 
-ACTUAL_BOOT_A_PART=$(get_partition_number_from_dev "${boot_a_dev}" || true)
-ACTUAL_BOOT_B_PART=$(get_partition_number_from_dev "${boot_b_dev}" || true)
+# Use detected partition mapping to support custom layouts
+# (for example, with BIOS/EFI/security partitions).
+BOOT_A_PART=$(get_partition_number_from_dev "${boot_a_dev}" || true)
+BOOT_B_PART=$(get_partition_number_from_dev "${boot_b_dev}" || true)
 ROOT_A_PART=$(get_partition_number_from_dev "${root_a_dev}" || true)
 ROOT_B_PART=$(get_partition_number_from_dev "${root_b_dev}" || true)
 
-if [ -z "${ACTUAL_BOOT_A_PART}" ] || [ -z "${ACTUAL_BOOT_B_PART}" ] || [ -z "${ROOT_A_PART}" ] || [ -z "${ROOT_B_PART}" ]; then
+if [ -z "${BOOT_A_PART}" ] || [ -z "${BOOT_B_PART}" ] || [ -z "${ROOT_A_PART}" ] || [ -z "${ROOT_B_PART}" ]; then
     log_error "Failed to parse one or more partition numbers from device names"
     log_error "boot_a=${boot_a_dev} boot_b=${boot_b_dev} root_a=${root_a_dev} root_b=${root_b_dev}"
     exit 1
 fi
-
-# Use detected partition mapping to support custom layouts
-# (for example, with BIOS/EFI/security partitions).
-BOOT_A_PART="${ACTUAL_BOOT_A_PART}"
-BOOT_B_PART="${ACTUAL_BOOT_B_PART}"
 
 BOOT_DEVTYPE=""
 BOOT_DEVNUM=""
@@ -167,6 +257,7 @@ boot_a_uuid="$(get_fs_uuid_by_label "armbi_boota")"
 boot_b_uuid="$(get_fs_uuid_by_label "armbi_bootb")"
 root_a_uuid="$(get_part_uuid "${root_a_dev}")"
 root_b_uuid="$(get_part_uuid "${root_b_dev}")"
+CURRENT_SLOT="$(detect_current_slot)"
 
 log_info "Detected partition layout:"
 log_info "  boot_a: ${boot_a_dev} (partition ${BOOT_A_PART})"
@@ -174,12 +265,15 @@ log_info "  boot_b: ${boot_b_dev} (partition ${BOOT_B_PART})"
 log_info "  root_a: ${root_a_dev} (partition ${ROOT_A_PART})"
 log_info "  root_b: ${root_b_dev} (partition ${ROOT_B_PART})"
 log_info "Detected boot media for U-Boot: ${BOOT_DEVTYPE} ${BOOT_DEVNUM}"
+log_info "Detected current slot: ${CURRENT_SLOT}"
 
 log_info "Partition UUIDs:"
 log_info "  boot_a: ${boot_a_uuid:-<not found>}"
 log_info "  boot_b: ${boot_b_uuid:-<not found>}"
 log_info "  root_a: ${root_a_uuid:-<not found>}"
 log_info "  root_b: ${root_b_uuid:-<not found>}"
+
+ensure_fw_env_config "${boot_a_dev}"
 
 # Save original bootcmd
 if ! fw_printenv -n orig_bootcmd >/dev/null 2>&1; then
@@ -190,80 +284,42 @@ if ! fw_printenv -n orig_bootcmd >/dev/null 2>&1; then
     fi
 fi
 
-# Set default boot_slot if not exists
-if ! fw_printenv -n boot_slot >/dev/null 2>&1; then
-    fw_setenv boot_slot a
-    log_info "Set boot_slot to 'a'"
-fi
+set_env_if_missing boot_slot "${CURRENT_SLOT}"
+set_env_if_missing boot_success "${CURRENT_SLOT}"
+set_env_if_missing ota_in_progress 0
+set_env_if_missing try_count 0
+set_env_if_missing slot_retry_max 3
+set_env_if_missing slot_retry_left "$(fw_printenv -n slot_retry_max 2>/dev/null || echo 3)"
 
-# Set boot_success if not exists
-if ! fw_printenv -n boot_success >/dev/null 2>&1; then
-    fw_setenv boot_success a
-    log_info "Set boot_success to 'a'"
-fi
+AB_PREBOOT='if test "${ota_in_progress}" = "1"; then if test "${slot_retry_left}" = "0"; then setenv boot_slot ${boot_success}; setenv ota_in_progress 0; setenv slot_retry_left ${slot_retry_max}; saveenv; reset; fi; setexpr slot_retry_left ${slot_retry_left} - 1; saveenv; fi'
+AB_BOOTCMD='run ab_preboot; run distro_bootcmd; boot_fit; bootrkp'
+AB_SCAN_DEV_FOR_BOOT_PART='if test "${devtype}" = "${ab_boot_devtype}" && test "${devnum}" = "${ab_boot_devnum}"; then if test "${boot_slot}" = "b"; then setenv devplist ${distro_bootpart_b}; else setenv devplist ${distro_bootpart_a}; fi; else part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi; boot_android ${devtype} ${devnum}; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done'
 
-# Set ota_in_progress if not exists
-if ! fw_printenv -n ota_in_progress >/dev/null 2>&1; then
-    fw_setenv ota_in_progress 0
-    log_info "Set ota_in_progress to '0'"
-fi
-
-# Set try_count if not exists
-if ! fw_printenv -n try_count >/dev/null 2>&1; then
-    fw_setenv try_count 0
-    log_info "Set try_count to '0'"
-fi
-
-# U-Boot level boot retry policy:
-# - slot_retry_max: max boot attempts for target slot while ota_in_progress=1
-# - slot_retry_left: remaining attempts before fallback to boot_success slot
-if ! fw_printenv -n slot_retry_max >/dev/null 2>&1; then
-    fw_setenv slot_retry_max 3
-    log_info "Set slot_retry_max to '3'"
-fi
-
-if ! fw_printenv -n slot_retry_left >/dev/null 2>&1; then
-    fw_setenv slot_retry_left "$(fw_printenv -n slot_retry_max 2>/dev/null || echo 3)"
-    log_info "Set slot_retry_left to slot_retry_max"
-fi
-
-# ============================================================
-# Set up distro_bootpart variables for each slot
-# ============================================================
-# Create a temporary file with all u-boot environment variables
 mkdir -p /var/lib/armbian-ota
 TEMP_ENV=$(mktemp /var/lib/armbian-ota/uboot-env.XXXXXX)
-
-# Set partition numbers detected from labels
-echo "distro_bootpart_a ${BOOT_A_PART}" >> "${TEMP_ENV}"
-echo "distro_bootpart_b ${BOOT_B_PART}" >> "${TEMP_ENV}"
-echo "ab_boot_devtype ${BOOT_DEVTYPE}" >> "${TEMP_ENV}"
-echo "ab_boot_devnum ${BOOT_DEVNUM}" >> "${TEMP_ENV}"
-echo "boot_targets ${BOOT_DEVTYPE}${BOOT_DEVNUM}" >> "${TEMP_ENV}"
+trap 'rm -f "${TEMP_ENV:-}"' EXIT
 
 log_info "Set distro_bootpart_a=${BOOT_A_PART}, distro_bootpart_b=${BOOT_B_PART}, ab_boot_devtype=${BOOT_DEVTYPE}, ab_boot_devnum=${BOOT_DEVNUM}, boot_targets=${BOOT_DEVTYPE}${BOOT_DEVNUM}"
 
-# ============================================================
-# Modify bootcmd to use slot-based booting
-# ============================================================
 # The new environment keeps standard distro_bootcmd scanning order.
 # We only override scan_dev_for_boot_part so that for the selected
 # boot media (ab_boot_devtype/ab_boot_devnum) it scans exactly one
 # partition chosen by boot_slot (A or B). Other media use stock behavior.
-cat >> "${TEMP_ENV}" << EOF
-# U-Boot preboot guard for A/B OTA retry/fallback
-ab_preboot if test "\${ota_in_progress}" = "1"; then if env exists slot_retry_max; then true; else setenv slot_retry_max 3; fi; if env exists slot_retry_left; then true; else setenv slot_retry_left \${slot_retry_max}; fi; if test "\${slot_retry_left}" = "0"; then if env exists boot_success; then setenv boot_slot \${boot_success}; else setenv boot_slot a; fi; setenv ota_in_progress 0; setenv slot_retry_left \${slot_retry_max}; saveenv; reset; fi; setexpr slot_retry_left \${slot_retry_left} - 1; saveenv; fi
-# Keep normal boot flow (similar to non-OTA default)
-bootcmd run ab_preboot; if env exists boot_pci_enum; then run boot_pci_enum; fi; run distro_bootcmd; boot_fit; bootrkp
-# Slot-aware partition selection only on AB boot media; others stay unchanged
-scan_dev_for_boot_part if test "\${devtype}" = "\${ab_boot_devtype}" && test "\${devnum}" = "\${ab_boot_devnum}"; then if test "\${boot_slot}" = "b"; then setenv devplist \${distro_bootpart_b}; else setenv devplist \${distro_bootpart_a}; fi; else part list \${devtype} \${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi; boot_android \${devtype} \${devnum}; for distro_bootpart in \${devplist}; do if fstype \${devtype} \${devnum}:\${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done
-EOF
+{
+    printf 'distro_bootpart_a=%s\n' "${BOOT_A_PART}"
+    printf 'distro_bootpart_b=%s\n' "${BOOT_B_PART}"
+    printf 'ab_boot_devtype=%s\n' "${BOOT_DEVTYPE}"
+    printf 'ab_boot_devnum=%s\n' "${BOOT_DEVNUM}"
+    printf 'boot_targets=%s%s\n' "${BOOT_DEVTYPE}" "${BOOT_DEVNUM}"
+    printf 'ab_preboot=%s\n' "${AB_PREBOOT}"
+    printf 'bootcmd=%s\n' "${AB_BOOTCMD}"
+    printf 'scan_dev_for_boot_part=%s\n' "${AB_SCAN_DEV_FOR_BOOT_PART}"
+} > "${TEMP_ENV}"
 
 log_info "Modified bootcmd"
 
 # Apply all environment variables at once
 fw_setenv -s "${TEMP_ENV}"
-rm -f "${TEMP_ENV}"
 
 # ============================================================
 # Mark as initialized
