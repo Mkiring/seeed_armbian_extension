@@ -149,7 +149,11 @@ function ota_verify_extracted_archives() {
 
     ota_verify_sha256_file "${ota_temp_dir}" "${rootfs_sha_file}" "rootfs.tar.gz" || return 1
 
-    if [[ "${secure_boot_and_decrypt}" == "yes" && -f "${ota_temp_dir}/boot.itb" ]]; then
+    if [[ "${secure_boot_and_decrypt}" == "yes" ]]; then
+        if [[ ! -f "${ota_temp_dir}/boot.itb" ]]; then
+            display_alert "Error: boot.itb is required for secure boot OTA" "" "err"
+            return 1
+        fi
         if [[ ! -r "${ota_temp_dir}/boot.itb" ]]; then
             display_alert "Error: boot.itb is not readable" "" "err"
             return 1
@@ -477,10 +481,12 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
 
                 ota_write_sha256_file "${ota_temp_dir}" "boot.itb" "${boot_sha_file}"
             else
-                display_alert "Warning: Failed to copy boot.itb" "" "warn"
+                display_alert "Error: Failed to copy boot.itb" "" "err"
+                return 1
             fi
         else
-            display_alert "Warning: boot.itb not found at ${boot_itb_source}" "" "warn"
+            display_alert "Error: boot.itb not found at ${boot_itb_source}" "" "err"
+            return 1
         fi
     elif [[ -n "$boot_partition" && -b "$boot_partition" ]]; then
         # Normal boot partition extraction

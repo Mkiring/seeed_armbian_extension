@@ -236,11 +236,14 @@ set_env_if_missing() {
 }
 
 # Detect slot partitions:
-# - boot partitions by filesystem label (ext4 labels armbi_boota/bootb)
+# - boot partitions by filesystem label (ext4 labels armbi_boota/bootb),
+#   falling back to GPT PARTLABEL for raw FIT boot_a/boot_b partitions.
 # - root partitions by GPT PARTLABEL first (rootfs_a/rootfs_b), which works
 #   for both normal AB and encrypted AB (rootfs_b is locked by default).
 boot_a_dev="$(blkid -t LABEL="armbi_boota" -o device 2>/dev/null | head -n1)"
 boot_b_dev="$(blkid -t LABEL="armbi_bootb" -o device 2>/dev/null | head -n1)"
+[ -n "${boot_a_dev}" ] || boot_a_dev="$(get_part_dev_by_partlabel "boot_a" || true)"
+[ -n "${boot_b_dev}" ] || boot_b_dev="$(get_part_dev_by_partlabel "boot_b" || true)"
 root_a_dev="$(get_part_dev_by_partlabel "rootfs_a" || true)"
 root_b_dev="$(get_part_dev_by_partlabel "rootfs_b" || true)"
 
@@ -278,11 +281,17 @@ if [ -z "${BOOT_DEVTYPE}" ] || [ -z "${BOOT_DEVNUM}" ]; then
     exit 1
 fi
 
-# Get partition UUIDs
+# Get partition UUIDs and determine whether boot slots are raw FIT partitions.
 boot_a_uuid="$(get_fs_uuid_by_label "armbi_boota")"
 boot_b_uuid="$(get_fs_uuid_by_label "armbi_bootb")"
 root_a_uuid="$(get_part_uuid "${root_a_dev}")"
 root_b_uuid="$(get_part_uuid "${root_b_dev}")"
+boot_a_fstype="$(blkid -s TYPE -o value "${boot_a_dev}" 2>/dev/null || true)"
+boot_b_fstype="$(blkid -s TYPE -o value "${boot_b_dev}" 2>/dev/null || true)"
+AB_BOOT_MODE="filesystem"
+if [ -z "${boot_a_fstype}" ] && [ -z "${boot_b_fstype}" ]; then
+    AB_BOOT_MODE="raw-fit"
+fi
 CURRENT_SLOT="$(detect_current_slot)"
 
 log_info "Detected partition layout:"
@@ -292,6 +301,7 @@ log_info "  root_a: ${root_a_dev} (partition ${ROOT_A_PART})"
 log_info "  root_b: ${root_b_dev} (partition ${ROOT_B_PART})"
 log_info "Detected boot media for U-Boot: ${BOOT_DEVTYPE} ${BOOT_DEVNUM}"
 log_info "Detected current slot: ${CURRENT_SLOT}"
+log_info "Detected A/B boot mode: ${AB_BOOT_MODE}"
 
 log_info "Partition UUIDs:"
 log_info "  boot_a: ${boot_a_uuid:-<not found>}"
@@ -318,8 +328,16 @@ set_env_if_missing slot_retry_max 3
 set_env_if_missing slot_retry_left "$(fw_printenv -n slot_retry_max 2>/dev/null || echo 3)"
 
 AB_PREBOOT='if test "${ota_in_progress}" = "1"; then if test "${slot_retry_left}" = "0"; then setenv boot_slot ${boot_success}; setenv ota_in_progress 0; setenv slot_retry_left ${slot_retry_max}; saveenv; reset; fi; setexpr slot_retry_left ${slot_retry_left} - 1; saveenv; fi'
-AB_BOOTCMD='run ab_preboot; run distro_bootcmd; boot_fit; bootrkp'
 AB_SCAN_DEV_FOR_BOOT_PART='if test "${devtype}" = "${ab_boot_devtype}" && test "${devnum}" = "${ab_boot_devnum}"; then if test "${boot_slot}" = "b"; then setenv devplist ${distro_bootpart_b}; else setenv devplist ${distro_bootpart_a}; fi; else part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi; boot_android ${devtype} ${devnum}; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done'
+AB_SELECT_FIT_SLOT='if test "${boot_slot}" = "b"; then setenv boot_fit_part boot_b; else setenv boot_fit_part boot_a; fi'
+
+if [ "${AB_BOOT_MODE}" = "raw-fit" ]; then
+    # The Rockchip boot_fit patch consumes boot_fit_part and loads the raw FIT
+    # directly from boot_a or boot_b; distro_bootcmd only supports filesystems.
+    AB_BOOTCMD='run ab_preboot; run ab_select_fit_slot; boot_fit'
+else
+    AB_BOOTCMD='run ab_preboot; run distro_bootcmd; boot_fit; bootrkp'
+fi
 
 mkdir -p /var/lib/armbian-ota
 TEMP_ENV=$(mktemp /var/lib/armbian-ota/uboot-env.XXXXXX)
@@ -337,9 +355,13 @@ log_info "Set distro_bootpart_a=${BOOT_A_PART}, distro_bootpart_b=${BOOT_B_PART}
     printf 'ab_boot_devtype=%s\n' "${BOOT_DEVTYPE}"
     printf 'ab_boot_devnum=%s\n' "${BOOT_DEVNUM}"
     printf 'boot_targets=%s%s\n' "${BOOT_DEVTYPE}" "${BOOT_DEVNUM}"
+    printf 'ab_boot_mode=%s\n' "${AB_BOOT_MODE}"
     printf 'ab_preboot=%s\n' "${AB_PREBOOT}"
+    printf 'ab_select_fit_slot=%s\n' "${AB_SELECT_FIT_SLOT}"
     printf 'bootcmd=%s\n' "${AB_BOOTCMD}"
-    printf 'scan_dev_for_boot_part=%s\n' "${AB_SCAN_DEV_FOR_BOOT_PART}"
+    if [ "${AB_BOOT_MODE}" = "filesystem" ]; then
+        printf 'scan_dev_for_boot_part=%s\n' "${AB_SCAN_DEV_FOR_BOOT_PART}"
+    fi
 } > "${TEMP_ENV}"
 
 log_info "Modified bootcmd"
@@ -364,6 +386,7 @@ root_a_dev=${root_a_dev}
 root_b_dev=${root_b_dev}
 boot_devtype=${BOOT_DEVTYPE}
 boot_devnum=${BOOT_DEVNUM}
+boot_mode=${AB_BOOT_MODE}
 boot_a_uuid=${boot_a_uuid}
 boot_b_uuid=${boot_b_uuid}
 root_a_uuid=${root_a_uuid}

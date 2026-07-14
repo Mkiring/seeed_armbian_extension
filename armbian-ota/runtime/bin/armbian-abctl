@@ -1,0 +1,80 @@
+#!/bin/bash
+# A/B slot-state wrapper for the current U-Boot environment backend.
+set -euo pipefail
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+require_root() { [ "$(id -u)" -eq 0 ] || die "must be run as root"; }
+getenv() { fw_printenv -n "$1" 2>/dev/null || true; }
+setenvs() {
+    local env_file entry key value
+    env_file="$(mktemp)" || die "failed to create temporary U-Boot environment file"
+    for entry in "$@"; do
+        key="${entry%%=*}"
+        value="${entry#*=}"
+        [ -n "${key}" ] && [ "${key}" != "${entry}" ] || {
+            rm -f "${env_file}"
+            die "invalid U-Boot environment assignment"
+        }
+        printf '%s=%s\n' "${key}" "${value}" >> "${env_file}"
+    done
+    fw_setenv -s "${env_file}" || {
+        rm -f "${env_file}"
+        die "failed to update U-Boot environment"
+    }
+    rm -f "${env_file}"
+    for entry in "$@"; do
+        key="${entry%%=*}"
+        value="${entry#*=}"
+        [ "$(getenv "${key}")" = "${value}" ] || die "U-Boot environment verification failed: ${key}"
+    done
+}
+current_slot() {
+    local root part label
+    root="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+    [ -n "${root}" ] || root="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    part="$(lsblk -no PKNAME "${root}" 2>/dev/null | head -n1 || true)"
+    [ -n "${part}" ] && root="/dev/${part}"
+    label="$(blkid -s PARTLABEL -o value "${root}" 2>/dev/null || true)"
+    case "${label}" in rootfs_a) echo a;; rootfs_b) echo b;; *) return 1;; esac
+}
+retry_max() { local n; n="$(getenv slot_retry_max)"; case "${n}" in ''|*[!0-9]*) echo 3;; *) echo "${n}";; esac; }
+status() {
+    printf 'backend=fw_env\n'
+    printf 'boot_slot=%s\n' "$(getenv boot_slot)"
+    printf 'boot_success=%s\n' "$(getenv boot_success)"
+    printf 'ota_in_progress=%s\n' "$(getenv ota_in_progress)"
+    printf 'slot_retry_left=%s\n' "$(getenv slot_retry_left)"
+    printf 'slot_retry_max=%s\n' "$(retry_max)"
+}
+prepare() {
+    local slot="$1" max
+    case "${slot}" in a|b);; *) die "slot must be a or b";; esac
+    max="$(retry_max)"
+    setenvs "ota_in_progress=1" "boot_slot=${slot}" "try_count=0" \
+        "slot_retry_max=${max}" "slot_retry_left=${max}"
+}
+mark_success() {
+    local slot="${1:-$(current_slot 2>/dev/null || true)}" max
+    case "${slot}" in a|b);; *) die "cannot determine successful slot";; esac
+    max="$(retry_max)"
+    setenvs "boot_success=${slot}" "ota_in_progress=0" "try_count=0" \
+        "slot_retry_left=${max}"
+}
+rollback() {
+    local slot max
+    slot="$(getenv boot_success)"; case "${slot}" in a|b);; *) die "boot_success is invalid";; esac
+    max="$(retry_max)"
+    setenvs "boot_slot=${slot}" "ota_in_progress=0" "try_count=0" \
+        "slot_retry_left=${max}"
+}
+
+require_root
+command -v fw_printenv >/dev/null 2>&1 || die "fw_printenv is not installed"
+command -v fw_setenv >/dev/null 2>&1 || die "fw_setenv is not installed"
+case "${1:-}" in
+    status) status;;
+    prepare) [ $# -eq 2 ] || die "usage: armbian-abctl prepare <a|b>"; prepare "$2";;
+    mark-success) mark_success "${2:-}";;
+    rollback) rollback;;
+    *) echo "Usage: armbian-abctl {status|prepare <a|b>|mark-success [a|b]|rollback}" >&2; exit 1;;
+esac

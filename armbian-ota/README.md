@@ -235,6 +235,28 @@ cat /run/initramfs/ab-ota.log
 Rollback is triggered by `armbian-ota-rollback.service` if first boot health checks fail during A/B OTA verification.
 Use `armbian-ota switch-slot [a|b]` for manual slot maintenance after OTA has completed.
 
+### A/B Boot State
+
+Non-secure A/B images store boot state in the fixed raw U-Boot environment
+offset (`0x3f8000`, size `0x8000`) on the selected boot disk.  This works the
+same way for SD, eMMC, and NVMe images. `armbian-abctl` is the userspace
+wrapper around this existing `fw_setenv` backend.
+
+For Secure Boot A/B packages, the A/B backend verifies `boot.itb` and writes
+it directly to the inactive raw `boot_a` or `boot_b` partition. It never
+mounts a FIT boot partition or treats the FIT image as `boot.tar.gz`.
+When automatic rootfs decryption is enabled, both A/B modes create a shared
+`security` partition and format both rootfs slots as LUKS-backed ext4.
+Slot-state transitions still use the configured A/B U-Boot environment
+backend.
+
+```bash
+armbian-abctl status
+armbian-abctl prepare b
+armbian-abctl mark-success b
+armbian-abctl rollback
+```
+
 ### Check U-Boot Environment
 
 ```bash

@@ -3,6 +3,7 @@
 RECOVERY_ROOTFS_TAR="${OTA_WORK_DIR}/rootfs.tar.gz"
 RECOVERY_ROOTFS_SHA="${OTA_WORK_DIR}/rootfs.sha256"
 RECOVERY_BOOT_TAR="${OTA_WORK_DIR}/boot.tar.gz"
+RECOVERY_BOOT_ITB="${OTA_WORK_DIR}/boot.itb"
 RECOVERY_BOOT_SHA="${OTA_WORK_DIR}/boot.sha256"
 
 recovery_require_tools() {
@@ -10,9 +11,16 @@ recovery_require_tools() {
 }
 
 recovery_verify_payload() {
+    [ -f "${RECOVERY_BOOT_ITB}" ] && [ -f "${RECOVERY_BOOT_TAR}" ] &&
+        error_exit "OTA package contains both boot.itb and boot.tar.gz; refusing ambiguous boot payload"
+
     verify_payload_archives "${OTA_WORK_DIR}" \
         "rootfs.tar.gz" "rootfs.sha256" \
         "boot.tar.gz" "boot.sha256"
+
+    if [ -f "${RECOVERY_BOOT_ITB}" ]; then
+        verify_sha256 "${RECOVERY_BOOT_ITB}" "${RECOVERY_BOOT_SHA}" "boot.itb"
+    fi
 }
 
 recovery_mark_prepared() {

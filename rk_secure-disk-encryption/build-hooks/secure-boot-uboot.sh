@@ -187,6 +187,194 @@ function rk_secure_boot_check_produced_fit_image() {
     rk_secure_boot_verify_fit_images "${binfile}"
 }
 
+function rk_secure_boot_rebuild_idbloader() {
+    # The normal Rockchip post-process runs before this signing hook.  Rebuild
+    # its loader afterwards so the boot media contains the SPL DTB into which
+    # mkimage injected the FIT public key, rather than the pre-signing SPL.
+    local spl_bin_path
+
+    case "${BOOT_SCENARIO:-}" in
+        spl-blobs)
+            spl_bin_path="${RKBIN_DIR}/${DDR_BLOB}"
+            [[ -f "${spl_bin_path}" ]] || exit_with_error "DDR blob missing while rebuilding signed idbloader" "${spl_bin_path}"
+
+            if declare -F board_uboot_spl_blobs_postprocess >/dev/null; then
+                board_uboot_spl_blobs_postprocess "${BOOT_SOC}" "${spl_bin_path}" "./spl/u-boot-spl.bin"
+            else
+                rk_run_host_command tools/mkimage -n "${BOOT_SOC_MKIMAGE}" -T rksd \
+                    -d "${spl_bin_path}:spl/u-boot-spl.bin" idbloader.img ||
+                    exit_with_error "Failed to rebuild idbloader with signed SPL" "${BOOT_SOC}"
+            fi
+            ;;
+        vendor-spl-blobs)
+            # A vendor SPL cannot contain the FIT public key generated for this
+            # build.  Continuing here would package an image that looks signed
+            # but whose first mutable stage cannot validate U-Boot.
+            exit_with_error "Full secure boot is incompatible with vendor-spl-blobs" "Use BOOT_SCENARIO=spl-blobs so the signed SPL is deployed"
+            ;;
+        *)
+            exit_with_error "Unsupported secure U-Boot loader scenario" "BOOT_SCENARIO=${BOOT_SCENARIO:-<unset>}"
+            ;;
+    esac
+
+    [[ -f idbloader.img ]] || exit_with_error "Signed idbloader was not produced" "${PWD}/idbloader.img"
+}
+
+function rk_secure_boot_sign_loader_artifacts() {
+    local rk_sign_tool="$1" platform="$2" keys_dir="$3"
+
+    "${rk_sign_tool}" cc --chip "${platform#rk}" ||
+        exit_with_error "Failed to select Rockchip secure-boot chip" "${platform}"
+    "${rk_sign_tool}" lk --key "${keys_dir}/dev.key" --pubkey "${keys_dir}/dev.pubkey" ||
+        exit_with_error "Failed to load Rockchip secure-boot signing key" "${keys_dir}"
+    "${rk_sign_tool}" sb --idb idbloader.img ||
+        exit_with_error "Failed to sign idbloader" "${PWD}/idbloader.img"
+    "${rk_sign_tool}" vb --idb idbloader.img ||
+        exit_with_error "Signed idbloader verification failed" "${PWD}/idbloader.img"
+
+    # Maskrom recovery uses this separately packaged loader, so it must carry
+    # the same signed SPL when the board hook generated one.
+    if [[ -f spl_loader_maskrom.bin ]]; then
+        "${rk_sign_tool}" sl --loader spl_loader_maskrom.bin ||
+            exit_with_error "Failed to sign Maskrom SPL loader" "${PWD}/spl_loader_maskrom.bin"
+        "${rk_sign_tool}" vl --loader spl_loader_maskrom.bin ||
+            exit_with_error "Signed Maskrom SPL loader verification failed" "${PWD}/spl_loader_maskrom.bin"
+    fi
+}
+
+function rk_secure_boot_rebuild_spi_loader() {
+    [[ "${BOOT_SUPPORT_SPI:-no}" == "yes" ]] || return 0
+
+    if [[ "${BOOT_SPI_RKSPI_LOADER:-no}" == "yes" ]]; then
+        rk_run_host_command dd if=/dev/zero of=rkspi_loader.img bs=1M count=0 seek=16 ||
+            exit_with_error "Failed to initialise signed SPI loader image" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img mklabel gpt || exit_with_error "Failed to create signed SPI loader GPT" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart idbloader 64 7167 || exit_with_error "Failed to create SPI idbloader partition" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart vnvm 7168 7679 || exit_with_error "Failed to create SPI vnvm partition" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart reserved_space 7680 8063 || exit_with_error "Failed to create SPI reserved-space partition" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart reserved1 8064 8127 || exit_with_error "Failed to create SPI reserved1 partition" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart uboot_env 8128 8191 || exit_with_error "Failed to create SPI U-Boot env partition" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart reserved2 8192 16383 || exit_with_error "Failed to create SPI reserved2 partition" "rkspi_loader.img"
+        rk_run_host_command /sbin/parted -s rkspi_loader.img unit s mkpart uboot 16384 32734 || exit_with_error "Failed to create SPI U-Boot partition" "rkspi_loader.img"
+        rk_run_host_command dd if=idbloader.img of=rkspi_loader.img seek=64 conv=notrunc || exit_with_error "Failed to place signed idbloader in SPI image" "rkspi_loader.img"
+        rk_run_host_command dd if=u-boot.itb of=rkspi_loader.img seek=16384 conv=notrunc || exit_with_error "Failed to place signed U-Boot FIT in SPI image" "rkspi_loader.img"
+    else
+        [[ -f tpl/u-boot-tpl.bin ]] || exit_with_error "TPL missing while rebuilding signed SPI loader" "tpl/u-boot-tpl.bin"
+        rk_run_host_command tools/mkimage -n "${BOOT_SOC_MKIMAGE}" -T rkspi \
+            -d tpl/u-boot-tpl.bin:spl/u-boot-spl.bin rkspi_tpl_spl.img ||
+            exit_with_error "Failed to build signed SPI TPL/SPL image" "rkspi_tpl_spl.img"
+        rk_run_host_command dd if=/dev/zero of=rkspi_loader.img count=8128 status=none || exit_with_error "Failed to initialise signed SPI loader image" "rkspi_loader.img"
+        rk_run_host_command dd if=rkspi_tpl_spl.img of=rkspi_loader.img conv=notrunc status=none || exit_with_error "Failed to place signed TPL/SPL in SPI image" "rkspi_loader.img"
+        rk_run_host_command dd if=u-boot.itb of=rkspi_loader.img seek=768 conv=notrunc status=none || exit_with_error "Failed to place signed U-Boot FIT in SPI image" "rkspi_loader.img"
+    fi
+}
+
+function rk_secure_boot_minimize_spl_fit_key() {
+    # Keep the SPL control DTB within its fixed loader budget. This is the
+    # post-signing reduction used by Rockchip's fit-core.sh; the hardware
+    # crypto implementation reconstructs the omitted RSA intermediates.
+    local spl_dtb="spl/u-boot-spl.dtb"
+    local key_node="/signature/key-dev"
+
+    if grep -qx 'CONFIG_SPL_FIT_HW_CRYPTO=y' .config; then
+        fdtput -tx "${spl_dtb}" "${key_node}" rsa,r-squared 0x0 ||
+            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        if grep -qx 'CONFIG_SPL_ROCKCHIP_CRYPTO_V1=y' .config; then
+            fdtput -tx "${spl_dtb}" "${key_node}" rsa,np 0x0 ||
+                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+            fdtput -r "${spl_dtb}" "${key_node}/hash@np" ||
+                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        else
+            fdtput -tx "${spl_dtb}" "${key_node}" rsa,c 0x0 ||
+                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+            fdtput -r "${spl_dtb}" "${key_node}/hash@c" ||
+                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        fi
+    else
+        fdtput -tx "${spl_dtb}" "${key_node}" rsa,c 0x0 ||
+            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        fdtput -tx "${spl_dtb}" "${key_node}" rsa,np 0x0 ||
+            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        fdtput -tx "${spl_dtb}" "${key_node}" rsa,exponent-BN 0x0 ||
+            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        fdtput -r "${spl_dtb}" "${key_node}/hash@c" ||
+            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+        fdtput -r "${spl_dtb}" "${key_node}/hash@np" ||
+            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
+    fi
+}
+
+function rk_secure_boot_repack_signed_spl() {
+    local spl_bin="spl/u-boot-spl.bin"
+    local spl_nodtb="spl/u-boot-spl-nodtb.bin"
+    local spl_pad="spl/u-boot-spl-pad.bin"
+    local spl_dtb="spl/u-boot-spl.dtb"
+
+    cat "${spl_nodtb}" > "${spl_bin}" || exit_with_error "Failed to start signed SPL repack" "${spl_bin}"
+    if ! grep -qx 'CONFIG_SPL_SEPARATE_BSS=y' .config; then
+        [[ -f "${spl_pad}" ]] || exit_with_error "SPL pad missing while repacking signed SPL" "${spl_pad}"
+        cat "${spl_pad}" >> "${spl_bin}" || exit_with_error "Failed to append SPL pad" "${spl_bin}"
+    fi
+    cat "${spl_dtb}" >> "${spl_bin}" || exit_with_error "Failed to append signed SPL DTB" "${spl_bin}"
+}
+
+function rk_secure_boot_sign_uboot_fit() {
+    # Sign the Armbian-built ITS directly. Do not call Rockchip scripts/fit.sh:
+    # with CONFIG_FIT_SIGNATURE it invokes make.sh --raw-compile and silently
+    # rebuilds the already-built Armbian U-Boot with the vendor toolchain.
+    # This hook instead injects the public key into the existing SPL DTB,
+    # repacks the existing SPL, and host-verifies the resulting FIT.
+    rk_full_secure_boot_enabled || return 0
+
+    local platform keys_dir rk_sign_tool signed_fit fit_padding
+    platform="$(rk_detect_platform)"
+    keys_dir="${UBOOT_FIT_KEYS_DIR:-${PWD}/keys}"
+    rk_sign_tool="$(command -v rk_sign_tool 2>/dev/null || true)"
+    [[ -n "${rk_sign_tool}" ]] || rk_sign_tool="$(resolve_platform_rkbin_dir)/tools/rk_sign_tool"
+
+    [[ "${platform}" != "unknown" ]] || exit_with_error "Cannot sign U-Boot FIT for unknown Rockchip platform" "BOOT_SOC=${BOOT_SOC:-}"
+    [[ -x tools/mkimage && -x tools/fit_check_sign ]] || exit_with_error "Rockchip FIT signing tools missing" "${PWD}"
+    command -v fdtget >/dev/null 2>&1 || exit_with_error "fdtget is required for secure U-Boot FIT signing" "host dependency missing"
+    [[ -x "${rk_sign_tool}" ]] || exit_with_error "rk_sign_tool missing for secure U-Boot build" "${rk_sign_tool}"
+    [[ -f .config && -f u-boot.its && -f spl/u-boot-spl.dtb && -f spl/u-boot-spl-nodtb.bin ]] ||
+        exit_with_error "U-Boot signing inputs missing" "${PWD}"
+    [[ -f "${keys_dir}/dev.key" && -f "${keys_dir}/dev.pubkey" && -f "${keys_dir}/dev.crt" ]] ||
+        exit_with_error "FIT signing key material missing" "${keys_dir}"
+    grep -qx 'CONFIG_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_FIT_SIGNATURE must be enabled for full secure boot" ".config"
+    grep -qx 'CONFIG_SPL_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_SPL_FIT_SIGNATURE must be enabled for full secure boot" ".config"
+    grep -Eq 'rsa(2048|4096)' u-boot.its || exit_with_error "U-Boot ITS has no supported RSA signature node" "u-boot.its"
+
+    fit_padding=0x1000
+    grep -qx 'CONFIG_FIT_ENABLE_RSA4096_SUPPORT=y' .config && fit_padding=0x1200
+    mkdir -p fit || exit_with_error "Failed to create FIT output directory" "${PWD}/fit"
+    rm -f fit/uboot.itb data2sign.bin
+
+    # boot.itb is signed later with -K u-boot.dtb.  Inject that key before
+    # generating the final U-Boot FIT so the DTB embedded in u-boot.itb is the
+    # same trusted DTB used by the running U-Boot instance.
+    if ! fdtget -l u-boot.dtb /signature >/dev/null 2>&1; then
+        tools/mkimage -f u-boot.its -k "${keys_dir}" -K u-boot.dtb \
+            -E -p "${fit_padding}" -r fit/uboot.itb ||
+            exit_with_error "Failed to inject the boot FIT public key into U-Boot DTB" "u-boot.dtb"
+    fi
+    tools/mkimage -f u-boot.its -k "${keys_dir}" -K spl/u-boot-spl.dtb \
+        -E -p "${fit_padding}" -r fit/uboot.itb ||
+        exit_with_error "Failed to sign Armbian-built U-Boot FIT" "${platform}"
+
+    signed_fit="fit/uboot.itb"
+    [[ -f "${signed_fit}" ]] || exit_with_error "Signed U-Boot FIT missing" "${signed_fit}"
+    install -m 0644 "${signed_fit}" u-boot.itb || exit_with_error "Failed to install signed U-Boot FIT" "u-boot.itb"
+    tools/fit_check_sign -f u-boot.itb -k spl/u-boot-spl.dtb -s ||
+        exit_with_error "Signed U-Boot FIT verification failed" "u-boot.itb"
+
+    rk_secure_boot_minimize_spl_fit_key
+    rk_secure_boot_repack_signed_spl
+    rk_secure_boot_rebuild_idbloader
+    rk_secure_boot_sign_loader_artifacts "${rk_sign_tool}" "${platform}" "${keys_dir}"
+    rk_secure_boot_rebuild_spi_loader
+    display_alert "secure-uboot" "Signed U-Boot FIT, embedded SPL key, and loader artifacts" "info"
+}
+
 function rk_secure_boot_prepare_uboot_tree() {
     # Goal: Generate keys required for FIT signing before U-Boot configuration, plus an optional system encryption key.
     if ! rk_optee_bootchain_enabled; then
@@ -198,6 +386,9 @@ function rk_secure_boot_prepare_uboot_tree() {
     fi
 
     if [[ "${DISABLE_FIT_KEY_GEN}" == "yes" ]]; then
+        if rk_full_secure_boot_enabled; then
+            exit_with_error "DISABLE_FIT_KEY_GEN cannot be used with full secure boot" "RK_SECURE_UBOOT_ENABLE=yes requires a FIT signing key"
+        fi
         return 0
     fi
 
@@ -229,6 +420,9 @@ function rk_secure_boot_prepare_uboot_tree() {
     fi
 
     if [[ -z "${rk_sign_tool}" ]]; then
+        if rk_full_secure_boot_enabled; then
+            exit_with_error "rk_sign_tool not found for full secure boot" "Cannot generate or sign FIT key material"
+        fi
         display_alert "secure-uboot" "rk_sign_tool not found, skipping FIT key generation" "warn"
         return 0
     fi

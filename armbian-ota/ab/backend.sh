@@ -2,6 +2,7 @@
 
 AB_OTA_ROOTFS_TAR="rootfs.tar.gz"
 AB_OTA_BOOT_TAR="boot.tar.gz"
+AB_OTA_BOOT_ITB="boot.itb"
 AB_OTA_ROOTFS_SHA="rootfs.sha256"
 AB_OTA_BOOT_SHA="boot.sha256"
 
@@ -311,14 +312,6 @@ ab_uboot_get_env() {
     fw_printenv -n "$1" 2>/dev/null || echo ""
 }
 
-ab_uboot_set_env() {
-    local key="$1"
-    local value="$2"
-    log_info "Setting u-boot env: ${key}=${value}"
-    fw_setenv "${key}" "${value}" || return 1
-    [ "$(fw_printenv -n "${key}" 2>/dev/null || true)" = "${value}" ]
-}
-
 ab_get_retry_max() {
     local retry_max
     retry_max="$(ab_uboot_get_env slot_retry_max)"
@@ -365,12 +358,50 @@ ab_extract_tar_gz_payload() {
     tar --xattrs --acls --numeric-owner -xzf "${archive}" -C "${target}"
 }
 
+ab_is_fit_image() {
+    local image="$1" magic
+
+    [ -f "${image}" ] || return 1
+    magic="$(dd if="${image}" bs=4 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    [ "${magic}" = "d00dfeed" ]
+}
+
+ab_write_target_boot_itb() {
+    local image="$1" target="$2" target_slot="$3"
+    local expected_partlabel image_size target_size partlabel
+
+    case "${target_slot}" in
+        a|b) ;;
+        *) error_exit "Invalid target slot for FIT boot image: ${target_slot}" ;;
+    esac
+
+    [ -f "${image}" ] || error_exit "Missing FIT boot payload: ${image}"
+    [ -b "${target}" ] || error_exit "FIT boot target is not a block device: ${target}"
+
+    expected_partlabel="boot_${target_slot}"
+    partlabel="$(blkid -s PARTLABEL -o value "${target}" 2>/dev/null || true)"
+    [ "${partlabel}" = "${expected_partlabel}" ] ||
+        error_exit "Refusing to write FIT boot image to ${target}: expected PARTLABEL=${expected_partlabel}, found ${partlabel:-<empty>}"
+
+    ab_is_fit_image "${image}" || error_exit "Refusing to write invalid FIT boot image: ${image}"
+
+    image_size="$(stat -c '%s' "${image}" 2>/dev/null || true)"
+    target_size="$(blockdev --getsize64 "${target}" 2>/dev/null || true)"
+    [ -n "${image_size}" ] && [ -n "${target_size}" ] && [ "${image_size}" -le "${target_size}" ] ||
+        error_exit "FIT boot image size check failed: image=${image_size:-unknown}, target=${target_size:-unknown}"
+
+    log_info "Writing FIT boot image ${image} (${image_size} bytes) to target slot ${target_slot}: ${target}"
+    dd if="${image}" of="${target}" bs=4M conv=fsync ||
+        error_exit "Failed to write FIT boot image to ${target}"
+    sync
+}
+
 ab_require_tools() {
-    ota_require_runtime fw_printenv fw_setenv blkid mount umount tar findmnt sed grep awk reboot dd
+    ota_require_runtime fw_printenv armbian-abctl blkid mount umount tar findmnt sed grep awk reboot dd od tr blockdev
 }
 
 ab_env_slot_boot_ready() {
-    local bootcmd scan preboot devtype devnum part_a part_b
+    local bootcmd scan preboot devtype devnum part_a part_b boot_mode fit_selector
     bootcmd="$(ab_uboot_get_env bootcmd)"
     scan="$(ab_uboot_get_env scan_dev_for_boot_part)"
     preboot="$(ab_uboot_get_env ab_preboot)"
@@ -378,6 +409,8 @@ ab_env_slot_boot_ready() {
     devnum="$(ab_uboot_get_env ab_boot_devnum)"
     part_a="$(ab_uboot_get_env distro_bootpart_a)"
     part_b="$(ab_uboot_get_env distro_bootpart_b)"
+    boot_mode="$(ab_uboot_get_env ab_boot_mode)"
+    fit_selector="$(ab_uboot_get_env ab_select_fit_slot)"
 
     [ -n "${devtype}" ] || return 1
     [ -n "${devnum}" ] || return 1
@@ -385,6 +418,14 @@ ab_env_slot_boot_ready() {
     [ -n "${part_b}" ] || return 1
     echo "${preboot}" | grep -q "slot_retry_left" || return 1
     echo "${preboot}" | grep -q "ota_in_progress" || return 1
+
+    if [ "${boot_mode}" = "raw-fit" ]; then
+        echo "${fit_selector}" | grep -q "boot_fit_part" || return 1
+        echo "${bootcmd}" | grep -q "run ab_select_fit_slot" || return 1
+        echo "${bootcmd}" | grep -q "boot_fit" || return 1
+        return 0
+    fi
+
     echo "${scan}" | grep -q "ab_boot_devtype" || return 1
     echo "${scan}" | grep -q "boot_slot" || return 1
     echo "${bootcmd}" | grep -q "run ab_preboot" || return 1
@@ -472,9 +513,19 @@ ab_update_armbian_env() {
 
 ab_verify_payload() {
     local work_dir="$1"
+
+    [ -f "${work_dir}/${AB_OTA_BOOT_ITB}" ] && [ -f "${work_dir}/${AB_OTA_BOOT_TAR}" ] &&
+        error_exit "OTA package contains both ${AB_OTA_BOOT_ITB} and ${AB_OTA_BOOT_TAR}; refusing ambiguous boot payload"
+
     verify_payload_archives "${work_dir}" \
         "${AB_OTA_ROOTFS_TAR}" "${AB_OTA_ROOTFS_SHA}" \
         "${AB_OTA_BOOT_TAR}" "${AB_OTA_BOOT_SHA}"
+
+    if [ -f "${work_dir}/${AB_OTA_BOOT_ITB}" ]; then
+        verify_sha256 "${work_dir}/${AB_OTA_BOOT_ITB}" "${work_dir}/${AB_OTA_BOOT_SHA}" "${AB_OTA_BOOT_ITB}"
+        ab_is_fit_image "${work_dir}/${AB_OTA_BOOT_ITB}" ||
+            error_exit "Invalid FIT boot image in OTA package: ${AB_OTA_BOOT_ITB}"
+    fi
 }
 
 ab_mark_ready_to_boot() {
@@ -591,7 +642,10 @@ ab_update_target_partition() {
 
     ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
 
-    if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
+    if [ -f "${temp_work}/${AB_OTA_BOOT_ITB}" ]; then
+        [ -n "${target_boot_dev}" ] || error_exit "Cannot find target boot partition for FIT boot image"
+        ab_write_target_boot_itb "${temp_work}/${AB_OTA_BOOT_ITB}" "${target_boot_dev}" "${target_slot}"
+    elif [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
         boot_mnt="$(make_ota_work_dir "ab-boot-mnt")"
         if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
             empty_mount_dir "${boot_mnt}"
@@ -689,11 +743,7 @@ ab_start_ota() {
     rm -rf "${temp_work}"
 
     ab_mark_ready_to_boot "${package_path}" "${current_slot}" "${target_slot}"
-    ab_uboot_set_env "ota_in_progress" "1" || error_exit "Failed to set ota_in_progress"
-    ab_uboot_set_env "boot_slot" "${target_slot}" || error_exit "Failed to switch boot_slot"
-    ab_uboot_set_env "try_count" "0" || log_warn "Failed to reset try_count"
-    ab_uboot_set_env "slot_retry_max" "$(ab_get_retry_max)" || log_warn "Failed to set slot_retry_max"
-    ab_uboot_set_env "slot_retry_left" "$(ab_get_retry_max)" || error_exit "Failed to set slot_retry_left"
+    armbian-abctl prepare "${target_slot}" || error_exit "Failed to prepare U-Boot A/B state"
 
     log_info "AB OTA staged successfully. Current slot=${current_slot}, target slot=${target_slot}"
     log_info "Reboot to boot the new slot"
@@ -709,10 +759,7 @@ ab_mark_success() {
     fi
 
     current_slot="$(ab_get_current_slot)"
-    ab_uboot_set_env "boot_success" "${current_slot}" || log_error "Failed to set boot_success"
-    ab_uboot_set_env "ota_in_progress" "0" || log_error "Failed to clear ota_in_progress"
-    ab_uboot_set_env "try_count" "0" || log_warn "Failed to reset try_count"
-    ab_uboot_set_env "slot_retry_left" "$(ab_get_retry_max)" || log_warn "Failed to reset slot_retry_left"
+    armbian-abctl mark-success "${current_slot}" || log_error "Failed to mark A/B boot successful"
 
     state_mark_mode "ab"
     state_mark_status "success"
@@ -745,14 +792,11 @@ ab_rollback() {
         state_mark_mode "ab"
         state_mark_status "failed"
         state_set "COMPLETE_TIME" "$(date -Iseconds)"
-        ab_uboot_set_env "ota_in_progress" "0" || true
+        armbian-abctl rollback || true
         error_exit "Maximum rollback retry count reached"
     fi
 
-    ab_uboot_set_env "boot_slot" "${last_success}" || log_error "Failed to restore boot_slot"
-    ab_uboot_set_env "ota_in_progress" "0" || log_error "Failed to clear ota_in_progress"
-    ab_uboot_set_env "try_count" "${try_count}" || log_error "Failed to update try_count"
-    ab_uboot_set_env "slot_retry_left" "$(ab_get_retry_max)" || log_warn "Failed to reset slot_retry_left"
+    armbian-abctl rollback || log_error "Failed to restore A/B boot state"
 
     state_mark_mode "ab"
     state_mark_status "rollback"
@@ -792,11 +836,7 @@ ab_switch_slot() {
         return 0
     fi
 
-    ab_uboot_set_env "boot_slot" "${target_slot}" || error_exit "Failed to switch boot_slot"
-    ab_uboot_set_env "boot_success" "${target_slot}" || log_warn "Failed to update boot_success"
-    ab_uboot_set_env "ota_in_progress" "0" || log_warn "Failed to clear ota_in_progress"
-    ab_uboot_set_env "try_count" "0" || log_warn "Failed to reset try_count"
-    ab_uboot_set_env "slot_retry_left" "$(ab_get_retry_max)" || log_warn "Failed to reset slot_retry_left"
+    armbian-abctl mark-success "${target_slot}" || error_exit "Failed to switch A/B boot state"
 
     state_mark_mode "ab"
     state_mark_status "slot_switched"

@@ -3,6 +3,7 @@
 #
 
 rk_secure_boot_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+rk_secure_boot_extension_dir="${rk_secure_boot_dir}"
 
 source "${rk_secure_boot_dir}/build-hooks/common.sh"
 source "${rk_secure_boot_dir}/build-hooks/secure-boot-uboot.sh"
@@ -40,6 +41,10 @@ function post_config_uboot_target__rk_secure_boot_stage_fit_generator() {
             exit_with_error "No secure U-Boot config fragment mapping found" "BOOT_SOC=${BOOT_SOC:-} BOARD_NAME=${BOARD_NAME:-${BOARD:-}}"
         rk_secure_boot_apply_config_fragment "${fragment}"
     fi
+}
+
+function post_uboot_custom_postprocess__rk_secure_boot_sign_fit() {
+    rk_secure_boot_sign_uboot_fit
 }
 
 function check_uboot_produced_binary_file__rk_secure_boot_fit() {

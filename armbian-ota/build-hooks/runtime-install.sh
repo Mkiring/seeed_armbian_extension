@@ -24,6 +24,10 @@ function ota_install_runtime_to_rootfs() {
         display_alert "OTA runtime" "Failed to install armbian-ota CLI" "err"
         return 1
     }
+    cp "${runtime_src}/bin/armbian-abctl" "${root_dir}/usr/sbin/armbian-abctl" || {
+        display_alert "OTA runtime" "Failed to install armbian-abctl" "err"
+        return 1
+    }
     cp "${runtime_src}/lib/common.sh" "${root_dir}/usr/share/armbian-ota/common.sh" || {
         display_alert "OTA runtime" "Failed to install common.sh" "err"
         return 1
@@ -86,7 +90,7 @@ function ota_install_runtime_to_rootfs() {
         fi
     fi
 
-    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/state.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
+    chmod +x "${root_dir}/usr/sbin/armbian-ota" "${root_dir}/usr/sbin/armbian-abctl" "${root_dir}/usr/share/armbian-ota/common.sh" "${root_dir}/usr/share/armbian-ota/state.sh" "${root_dir}/usr/share/armbian-ota/persist.sh" "${root_dir}/usr/share/armbian-ota/preserve.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-ab.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-ab.sh"
     [[ -f "${root_dir}/usr/share/armbian-ota/backend-recovery.sh" ]] && chmod +x "${root_dir}/usr/share/armbian-ota/backend-recovery.sh"
 
