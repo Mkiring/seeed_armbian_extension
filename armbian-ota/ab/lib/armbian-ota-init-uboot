@@ -46,6 +46,32 @@ if ! command -v fw_printenv >/dev/null 2>&1 || ! command -v fw_setenv >/dev/null
     exit 1
 fi
 
+ensure_initial_env() {
+    local initial_env="/etc/u-boot-initial-env"
+
+    # libubootenv has no compiled-in default.  On a freshly provisioned raw
+    # environment, fw_setenv needs this file to construct the first valid
+    # CRC-protected image.  Do not replace an administrator-provided default.
+    if [ -s "${initial_env}" ]; then
+        return 0
+    fi
+
+    mkdir -p /etc
+    cat > "${initial_env}" <<'EOF'
+# Default values for first-time A/B U-Boot environment initialization.
+boot_slot=a
+boot_success=a
+ota_in_progress=0
+try_count=0
+slot_retry_max=3
+slot_retry_left=3
+EOF
+    chmod 0644 "${initial_env}"
+    log_info "Installed fallback U-Boot default environment: ${initial_env}"
+}
+
+ensure_initial_env
+
 log_info "=== Initializing u-boot AB partition boot environment ==="
 
 get_partition_number_from_dev() {
