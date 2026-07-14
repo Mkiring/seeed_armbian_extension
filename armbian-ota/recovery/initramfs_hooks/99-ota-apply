@@ -628,7 +628,6 @@ START_TIME_VALUE="$(grep -E '^START_TIME=' "${STATE_FILE}" 2>/dev/null | tail -n
 COMPLETE_TIME_VALUE="$(date -Iseconds)"
 if command -v ota_state_write_file >/dev/null 2>&1; then
     (
-        OTA_STATE_TEMPLATE_FILE="${ROOT_MNT}/etc/armbian-ota/ota-state.env.template"
         OTA_STATE_MODE=recovery
         OTA_STATE_STATUS=success
         OTA_STATE_PACKAGE_PATH="${PACKAGE_PATH_VALUE}"

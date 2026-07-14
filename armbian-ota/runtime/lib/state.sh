@@ -15,13 +15,9 @@ ota_state_set_key() {
 ota_state_write_file() {
     state_file="$1"
     state_dir="${state_file%/*}"
-    template_file="${OTA_STATE_TEMPLATE_FILE:-/etc/armbian-ota/ota-state.env.template}"
 
     mkdir -p "${state_dir}" || return 1
-    if [ -f "${template_file}" ]; then
-        cp "${template_file}" "${state_file}" || return 1
-    else
-        cat > "${state_file}" <<'EOF' || return 1
+    cat > "${state_file}" <<'EOF' || return 1
 # Armbian OTA runtime state
 OTA_MODE=
 STATUS=idle
@@ -31,7 +27,6 @@ TARGET_SLOT=
 START_TIME=
 COMPLETE_TIME=
 EOF
-    fi
 
     ota_state_set_key "${state_file}" OTA_MODE "${OTA_STATE_MODE:-}"
     ota_state_set_key "${state_file}" STATUS "${OTA_STATE_STATUS:-idle}"

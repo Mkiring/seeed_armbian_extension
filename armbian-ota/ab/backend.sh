@@ -496,7 +496,6 @@ ab_write_target_state() {
     start_time="$(date -Iseconds)"
 
     (
-        OTA_STATE_TEMPLATE_FILE="${root_mnt}/etc/armbian-ota/ota-state.env.template"
         OTA_STATE_MODE=ab
         OTA_STATE_STATUS=ready_to_boot
         OTA_STATE_PACKAGE_PATH="$(basename "${package_path}")"

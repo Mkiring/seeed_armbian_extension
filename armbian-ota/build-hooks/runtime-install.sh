@@ -11,7 +11,6 @@ function ota_install_runtime_to_rootfs() {
     local recovery_src="${ota_ext_dir}/recovery"
     local default_preserve_list="${runtime_src}/policy/preserve-list.txt"
     local default_persist_map="${runtime_src}/policy/persist-map.txt"
-    local state_template="${runtime_src}/policy/ota-state.env.template"
 
     if [[ ! -d "${runtime_src}" ]]; then
         display_alert "OTA runtime" "runtime source dir missing: ${runtime_src}" "warn"
@@ -66,13 +65,6 @@ function ota_install_runtime_to_rootfs() {
                 display_alert "OTA runtime" "Failed to install default persist-map.txt" "warn"
             }
         fi
-    fi
-
-    if [[ -f "${state_template}" ]]; then
-        mkdir -p "${root_dir}/etc/armbian-ota"
-        cp "${state_template}" "${root_dir}/etc/armbian-ota/ota-state.env.template" || {
-            display_alert "OTA runtime" "Failed to install ota-state.env.template" "warn"
-        }
     fi
 
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
