@@ -64,3 +64,37 @@ if [[ "yes" == "yes" ]]; then
 	display_alert "RK U-Boot postprocess" "Enable rk-uboot-postprocess hooks" "info"
 	enable_extension "seeed_armbian_extension/rk-uboot-postprocess/rk-uboot-postprocess"
 fi
+
+# Add the PCIe ASPM workaround to the generated image's kernel command line.
+# Keep any board- or user-provided extraargs intact and make this hook idempotent.
+function post_customize_image__010_disable_pcie_aspm() {
+	local armbian_env="${MOUNT}/boot/armbianEnv.txt"
+	local line
+	local extraargs=""
+
+	mkdir -p "${MOUNT}/boot"
+	touch "${armbian_env}"
+
+	while IFS= read -r line; do
+		if [[ "${line}" == extraargs=* ]]; then
+			extraargs="${line#extraargs=}"
+			break
+		fi
+	done < "${armbian_env}"
+
+	if [[ " ${extraargs} " == *" pcie_aspm=off "* ]]; then
+		return 0
+	fi
+
+	if [[ -n "${extraargs}" ]]; then
+		sed -i '0,/^extraargs=/{/^extraargs=/s|$| pcie_aspm=off|}' "${armbian_env}"
+	else
+		if grep -q '^extraargs=' "${armbian_env}"; then
+			sed -i '0,/^extraargs=/{/^extraargs=/s|$|pcie_aspm=off|}' "${armbian_env}"
+		else
+			printf 'extraargs=pcie_aspm=off\n' >> "${armbian_env}"
+		fi
+	fi
+
+	display_alert "PCIe ASPM" "Added pcie_aspm=off to armbianEnv.txt" "info"
+}

@@ -5,6 +5,7 @@ This repository contains Armbian extensions focused on:
 - OTA updates (Recovery OTA / A/B Partition OTA)
 - Disk encryption (LUKS) with automatic unlock (OP-TEE)
 - Rockchip secure U-Boot / OP-TEE bootchain support
+- PCIe ASPM is disabled in generated images through `extraargs=pcie_aspm=off`
 
 ## Repository Role
 
