@@ -168,11 +168,23 @@ function rk_secure_boot_run_secondary_fit_signing() {
         fit_padding="0x1200"
     fi
 
+    # USBPLUG postprocessing can leave a stale tools/mkimage built from a
+    # temporary config without CONFIG_FIT_SIGNATURE.  That binary accepts the
+    # FIT arguments but creates an unsigned image, only failing later in
+    # fit_check_sign with "No RSA key found".  Rebuild it from the final,
+    # secure U-Boot configuration before the secondary FIT signing pass.
+    if "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -q 'Signing / verified boot not supported'; then
+        make -C "${uboot_dir}" -B tools-only || exit_with_error "FIT signing failed: unable to rebuild mkimage" "${uboot_dir}/tools"
+    fi
+    "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -qv 'Signing / verified boot not supported' ||
+        exit_with_error "FIT signing failed: mkimage lacks FIT signature support" "${uboot_dir}/tools/mkimage"
+
     display_alert "fit-post-initrd" "Signing final FIT from boot-final.its" "info"
     (
         cd "${uboot_dir}" || exit 1
         mkdir -p fit
         ./tools/mkimage -f "${fit_work}/boot-final.its" -k keys/ -K u-boot.dtb -E -p "${fit_padding}" -r fit/boot.itb || exit 1
+        fdtget -l u-boot.dtb /signature 2>/dev/null | grep -qx 'key-dev' || exit 1
         if [[ -x ./tools/fit_check_sign ]]; then
             ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
         fi

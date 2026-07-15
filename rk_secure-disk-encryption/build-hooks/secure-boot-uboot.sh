@@ -344,6 +344,13 @@ function rk_secure_boot_sign_uboot_fit() {
     grep -qx 'CONFIG_SPL_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_SPL_FIT_SIGNATURE must be enabled for full secure boot" ".config"
     grep -Eq 'rsa(2048|4096)' u-boot.its || exit_with_error "U-Boot ITS has no supported RSA signature node" "u-boot.its"
 
+    # The USBPLUG postprocess rebuilds host tools with its temporary config,
+    # leaving mkimage without FIT-signature support. Restore the host tools
+    # from the final secure U-Boot configuration before signing the FIT.
+    if tools/mkimage -h 2>&1 | grep -q 'Signing / verified boot not supported'; then
+        make -B tools-only || exit_with_error "Failed to rebuild FIT-signing U-Boot host tools" "${PWD}/tools"
+    fi
+
     fit_padding=0x1000
     grep -qx 'CONFIG_FIT_ENABLE_RSA4096_SUPPORT=y' .config && fit_padding=0x1200
     mkdir -p fit || exit_with_error "Failed to create FIT output directory" "${PWD}/fit"
@@ -360,13 +367,6 @@ function rk_secure_boot_sign_uboot_fit() {
     tools/mkimage -f u-boot.its -k "${keys_dir}" -K spl/u-boot-spl.dtb \
         -E -p "${fit_padding}" -r fit/uboot.itb ||
         exit_with_error "Failed to sign Armbian-built U-Boot FIT" "${platform}"
-
-    # Re-sign the final FIT while explicitly updating the SPL control DTB.
-    # The SPL carries this public key and uses it to authenticate u-boot.itb
-    # before U-Boot itself can run.
-    tools/mkimage -F -k "${keys_dir}" -K spl/u-boot-spl.dtb \
-        -r fit/uboot.itb ||
-        exit_with_error "Failed to finalize signed U-Boot FIT and embed SPL key" "${platform}"
 
     fdtget -l spl/u-boot-spl.dtb /signature 2>/dev/null | grep -qx 'key-dev' ||
         exit_with_error "FIT public key was not embedded in SPL DTB" "spl/u-boot-spl.dtb"

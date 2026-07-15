@@ -62,16 +62,23 @@ function rk_autodecrypt_ensure_sdk_tools() {
 }
 
 function rk_autodecrypt_ensure_pycryptodome() {
-    # rk_tee_user/v2 signs OP-TEE TAs with Python Crypto/Cryptodome helpers.
-    if python3 - <<'PY' >/dev/null 2>&1
+	# rk_tee_user/v2 signs OP-TEE TAs with Python Crypto/Cryptodome helpers.
+	if python3 - <<'PY' >/dev/null 2>&1
 import Crypto
 PY
-    then
-        return 0
-    fi
+	then
+		return 0
+	fi
 
-    rk_run_host_command apt-get install -y python3-pycryptodome ||
-        exit_with_error "failed to install python3-pycryptodome" "apt-get"
+	local cached_deb="$(dirname "${BASH_SOURCE[0]}")/host-debs/python3-pycryptodome_3.20.0+dfsg-1_amd64.deb"
+	if [[ -r "${cached_deb}" ]]; then
+		rk_run_host_command apt-get install -y "${cached_deb}" ||
+			exit_with_error "failed to install cached python3-pycryptodome" "apt-get"
+		return 0
+	fi
+
+	rk_run_host_command apt-get install -y python3-pycryptodome ||
+		exit_with_error "failed to install python3-pycryptodome" "apt-get"
 }
 function rk_autodecrypt_install_optee_client() {
     local root_dir="$1"
