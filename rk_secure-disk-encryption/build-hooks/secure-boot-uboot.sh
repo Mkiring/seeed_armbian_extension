@@ -361,6 +361,19 @@ function rk_secure_boot_sign_uboot_fit() {
         -E -p "${fit_padding}" -r fit/uboot.itb ||
         exit_with_error "Failed to sign Armbian-built U-Boot FIT" "${platform}"
 
+    # Re-sign the final FIT while explicitly updating the SPL control DTB.
+    # The SPL carries this public key and uses it to authenticate u-boot.itb
+    # before U-Boot itself can run.
+    tools/mkimage -F -k "${keys_dir}" -K spl/u-boot-spl.dtb \
+        -r fit/uboot.itb ||
+        exit_with_error "Failed to finalize signed U-Boot FIT and embed SPL key" "${platform}"
+
+    fdtget -l spl/u-boot-spl.dtb /signature 2>/dev/null | grep -qx 'key-dev' ||
+        exit_with_error "FIT public key was not embedded in SPL DTB" "spl/u-boot-spl.dtb"
+
+    fdtget -p fit/uboot.itb /configurations/conf/signature 2>/dev/null | grep -qx 'value' ||
+        exit_with_error "U-Boot FIT configuration was not signed" "fit/uboot.itb"
+
     signed_fit="fit/uboot.itb"
     [[ -f "${signed_fit}" ]] || exit_with_error "Signed U-Boot FIT missing" "${signed_fit}"
     install -m 0644 "${signed_fit}" u-boot.itb || exit_with_error "Failed to install signed U-Boot FIT" "u-boot.itb"
