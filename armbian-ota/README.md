@@ -47,7 +47,6 @@ extensions/armbian-ota/
 │   │   └── armbian-resize-userdata         # Resize shared userdata partition
 │   ├── systemd/
 │   │   ├── armbian-ota-firstboot.service   # Health check service
-│   │   ├── armbian-ota-mark-success.service # Mark success service
 │   │   ├── armbian-ota-rollback.service    # Rollback service
 │   │   └── armbian-resize-userdata.service # Resize shared userdata partition
 ```

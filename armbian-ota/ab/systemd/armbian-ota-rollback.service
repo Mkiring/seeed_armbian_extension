@@ -3,10 +3,12 @@ Description=Armbian AB OTA Rollback on Failure
 Documentation=https://docs.armbian.com
 DefaultDependencies=no
 After=armbian-ota-firstboot.service
+ConditionPathExists=/var/lib/armbian-ota/ota-state.env
 
 [Service]
 Type=oneshot
-ExecCondition=/bin/sh -c 'test -f /var/lib/armbian-ota/ota-state.env && grep -q "^OTA_MODE=ab$" /var/lib/armbian-ota/ota-state.env && grep -Eq "^STATUS=(ready_to_boot|boot_verifying)$" /var/lib/armbian-ota/ota-state.env'
+ExecCondition=/usr/bin/grep -qxF OTA_MODE=ab /var/lib/armbian-ota/ota-state.env
+ExecCondition=/usr/bin/grep -Eq '^STATUS=(ready_to_boot|boot_verifying)$' /var/lib/armbian-ota/ota-state.env
 ExecStart=/usr/sbin/armbian-ota rollback
 TimeoutStartSec=60
 StandardOutput=journal+console

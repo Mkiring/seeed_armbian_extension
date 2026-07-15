@@ -759,7 +759,8 @@ ab_mark_success() {
     fi
 
     current_slot="$(ab_get_current_slot)"
-    armbian-abctl mark-success "${current_slot}" || log_error "Failed to mark A/B boot successful"
+    armbian-abctl mark-success "${current_slot}" ||
+        error_exit "Failed to mark A/B boot successful"
 
     state_mark_mode "ab"
     state_mark_status "success"

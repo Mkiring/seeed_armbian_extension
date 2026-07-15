@@ -194,7 +194,6 @@ function pre_umount_final_image__895_install_ab_tools() {
         local services=(
             "armbian-ota-init-uboot.service"
             "armbian-ota-firstboot.service"
-            "armbian-ota-mark-success.service"
             "armbian-ota-rollback.service"
         )
         local svc
