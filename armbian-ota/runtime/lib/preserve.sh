@@ -174,24 +174,34 @@ ota_preserve_backup_archive() {
     ota_preserve_prepare_archive_list "${root_dir}" "${list_file}" "${tmp_list}" || return 0
     ota_preserve_log_info "backing up whitelisted files to ${archive}"
 
-    if tar --xattrs --acls --numeric-owner -cpf "${archive}" -C "${root_dir}" -T "${tmp_list}" 2>"${err_file}"; then
+    # BusyBox tar lacks -T, so expand the validated archive list into
+    # positional arguments. This also works with GNU tar.
+    set --
+    while IFS= read -r rel || [ -n "${rel}" ]; do
+        [ -n "${rel}" ] && set -- "$@" "${rel}"
+    done < "${tmp_list}"
+    [ "$#" -gt 0 ] || return 0
+
+    if tar --xattrs --acls --numeric-owner -cpf "${archive}" -C "${root_dir}" "$@" 2>"${err_file}"; then
         ota_preserve_log_info "backup completed (metadata mode)"
         rm -f "${err_file}" 2>/dev/null || true
         return 0
+    else
+        rc=$?
     fi
 
-    rc=$?
     ota_preserve_log_info "metadata backup failed rc=${rc}, retry plain tar mode"
     ota_preserve_log_tail "backup stderr" "${err_file}" 40
 
     rm -f "${err_file}" 2>/dev/null || true
-    if tar -cpf "${archive}" -C "${root_dir}" -T "${tmp_list}" 2>"${err_file}"; then
+    if tar -cpf "${archive}" -C "${root_dir}" "$@" 2>"${err_file}"; then
         ota_preserve_log_info "backup completed (plain mode)"
         rm -f "${err_file}" 2>/dev/null || true
         return 0
+    else
+        rc=$?
     fi
 
-    rc=$?
     ota_preserve_log_warn "backup failed rc=${rc}, continue without preserve"
     ota_preserve_log_tail "backup stderr" "${err_file}" 60
     rm -f "${archive}" "${tmp_list}" "${err_file}" 2>/dev/null || true
