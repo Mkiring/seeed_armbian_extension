@@ -452,4 +452,13 @@ if [[ "$DRY_RUN" == "yes" ]]; then
     exit 0
 fi
 
+if [[ "$BUILD_KERNEL_ONLY" != "yes" &&
+      "$BUILD_UBOOT_ONLY" != "yes" &&
+      "$SECURITY_PROFILE" != "none" &&
+      -e /dev/mapper/armbian-root ]]; then
+    echo "Closing stale LUKS mapper: armbian-root"
+    sudo cryptsetup luksClose armbian-root ||
+        die "Unable to close stale LUKS mapper: armbian-root"
+fi
+
 "${BUILD_CMD[@]}"
