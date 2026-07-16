@@ -174,6 +174,9 @@ append_cache_ttl_args() {
     [[ -n "${GITHUB_MIRROR:-}" ]] && BUILD_CMD+=(GITHUB_MIRROR="$GITHUB_MIRROR")
     [[ -n "${GHPROXY_ADDRESS:-}" ]] && BUILD_CMD+=(GHPROXY_ADDRESS="$GHPROXY_ADDRESS")
     [[ -n "${GITPROXY_ADDRESS:-}" ]] && BUILD_CMD+=(GITPROXY_ADDRESS="$GITPROXY_ADDRESS")
+    # Pass only the directory path. Private key material stays in a mounted
+    # protected directory and is never serialized into the build command.
+    [[ -n "${UBOOT_FIT_KEYS_BACKUP_DIR:-}" ]] && BUILD_CMD+=(UBOOT_FIT_KEYS_BACKUP_DIR="$UBOOT_FIT_KEYS_BACKUP_DIR")
     [[ -n "${SEEED_RK_EXTENSION_OFFLINE:-}" ]] && BUILD_CMD+=(SEEED_RK_EXTENSION_OFFLINE="$SEEED_RK_EXTENSION_OFFLINE")
     [[ -n "${ARMBIAN_CONFIGNG_OFFLINE:-}" ]] && BUILD_CMD+=(ARMBIAN_CONFIGNG_OFFLINE="$ARMBIAN_CONFIGNG_OFFLINE")
     [[ -n "${ROOTFS_EXTRACT_WITHOUT_PV:-}" ]] && BUILD_CMD+=(ROOTFS_EXTRACT_WITHOUT_PV="$ROOTFS_EXTRACT_WITHOUT_PV")

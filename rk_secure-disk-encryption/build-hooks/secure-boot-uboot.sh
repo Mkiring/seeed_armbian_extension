@@ -387,7 +387,7 @@ function rk_secure_boot_prepare_uboot_tree() {
         return 0
     fi
 
-    local uboot_workdir rkbin_root rkbin_dir rk_sign_tool keys_dir
+    local uboot_workdir rkbin_root rkbin_dir rk_sign_tool keys_dir persistent_keys_dir
     uboot_workdir="$(pwd)"  # Current directory is the U-Boot source tree
     keys_dir="${uboot_workdir}/keys"
 
@@ -396,6 +396,12 @@ function rk_secure_boot_prepare_uboot_tree() {
         uboot_workdir="${UBOOT_DIR}"
         keys_dir="${UBOOT_DIR}/keys"
     fi
+
+    # A caller may provide a persistent signing-key directory. This is useful
+    # when an SPI-only build and a separately built OS FIT must retain one
+    # signing identity. With no directory supplied, preserve the upstream
+    # behavior: reuse worktree keys when present or generate a new key pair.
+    persistent_keys_dir="${UBOOT_FIT_KEYS_BACKUP_DIR:-}"
 
     rk_secure_boot_stage_uboot_fit_generator "${uboot_workdir}"
 
@@ -424,29 +430,44 @@ function rk_secure_boot_prepare_uboot_tree() {
 
     mkdir -p "${keys_dir}" || { display_alert "secure-uboot" "Cannot create directory ${keys_dir}" "err"; return 1; }
 
-    # Idempotent: if dev.key and dev.crt already exist, assume keys were generated and avoid overwriting
-    if [[ -f "${keys_dir}/dev.key" && -f "${keys_dir}/dev.crt" ]]; then
+    if [[ -n "${persistent_keys_dir}" ]]; then
+        [[ -f "${persistent_keys_dir}/private_key.pem" ]] ||
+            exit_with_error "FIT signing private key missing" "${persistent_keys_dir}/private_key.pem"
+        display_alert "secure-uboot" "Restoring caller-supplied FIT signing keys" "${persistent_keys_dir}" "info"
+        (
+            cd "${keys_dir}" || exit 1
+            install -m 0600 "${persistent_keys_dir}/private_key.pem" private_key.pem || exit 1
+            if [[ -f "${persistent_keys_dir}/public_key.pem" ]]; then
+                install -m 0644 "${persistent_keys_dir}/public_key.pem" public_key.pem || exit 1
+            else
+                openssl pkey -in private_key.pem -pubout -out public_key.pem || exit 1
+                chmod 0644 public_key.pem
+            fi
+            if [[ -f "${persistent_keys_dir}/dev.crt" ]]; then
+                install -m 0644 "${persistent_keys_dir}/dev.crt" dev.crt || exit 1
+            else
+                openssl req -batch -new -x509 -key private_key.pem -out dev.crt -subj "/CN=Armbian FIT Key/" || exit 1
+                chmod 0644 dev.crt
+            fi
+            ln -sf private_key.pem dev.key
+            ln -sf public_key.pem dev.pubkey
+        )
+        display_alert "secure-uboot" "Caller-supplied FIT keys restored: ${keys_dir}" "info"
+    elif [[ -f "${keys_dir}/dev.key" && -f "${keys_dir}/dev.crt" ]]; then
         display_alert "secure-uboot" "Existing keys detected, skipping generation (${keys_dir})" "info"
-        export UBOOT_FIT_KEYS_DIR="${keys_dir}"
-        return 0
+    else
+        display_alert "secure-uboot" "Generating initial key pair using rk_sign_tool" "info"
+        (
+            cd "${keys_dir}" || exit 1
+            "${rk_sign_tool}" kk --bits 2048 --out ./ || exit_with_error "rk_sign_tool key generation failed" "${rk_sign_tool}"
+            ln -rsf private_key.pem dev.key
+            ln -rsf public_key.pem dev.pubkey
+            openssl req -batch -new -x509 -key dev.key -out dev.crt -subj "/CN=Armbian FIT Key/" || exit_with_error "Failed to generate self-signed certificate" "dev.crt"
+            openssl rand -hex 32 > system_enc_key || exit_with_error "Failed to generate system_enc_key" "system_enc_key"
+        )
+        display_alert "secure-uboot" "FIT keys generated: ${keys_dir}" "info"
     fi
-
-    display_alert "secure-uboot" "Generating initial key pair using rk_sign_tool" "info"
-    (
-        cd "${keys_dir}" || exit 1
-        # Generate RSA 2048-bit key pair (tool outputs private_key.pem / public_key.pem)
-        "${rk_sign_tool}" kk --bits 2048 --out ./ || exit_with_error "rk_sign_tool key generation failed" "${rk_sign_tool}"
-        ln -rsf private_key.pem dev.key
-        ln -rsf public_key.pem dev.pubkey
-
-        # Generate self-signed certificate (subject can be adjusted as needed)
-        openssl req -batch -new -x509 -key dev.key -out dev.crt -subj "/CN=Armbian FIT Key/" || exit_with_error "Failed to generate self-signed certificate" "dev.crt"
-
-        # Generate random key for system encryption (32 bytes, hex encoded)
-        openssl rand -hex 32 > system_enc_key || exit_with_error "Failed to generate system_enc_key" "system_enc_key"
-    )
 
     # Export path for later stages/packaging
     export UBOOT_FIT_KEYS_DIR="${keys_dir}"
-    display_alert "secure-uboot" "FIT keys generated: ${UBOOT_FIT_KEYS_DIR}" "info"
 }
