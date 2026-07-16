@@ -74,14 +74,18 @@ ota_preserve_copy_path() {
 
     mkdir -p "${dst_parent}" 2>/dev/null || {
         ota_preserve_log_warn "failed to create target parent: ${dst_parent}"
-        return 0
+        return 1
     }
 
-    rm -rf "${dst}" 2>/dev/null || true
+    rm -rf "${dst}" 2>/dev/null || {
+        ota_preserve_log_warn "failed to remove target path: /${rel}"
+        return 1
+    }
     if cp -a "${src}" "${dst_parent}/" 2>/dev/null; then
         ota_preserve_log_info "copied /${rel}"
     else
         ota_preserve_log_warn "failed to copy /${rel}"
+        return 1
     fi
 }
 
@@ -92,6 +96,7 @@ ota_preserve_apply_list() {
     raw=""
     line=""
     rel=""
+    failed=0
 
     [ -n "${src_root}" ] || {
         ota_preserve_log_warn "source root is empty, skip"
@@ -116,8 +121,10 @@ ota_preserve_apply_list() {
 
         rel="${line#/}"
         [ -n "${rel}" ] || continue
-        ota_preserve_copy_path "${src_root}" "${dst_root}" "${rel}"
+        ota_preserve_copy_path "${src_root}" "${dst_root}" "${rel}" || failed=1
     done < "${list_file}"
+
+    return "${failed}"
 }
 
 ota_preserve_prepare_archive_list() {

@@ -89,7 +89,7 @@ empty_mount_dir() {
             case "${f}" in
                 .|..|lost+found) continue ;;
             esac
-            rm -rf "${f}" 2>/dev/null || true
+            rm -rf "${f}" 2>/dev/null || exit 1
         done
     )
 }
