@@ -112,8 +112,10 @@ set_env_key() {
     fi
 }
 
-# enable shell trace (goes into log/kmsg)
-set -x
+# Enable verbose shell tracing only when explicitly requested.
+if [ "${OTA_DEBUG:-no}" = "yes" ]; then
+    set -x
+fi
 
 [ -f /usr/share/armbian-ota/state.sh ] && . /usr/share/armbian-ota/state.sh
 [ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
