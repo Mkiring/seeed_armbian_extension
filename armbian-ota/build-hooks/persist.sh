@@ -4,11 +4,7 @@ function ota_persist_is_safe_absolute_path() {
     local path="$1"
 
     case "${path}" in
-        /*) ;;
-        *) return 1 ;;
-    esac
-
-    case "${path}" in
+        ""|[!/]*) return 1 ;;
         "/"|"/."|"/.."|*"../"*|*"/.."|*"*"*|*"?"*|*"["*|*"]"*) return 1 ;;
     esac
 
@@ -74,14 +70,7 @@ function ota_configure_persist_fstab() {
 
     sed -i '/^# BEGIN armbian-ota persist$/,/^# END armbian-ota persist$/d' "${fstab}"
 
-    if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        display_alert "OTA persist" "Skip /home bind mount; A/B overlayroot persists rootfs writes on armbi_usrdata" "info"
-        return 0
-    fi
-
-    # Recovery OTA -- encrypted or not -- is a single rootfs partition with no
-    # armbi_usrdata. /userdata is a plain directory on the rootfs, so do not add
-    # LABEL=armbi_usrdata or userdata.mount ordering here.
+    # Recovery OTA stores persist sources under the rootfs /userdata directory.
     cat >> "${fstab}" <<EOF
 
 # BEGIN armbian-ota persist
@@ -91,21 +80,17 @@ EOF
     if [[ -f "${persist_map}" ]]; then
         ota_for_each_persist_mapping "${persist_map}" ota_append_persist_fstab_entry \
             "${root_dir}" "${fstab}"
+        display_alert "OTA persist" "Configured persist bind mounts in fstab (recovery mode)" "info"
     else
-        mkdir -p "${root_dir}/userdata/.persist/home" "${root_dir}/home"
-        printf '%-40s %-15s none  bind,nofail  0  0\n' "/userdata/.persist/home" "/home" >> "${fstab}"
+        display_alert "OTA persist" "persist map not found, skip persist bind mounts" "warn"
     fi
 
     cat >> "${fstab}" <<EOF
 # END armbian-ota persist
 EOF
-
-    display_alert "OTA persist" "Configured persist bind mounts in fstab (recovery mode)" "info"
 }
 
-# Seed persist sources from their target paths.
-# Idempotent: copies only when the persist source is empty, so data already
-# preserved on the persist target (partition or directory) always wins.
+# Seed empty persist sources from their target paths.
 
 function ota_seed_persist_path() {
     local root_dir="$1"
@@ -124,45 +109,28 @@ function ota_seed_persist_path() {
     chmod 755 "${persist}" 2>/dev/null || true
 }
 
-function ota_seed_persist_mapping() {
-    local root_dir="$1"
-    local persist_src="$2"
-    local mount_target="$3"
-
-    ota_seed_persist_path "${root_dir}" "${persist_src}" "${mount_target}"
-}
-
 function ota_init_userdata_persist() {
     local root_dir="$1"
     local persist_map="${OTA_RUNTIME_SRC}/policy/persist-map.txt"
 
-    if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        display_alert "OTA persist" "Skip /userdata/.persist initialization in A/B overlayroot mode" "info"
-        return 0
-    fi
-
-    # Recovery mode (encrypted or not): no armbi_usrdata partition. Seed
-    # /userdata/.persist as a plain directory on the rootfs so the fstab bind
-    # mounts have valid sources on first boot. Across OTA it is preserved by
-    # /etc/armbian-ota/preserve-list.txt (see ota_preserve_backup_archive).
+    # Seed recovery persist sources before their first bind mount.
     if [[ -f "${persist_map}" ]]; then
-        ota_for_each_persist_mapping "${persist_map}" ota_seed_persist_mapping "${root_dir}"
+        ota_for_each_persist_mapping "${persist_map}" ota_seed_persist_path "${root_dir}"
+        display_alert "OTA persist" "Seeded persist directories (recovery OTA)" "info"
     else
-        ota_seed_persist_path "${root_dir}" "/userdata/.persist/home" "/home"
+        display_alert "OTA persist" "persist map not found, skip persist initialization" "warn"
     fi
-    display_alert "OTA persist" "Seeded persist directories (recovery OTA)" "info"
 }
 
 # Build Hooks (execution order)
 
 function pre_umount_final_image__897_configure_ota_persist() {
-    if [[ "${OTA_ENABLE}" != "yes" ]]; then
+    if [[ "${OTA_ENABLE}" != "yes" || "${AB_PART_OTA}" == "yes" ]]; then
         return 0
     fi
 
-    local root_dir="${MOUNT}"
-    ota_configure_persist_fstab "${root_dir}"
-    ota_init_userdata_persist "${root_dir}"
+    ota_configure_persist_fstab "${MOUNT}"
+    ota_init_userdata_persist "${MOUNT}"
 }
 
 # Configure overlayroot before Armbian rebuilds the final initramfs.
