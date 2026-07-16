@@ -270,38 +270,20 @@ function rk_secure_boot_rebuild_spi_loader() {
 }
 
 function rk_secure_boot_minimize_spl_fit_key() {
-    # Keep the SPL control DTB within its fixed loader budget. This is the
-    # post-signing reduction used by Rockchip's fit-core.sh; the hardware
-    # crypto implementation reconstructs the omitted RSA intermediates.
+    # Do not reduce the key material. RK3588 SPL FIT verification needs the
+    # complete RSA public key; clearing rsa,r-squared or rsa,c leaves the DTB
+    # node present but makes SPL report "No RSA key found" at boot.
     local spl_dtb="spl/u-boot-spl.dtb"
     local key_node="/signature/key-dev"
+    local property value
 
-    if grep -qx 'CONFIG_SPL_FIT_HW_CRYPTO=y' .config; then
-        fdtput -tx "${spl_dtb}" "${key_node}" rsa,r-squared 0x0 ||
-            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        if grep -qx 'CONFIG_SPL_ROCKCHIP_CRYPTO_V1=y' .config; then
-            fdtput -tx "${spl_dtb}" "${key_node}" rsa,np 0x0 ||
-                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-            fdtput -r "${spl_dtb}" "${key_node}/hash@np" ||
-                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        else
-            fdtput -tx "${spl_dtb}" "${key_node}" rsa,c 0x0 ||
-                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-            fdtput -r "${spl_dtb}" "${key_node}/hash@c" ||
-                exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        fi
-    else
-        fdtput -tx "${spl_dtb}" "${key_node}" rsa,c 0x0 ||
-            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        fdtput -tx "${spl_dtb}" "${key_node}" rsa,np 0x0 ||
-            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        fdtput -tx "${spl_dtb}" "${key_node}" rsa,exponent-BN 0x0 ||
-            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        fdtput -r "${spl_dtb}" "${key_node}/hash@c" ||
-            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-        fdtput -r "${spl_dtb}" "${key_node}/hash@np" ||
-            exit_with_error "Failed to minimise SPL FIT key" "${spl_dtb}"
-    fi
+    fdtget -l "${spl_dtb}" /signature 2>/dev/null | grep -qx 'key-dev' ||
+        exit_with_error "SPL FIT public key node missing" "${spl_dtb}"
+    for property in rsa,modulus rsa,r-squared rsa,c rsa,np rsa,n0-inverse rsa,exponent; do
+        value="$(fdtget -t bx "${spl_dtb}" "${key_node}" "${property}" 2>/dev/null)"
+        [[ -n "${value}" && "${value}" != '0' ]] ||
+            exit_with_error "SPL FIT public key property missing" "${spl_dtb}:${property}"
+    done
 }
 
 function rk_secure_boot_repack_signed_spl() {
