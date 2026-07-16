@@ -28,11 +28,11 @@ START_TIME=
 COMPLETE_TIME=
 EOF
 
-    ota_state_set_key "${state_file}" OTA_MODE "${OTA_STATE_MODE:-}"
-    ota_state_set_key "${state_file}" STATUS "${OTA_STATE_STATUS:-idle}"
-    ota_state_set_key "${state_file}" PACKAGE_PATH "${OTA_STATE_PACKAGE_PATH:-}"
-    ota_state_set_key "${state_file}" CURRENT_SLOT "${OTA_STATE_CURRENT_SLOT:-}"
-    ota_state_set_key "${state_file}" TARGET_SLOT "${OTA_STATE_TARGET_SLOT:-}"
-    ota_state_set_key "${state_file}" START_TIME "${OTA_STATE_START_TIME:-}"
-    ota_state_set_key "${state_file}" COMPLETE_TIME "${OTA_STATE_COMPLETE_TIME:-}"
+    ota_state_set_key "${state_file}" OTA_MODE "${OTA_STATE_MODE:-}" || return 1
+    ota_state_set_key "${state_file}" STATUS "${OTA_STATE_STATUS:-idle}" || return 1
+    ota_state_set_key "${state_file}" PACKAGE_PATH "${OTA_STATE_PACKAGE_PATH:-}" || return 1
+    ota_state_set_key "${state_file}" CURRENT_SLOT "${OTA_STATE_CURRENT_SLOT:-}" || return 1
+    ota_state_set_key "${state_file}" TARGET_SLOT "${OTA_STATE_TARGET_SLOT:-}" || return 1
+    ota_state_set_key "${state_file}" START_TIME "${OTA_STATE_START_TIME:-}" || return 1
+    ota_state_set_key "${state_file}" COMPLETE_TIME "${OTA_STATE_COMPLETE_TIME:-}" || return 1
 }

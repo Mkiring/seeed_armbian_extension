@@ -95,13 +95,13 @@ empty_mount_dir() {
 }
 
 state_init() {
-    mkdir -p "${OTA_STATE_DIR}" 2>/dev/null || return 0
+    mkdir -p "${OTA_STATE_DIR}" 2>/dev/null || return 1
     [ -f "${OTA_STATE_FILE}" ] && return 0
 
     (
         OTA_STATE_STATUS=idle
         ota_state_write_file "${OTA_STATE_FILE}"
-    ) || true
+    )
 }
 
 state_get() {
@@ -114,7 +114,7 @@ state_get() {
 state_set() {
     local key="$1"
     local value="$2"
-    state_init
+    state_init || return 1
     ota_state_set_key "${OTA_STATE_FILE}" "${key}" "${value}"
 }
 
@@ -133,14 +133,14 @@ state_mark_prepared() {
     local current_slot="${4:-}"
     local target_slot="${5:-}"
 
-    state_init
-    state_mark_mode "${mode}"
-    state_mark_status "${status}"
-    state_set "PACKAGE_PATH" "$(basename "${package_path}")"
-    state_set "CURRENT_SLOT" "${current_slot}"
-    state_set "TARGET_SLOT" "${target_slot}"
-    state_set "START_TIME" "$(date -Iseconds)"
-    state_set "COMPLETE_TIME" ""
+    state_init || return 1
+    state_mark_mode "${mode}" || return 1
+    state_mark_status "${status}" || return 1
+    state_set "PACKAGE_PATH" "$(basename "${package_path}")" || return 1
+    state_set "CURRENT_SLOT" "${current_slot}" || return 1
+    state_set "TARGET_SLOT" "${target_slot}" || return 1
+    state_set "START_TIME" "$(date -Iseconds)" || return 1
+    state_set "COMPLETE_TIME" "" || return 1
 }
 
 load_package_env_metadata() {
@@ -248,7 +248,7 @@ verify_payload_archives() {
 
     verify_sha256 "${work_dir}/${rootfs_tar}" "${work_dir}/${rootfs_sha}" "${rootfs_tar}"
 
-    if [ -f "${work_dir}/${boot_tar}" ] && [ -f "${work_dir}/${boot_sha}" ]; then
+    if [ -f "${work_dir}/${boot_tar}" ]; then
         verify_sha256 "${work_dir}/${boot_tar}" "${work_dir}/${boot_sha}" "${boot_tar}"
     fi
 }
