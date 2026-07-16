@@ -16,6 +16,8 @@ AB_OTA_TEE_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-tee-supplicant.log"
 AB_OTA_KEYBOX_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-keybox.log"
 AB_OTA_TEE_PID=""
 
+# Partition and slot helpers
+
 ab_get_slot_partlabel_by_fslabel() {
     case "$1" in
         "${BOOT_A_LABEL}") echo "boot_a" ;;
@@ -117,6 +119,7 @@ ab_prepare_byname_links() {
     fi
 }
 
+# Security partition and keybox helpers
 ab_start_tee_supplicant() {
     AB_OTA_TEE_PID=""
 
@@ -144,6 +147,33 @@ ab_stop_tee_supplicant() {
         wait "${AB_OTA_TEE_PID}" 2>/dev/null || true
     fi
     AB_OTA_TEE_PID=""
+}
+
+ab_read_keybox_passphrase() {
+    ab_start_tee_supplicant || return 2
+    if ! /usr/bin/keybox_app >"${AB_OTA_KEYBOX_LOG}" 2>&1; then
+        ab_stop_tee_supplicant
+        return 1
+    fi
+    ab_stop_tee_supplicant
+}
+
+ab_try_keybox_roundtrip() {
+    local out_file="$1"
+
+    cp "${out_file}" "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
+    ab_start_tee_supplicant || {
+        log_warn "Failed to start tee-supplicant in non-SSKR path; keep raw key fallback"
+        return 0
+    }
+    /usr/bin/keybox_app write >"${AB_OTA_KEYBOX_LOG}" 2>&1 || true
+    rm -f "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
+    /usr/bin/keybox_app >"${AB_OTA_KEYBOX_LOG}" 2>&1 || true
+    ab_stop_tee_supplicant
+
+    if [ -s "${AB_OTA_SYSPW_FILE}" ]; then
+        cp "${AB_OTA_SYSPW_FILE}" "${out_file}" 2>/dev/null || true
+    fi
 }
 
 ab_get_security_passphrase_file() {
@@ -179,17 +209,17 @@ ab_get_security_passphrase_file() {
             return 1
         }
 
-        ab_start_tee_supplicant || {
+        local keybox_status=0
+        ab_read_keybox_passphrase || keybox_status=$?
+        if [ "${keybox_status}" -eq 2 ]; then
             log_error "Failed to start tee-supplicant in rootfs path"
             return 1
-        }
-        if ! /usr/bin/keybox_app >"${AB_OTA_KEYBOX_LOG}" 2>&1; then
-            ab_stop_tee_supplicant
+        fi
+        if [ "${keybox_status}" -ne 0 ]; then
             log_error "keybox_app read failed in rootfs path"
             [ -f "${AB_OTA_KEYBOX_LOG}" ] && log_error "keybox_app log: $(tail -n 1 "${AB_OTA_KEYBOX_LOG}")"
             return 1
         fi
-        ab_stop_tee_supplicant
 
         if [ ! -s "${AB_OTA_SYSPW_FILE}" ]; then
             log_error "keybox_app did not produce ${AB_OTA_SYSPW_FILE}"
@@ -207,23 +237,13 @@ ab_get_security_passphrase_file() {
 
     # Try keybox write/read round-trip as in initramfs script; fallback to raw on failure.
     if [ -x /usr/bin/keybox_app ]; then
-        cp "${out_file}" "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
-        ab_start_tee_supplicant || {
-            log_warn "Failed to start tee-supplicant in non-SSKR path; keep raw key fallback"
-            return 0
-        }
-        /usr/bin/keybox_app write >"${AB_OTA_KEYBOX_LOG}" 2>&1 || true
-        rm -f "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
-        /usr/bin/keybox_app >"${AB_OTA_KEYBOX_LOG}" 2>&1 || true
-        ab_stop_tee_supplicant
-        if [ -s "${AB_OTA_SYSPW_FILE}" ]; then
-            cp "${AB_OTA_SYSPW_FILE}" "${out_file}" 2>/dev/null || true
-        fi
+        ab_try_keybox_roundtrip "${out_file}"
     fi
 
     return 0
 }
 
+# Active-slot helpers
 ab_detect_current_slot_from_root() {
     local root_dev root_part root_partlabel root_uuid root_a_uuid root_b_uuid
     root_dev=""
@@ -281,7 +301,11 @@ ab_get_current_slot() {
         return 0
     fi
 
-    ab_uboot_get_env "boot_slot" || echo "a"
+    current_slot="$(ab_uboot_get_env "boot_slot")"
+    case "${current_slot}" in
+        a|b) echo "${current_slot}" ;;
+        *) echo "a" ;;
+    esac
 }
 
 ab_get_target_slot() {
@@ -308,6 +332,14 @@ ab_get_slot_root_label() {
     fi
 }
 
+ab_slot_from_root_label() {
+    case "$1" in
+        "${ROOT_A_LABEL}") echo "a" ;;
+        "${ROOT_B_LABEL}") echo "b" ;;
+        *) echo "" ;;
+    esac
+}
+
 ab_uboot_get_env() {
     fw_printenv -n "$1" 2>/dev/null || echo ""
 }
@@ -319,6 +351,83 @@ ab_get_retry_max() {
     echo "${retry_max}"
 }
 
+# U-Boot environment validation
+ab_require_tools() {
+    ota_require_runtime fw_printenv armbian-abctl blkid mount umount mountpoint tar findmnt sed grep awk reboot dd od tr blockdev
+}
+
+ab_env_slot_boot_ready() {
+    local bootcmd scan preboot devtype devnum part_a part_b boot_mode fit_selector
+    bootcmd="$(ab_uboot_get_env bootcmd)"
+    scan="$(ab_uboot_get_env scan_dev_for_boot_part)"
+    preboot="$(ab_uboot_get_env ab_preboot)"
+    devtype="$(ab_uboot_get_env ab_boot_devtype)"
+    devnum="$(ab_uboot_get_env ab_boot_devnum)"
+    part_a="$(ab_uboot_get_env distro_bootpart_a)"
+    part_b="$(ab_uboot_get_env distro_bootpart_b)"
+    boot_mode="$(ab_uboot_get_env ab_boot_mode)"
+    fit_selector="$(ab_uboot_get_env ab_select_fit_slot)"
+
+    [ -n "${devtype}" ] || return 1
+    [ -n "${devnum}" ] || return 1
+    [ -n "${part_a}" ] || return 1
+    [ -n "${part_b}" ] || return 1
+    echo "${preboot}" | grep -q "slot_retry_left" || return 1
+    echo "${preboot}" | grep -q "ota_in_progress" || return 1
+
+    if [ "${boot_mode}" = "raw-fit" ]; then
+        echo "${fit_selector}" | grep -q "boot_fit_part" || return 1
+        echo "${bootcmd}" | grep -q "run ab_select_fit_slot" || return 1
+        echo "${bootcmd}" | grep -q "boot_fit" || return 1
+        return 0
+    fi
+
+    echo "${scan}" | grep -q "ab_boot_devtype" || return 1
+    echo "${scan}" | grep -q "boot_slot" || return 1
+    echo "${bootcmd}" | grep -q "run ab_preboot" || return 1
+    echo "${bootcmd}" | grep -q "run distro_bootcmd" || return 1
+    return 0
+}
+
+ab_ensure_slot_boot_env() {
+    local init_script
+    init_script="/usr/lib/armbian/armbian-ota-init-uboot"
+
+    if ab_env_slot_boot_ready; then
+        return 0
+    fi
+
+    [ -x "${init_script}" ] || error_exit "AB boot env is not initialized and ${init_script} is missing"
+    log_warn "AB boot env is incomplete, trying to repair via ${init_script} --force"
+    "${init_script}" --force || error_exit "Failed to reinitialize AB boot env"
+    ab_env_slot_boot_ready || error_exit "AB boot env is still invalid after reinitialization"
+}
+
+ab_require_partition_label() {
+    local label="$1"
+    local dev
+
+    dev="$(ab_get_part_by_label "${label}")"
+    [ -n "${dev}" ] || error_exit "AB OTA requires partition label ${label}, but it was not found"
+}
+
+ab_validate_environment() {
+    local current_slot
+
+    ab_ensure_slot_boot_env
+    ab_require_partition_label "${BOOT_A_LABEL}"
+    ab_require_partition_label "${BOOT_B_LABEL}"
+    ab_require_partition_label "${ROOT_A_LABEL}"
+    ab_require_partition_label "${ROOT_B_LABEL}"
+
+    current_slot="$(ab_detect_current_slot_from_root)"
+    case "${current_slot}" in
+        a|b) ;;
+        *) error_exit "Current rootfs is not running from an AB root partition" ;;
+    esac
+}
+
+# Payload verification and extraction
 ab_log_extract_progress() {
     local label="$1"
     local percent next=10
@@ -396,121 +505,6 @@ ab_write_target_boot_itb() {
     sync
 }
 
-ab_require_tools() {
-    ota_require_runtime fw_printenv armbian-abctl blkid mount umount tar findmnt sed grep awk reboot dd od tr blockdev
-}
-
-ab_env_slot_boot_ready() {
-    local bootcmd scan preboot devtype devnum part_a part_b boot_mode fit_selector
-    bootcmd="$(ab_uboot_get_env bootcmd)"
-    scan="$(ab_uboot_get_env scan_dev_for_boot_part)"
-    preboot="$(ab_uboot_get_env ab_preboot)"
-    devtype="$(ab_uboot_get_env ab_boot_devtype)"
-    devnum="$(ab_uboot_get_env ab_boot_devnum)"
-    part_a="$(ab_uboot_get_env distro_bootpart_a)"
-    part_b="$(ab_uboot_get_env distro_bootpart_b)"
-    boot_mode="$(ab_uboot_get_env ab_boot_mode)"
-    fit_selector="$(ab_uboot_get_env ab_select_fit_slot)"
-
-    [ -n "${devtype}" ] || return 1
-    [ -n "${devnum}" ] || return 1
-    [ -n "${part_a}" ] || return 1
-    [ -n "${part_b}" ] || return 1
-    echo "${preboot}" | grep -q "slot_retry_left" || return 1
-    echo "${preboot}" | grep -q "ota_in_progress" || return 1
-
-    if [ "${boot_mode}" = "raw-fit" ]; then
-        echo "${fit_selector}" | grep -q "boot_fit_part" || return 1
-        echo "${bootcmd}" | grep -q "run ab_select_fit_slot" || return 1
-        echo "${bootcmd}" | grep -q "boot_fit" || return 1
-        return 0
-    fi
-
-    echo "${scan}" | grep -q "ab_boot_devtype" || return 1
-    echo "${scan}" | grep -q "boot_slot" || return 1
-    echo "${bootcmd}" | grep -q "run ab_preboot" || return 1
-    echo "${bootcmd}" | grep -q "run distro_bootcmd" || return 1
-    return 0
-}
-
-ab_ensure_slot_boot_env() {
-    local init_script
-    init_script="/usr/lib/armbian/armbian-ota-init-uboot"
-
-    if ab_env_slot_boot_ready; then
-        return 0
-    fi
-
-    [ -x "${init_script}" ] || error_exit "AB boot env is not initialized and ${init_script} is missing"
-    log_warn "AB boot env is incomplete, trying to repair via ${init_script} --force"
-    "${init_script}" --force || error_exit "Failed to reinitialize AB boot env"
-    ab_env_slot_boot_ready || error_exit "AB boot env is still invalid after reinitialization"
-}
-
-ab_require_partition_label() {
-    local label="$1"
-    local dev
-
-    dev="$(ab_get_part_by_label "${label}")"
-    [ -n "${dev}" ] || error_exit "AB OTA requires partition label ${label}, but it was not found"
-}
-
-ab_validate_environment() {
-    local current_slot
-
-    ab_ensure_slot_boot_env
-    ab_require_partition_label "${BOOT_A_LABEL}"
-    ab_require_partition_label "${BOOT_B_LABEL}"
-    ab_require_partition_label "${ROOT_A_LABEL}"
-    ab_require_partition_label "${ROOT_B_LABEL}"
-
-    current_slot="$(ab_detect_current_slot_from_root)"
-    case "${current_slot}" in
-        a|b) ;;
-        *) error_exit "Current rootfs is not running from an AB root partition" ;;
-    esac
-}
-
-ab_slot_from_root_label() {
-    case "$1" in
-        "${ROOT_A_LABEL}") echo "a" ;;
-        "${ROOT_B_LABEL}") echo "b" ;;
-        *) echo "" ;;
-    esac
-}
-
-ab_update_armbian_env() {
-    local arm_env="$1"
-    local root_type="$2"
-    local root_uuid="$3"
-
-    [ -f "${arm_env}" ] || return 0
-
-    if [ "${root_type}" = "crypto_LUKS" ]; then
-        if grep -q '^rootdev=' "${arm_env}"; then
-            sed -i 's|^rootdev=.*$|rootdev=/dev/mapper/armbian-root|' "${arm_env}"
-        else
-            printf '\nrootdev=/dev/mapper/armbian-root\n' >> "${arm_env}"
-        fi
-
-        [ -n "${root_uuid}" ] || return 0
-        if grep -q '^cryptdevice=' "${arm_env}"; then
-            sed -i "s|^cryptdevice=.*$|cryptdevice=UUID=${root_uuid}:armbian-root|" "${arm_env}"
-        else
-            printf 'cryptdevice=UUID=%s:armbian-root\n' "${root_uuid}" >> "${arm_env}"
-        fi
-        return 0
-    fi
-
-    [ -n "${root_uuid}" ] || return 0
-    if grep -q '^rootdev=' "${arm_env}"; then
-        sed -i "s|^rootdev=UUID=.*$|rootdev=UUID=${root_uuid}|" "${arm_env}"
-        sed -i "s|^rootdev=PARTUUID=.*$|rootdev=UUID=${root_uuid}|" "${arm_env}"
-    else
-        printf '\nrootdev=UUID=%s\n' "${root_uuid}" >> "${arm_env}"
-    fi
-}
-
 ab_verify_payload() {
     local work_dir="$1"
 
@@ -526,14 +520,6 @@ ab_verify_payload() {
         ab_is_fit_image "${work_dir}/${AB_OTA_BOOT_ITB}" ||
             error_exit "Invalid FIT boot image in OTA package: ${AB_OTA_BOOT_ITB}"
     fi
-}
-
-ab_mark_ready_to_boot() {
-    local package_path="$1"
-    local current_slot="$2"
-    local target_slot="$3"
-
-    state_mark_prepared "ab" "ready_to_boot" "${package_path}" "${current_slot}" "${target_slot}"
 }
 
 ab_write_target_state() {
@@ -557,15 +543,216 @@ ab_write_target_state() {
     ) || error_exit "Failed to write target OTA state"
 }
 
+# Target slot update helpers
+ab_apply_target_rootfs() {
+    local temp_work="$1"
+    local root_mnt="$2"
+    local package_path="$3"
+    local current_slot="$4"
+    local target_slot="$5"
+    local preserve_list
+
+    empty_mount_dir "${root_mnt}" || return 1
+    ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_ROOTFS_TAR}" "${root_mnt}" "rootfs" || return 1
+
+    if command -v ota_preserve_apply_list >/dev/null 2>&1; then
+        preserve_list="/etc/armbian-ota/preserve-list.txt"
+        [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/preserve-list.txt"
+        ota_preserve_apply_list "/" "${root_mnt}" "${preserve_list}" || return 1
+    else
+        log_warn "preserve helper not available, skip local config preserve"
+    fi
+
+    ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
+}
+
+ab_update_armbian_env() {
+    local arm_env="$1"
+    local root_type="$2"
+    local root_uuid="$3"
+
+    [ -f "${arm_env}" ] || return 0
+
+    if [ "${root_type}" = "crypto_LUKS" ]; then
+        if grep -q '^rootdev=' "${arm_env}"; then
+            sed -i 's|^rootdev=.*$|rootdev=/dev/mapper/armbian-root|' "${arm_env}" || return 1
+        else
+            printf '\nrootdev=/dev/mapper/armbian-root\n' >> "${arm_env}" || return 1
+        fi
+
+        [ -n "${root_uuid}" ] || return 0
+        if grep -q '^cryptdevice=' "${arm_env}"; then
+            sed -i "s|^cryptdevice=.*$|cryptdevice=UUID=${root_uuid}:armbian-root|" "${arm_env}" || return 1
+        else
+            printf 'cryptdevice=UUID=%s:armbian-root\n' "${root_uuid}" >> "${arm_env}" || return 1
+        fi
+        return 0
+    fi
+
+    [ -n "${root_uuid}" ] || return 0
+    if grep -q '^rootdev=' "${arm_env}"; then
+        sed -i "s|^rootdev=UUID=.*$|rootdev=UUID=${root_uuid}|" "${arm_env}" || return 1
+        sed -i "s|^rootdev=PARTUUID=.*$|rootdev=UUID=${root_uuid}|" "${arm_env}" || return 1
+    else
+        printf '\nrootdev=UUID=%s\n' "${root_uuid}" >> "${arm_env}" || return 1
+    fi
+}
+
+ab_update_target_boot() {
+    local temp_work="$1"
+    local root_mnt="$2"
+    local target_boot_dev="$3"
+    local target_slot="$4"
+    local target_root_type="$5"
+    local target_root_uuid="$6"
+    local boot_mnt arm_env=""
+
+    if [ -f "${temp_work}/${AB_OTA_BOOT_ITB}" ]; then
+        [ -n "${target_boot_dev}" ] || error_exit "Cannot find target boot partition for FIT boot image"
+        ab_write_target_boot_itb "${temp_work}/${AB_OTA_BOOT_ITB}" "${target_boot_dev}" "${target_slot}"
+    elif [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ]; then
+        boot_mnt="$(make_ota_work_dir "ab-boot-mnt")"
+        if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
+            if [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
+                empty_mount_dir "${boot_mnt}" || {
+                    log_error "Failed to clear target boot partition"
+                    umount "${boot_mnt}" 2>/dev/null || \
+                        log_warn "Failed to unmount target boot partition after clear failure"
+                    if ! mountpoint -q "${boot_mnt}" 2>/dev/null; then
+                        rm -rf "${boot_mnt}"
+                    fi
+                    return 1
+                }
+                ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_BOOT_TAR}" "${boot_mnt}" "boot" || \
+                    {
+                        log_error "Failed to extract boot payload"
+                        umount "${boot_mnt}" 2>/dev/null || \
+                            log_warn "Failed to unmount target boot partition after extraction failure"
+                        if ! mountpoint -q "${boot_mnt}" 2>/dev/null; then
+                            rm -rf "${boot_mnt}"
+                        fi
+                        return 1
+                    }
+                sync
+            fi
+            arm_env="${boot_mnt}/armbianEnv.txt"
+            if ! ab_update_armbian_env "${arm_env}" "${target_root_type}" "${target_root_uuid}"; then
+                log_error "Failed to update target boot environment"
+                umount "${boot_mnt}" 2>/dev/null || \
+                    log_warn "Failed to unmount target boot partition after environment update failure"
+                if ! mountpoint -q "${boot_mnt}" 2>/dev/null; then
+                    rm -rf "${boot_mnt}"
+                fi
+                return 1
+            fi
+            if ! umount "${boot_mnt}"; then
+                log_error "Failed to unmount target boot partition"
+                return 1
+            fi
+        else
+            log_error "Failed to mount target boot partition"
+            rm -rf "${boot_mnt}"
+            return 1
+        fi
+        rm -rf "${boot_mnt}"
+    fi
+
+    if [ -z "${arm_env}" ] && [ -f "${root_mnt}/boot/armbianEnv.txt" ]; then
+        ab_update_armbian_env "${root_mnt}/boot/armbianEnv.txt" "${target_root_type}" "${target_root_uuid}" || {
+            log_error "Failed to update target root boot environment"
+            return 1
+        }
+    fi
+}
+
+ab_update_target_filesystem_config() {
+    local root_mnt="$1"
+    local target_root_label="$2"
+    local target_boot_label="$3"
+    local target_root_type="$4"
+    local target_root_uuid="$5"
+    local target_boot_uuid="$6"
+    local fstab="${root_mnt}/etc/fstab"
+    local crypttab="${root_mnt}/etc/crypttab"
+    local existing_root_uuid existing_boot_uuid
+
+    if [ -f "${fstab}" ]; then
+        cp "${fstab}" "${fstab}.ota-backup" || return 1
+        existing_root_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]]*[[:space:]]*/[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
+        existing_boot_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]]*[[:space:]]*/boot[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
+
+        if [ "${target_root_type}" = "crypto_LUKS" ]; then
+            sed -i -E 's|^UUID=[^[:space:]]+[[:space:]]+/[[:space:]]+|/dev/mapper/armbian-root / |' "${fstab}" || return 1
+            sed -i -E 's|^/dev/[^[:space:]]+[[:space:]]+/[[:space:]]+|/dev/mapper/armbian-root / |' "${fstab}" || return 1
+        elif [ -n "${existing_root_uuid}" ] && [ -n "${target_root_uuid}" ]; then
+            sed -i "s|UUID=${existing_root_uuid}|UUID=${target_root_uuid}|g" "${fstab}" || return 1
+        fi
+        if [ -n "${existing_boot_uuid}" ] && [ -n "${target_boot_uuid}" ]; then
+            sed -i "s|UUID=${existing_boot_uuid}|UUID=${target_boot_uuid}|g" "${fstab}" || return 1
+        fi
+
+        sed -i "s|LABEL=armbi_roota|LABEL=${target_root_label}|g" "${fstab}" || return 1
+        sed -i "s|LABEL=armbi_rootb|LABEL=${target_root_label}|g" "${fstab}" || return 1
+        sed -i "s|LABEL=armbi_boota|LABEL=${target_boot_label}|g" "${fstab}" || return 1
+        sed -i "s|LABEL=armbi_bootb|LABEL=${target_boot_label}|g" "${fstab}" || return 1
+    fi
+
+    if [ "${target_root_type}" = "crypto_LUKS" ] && [ -f "${crypttab}" ] && [ -n "${target_root_uuid}" ]; then
+        sed -i -E "s|^(armbian-root[[:space:]]+)UUID=[0-9a-fA-F-]+|\\1UUID=${target_root_uuid}|" "${crypttab}" || return 1
+    fi
+}
+
+ab_cleanup_target_root() {
+    local root_mnt="$1"
+    local luks_mapper="$2"
+    local luks_opened="$3"
+    local cleanup_failed=0
+
+    if mountpoint -q "${root_mnt}" 2>/dev/null && ! umount "${root_mnt}"; then
+        log_warn "Failed to unmount target root partition"
+        cleanup_failed=1
+    fi
+    if [ "${luks_opened}" -eq 1 ] && [ -n "${luks_mapper}" ] && \
+        ! cryptsetup luksClose "${luks_mapper}" >/dev/null 2>&1; then
+        log_warn "Failed to close mapper ${luks_mapper}"
+        cleanup_failed=1
+    fi
+
+    if ! mountpoint -q "${root_mnt}" 2>/dev/null; then
+        rm -rf "${root_mnt}" || cleanup_failed=1
+    fi
+
+    return "${cleanup_failed}"
+}
+
+ab_record_state() {
+    local status="$1"
+    local current_slot="$2"
+    local target_slot="$3"
+
+    state_mark_mode "ab" || return 1
+    state_mark_status "${status}" || return 1
+    state_set "CURRENT_SLOT" "${current_slot}" || return 1
+    state_set "TARGET_SLOT" "${target_slot}" || return 1
+    state_set "COMPLETE_TIME" "$(date -Iseconds)" || return 1
+}
+
+ab_mark_ready_to_boot() {
+    local package_path="$1"
+    local current_slot="$2"
+    local target_slot="$3"
+
+    state_mark_prepared "ab" "ready_to_boot" "${package_path}" "${current_slot}" "${target_slot}"
+}
+
 ab_update_target_partition() {
     local temp_work="$1"
     local target_root_label="$2"
     local target_boot_label="$3"
     local package_path="$4"
     local current_slot="$5"
-    local target_slot target_root_dev target_boot_dev root_mnt boot_mnt
-    local target_root_uuid target_boot_uuid existing_root_uuid existing_boot_uuid
-    local fstab arm_env crypttab preserve_list
+    local target_slot target_root_dev target_boot_dev root_mnt
+    local target_root_uuid target_boot_uuid
     local target_root_type target_root_mount_dev target_root_luks_uuid
     local security_dev key_file luks_mapper luks_opened
 
@@ -614,49 +801,15 @@ ab_update_target_partition() {
 
     root_mnt="$(make_ota_work_dir "ab-root-mnt")"
     mount -t ext4 -o rw "${target_root_mount_dev}" "${root_mnt}" || {
-        if [ "${luks_opened}" -eq 1 ] && [ -n "${luks_mapper}" ]; then
-            cryptsetup luksClose "${luks_mapper}" >/dev/null 2>&1 || true
-        fi
-        rm -rf "${root_mnt}"
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
         error_exit "Failed to mount target root partition"
     }
 
-    empty_mount_dir "${root_mnt}"
-
-    ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_ROOTFS_TAR}" "${root_mnt}" "rootfs" || {
-        umount "${root_mnt}" 2>/dev/null || true
-        if [ "${luks_opened}" -eq 1 ] && [ -n "${luks_mapper}" ]; then
-            cryptsetup luksClose "${luks_mapper}" >/dev/null 2>&1 || true
-        fi
-        rm -rf "${root_mnt}"
-        error_exit "Failed to extract rootfs payload"
+    ab_apply_target_rootfs "${temp_work}" "${root_mnt}" "${package_path}" \
+        "${current_slot}" "${target_slot}" || {
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+        error_exit "Failed to apply rootfs payload"
     }
-
-    if command -v ota_preserve_apply_list >/dev/null 2>&1; then
-        preserve_list="/etc/armbian-ota/preserve-list.txt"
-        [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/preserve-list.txt"
-        ota_preserve_apply_list "/" "${root_mnt}" "${preserve_list}"
-    else
-        log_warn "preserve helper not available, skip local config preserve"
-    fi
-
-    ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
-
-    if [ -f "${temp_work}/${AB_OTA_BOOT_ITB}" ]; then
-        [ -n "${target_boot_dev}" ] || error_exit "Cannot find target boot partition for FIT boot image"
-        ab_write_target_boot_itb "${temp_work}/${AB_OTA_BOOT_ITB}" "${target_boot_dev}" "${target_slot}"
-    elif [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ] && [ -f "${temp_work}/${AB_OTA_BOOT_TAR}" ]; then
-        boot_mnt="$(make_ota_work_dir "ab-boot-mnt")"
-        if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
-            empty_mount_dir "${boot_mnt}"
-            ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_BOOT_TAR}" "${boot_mnt}" "boot" || log_warn "Failed to extract boot payload"
-            sync
-            umount "${boot_mnt}" 2>/dev/null || true
-        else
-            log_warn "Failed to mount target boot partition, skipping boot update"
-        fi
-        rm -rf "${boot_mnt}"
-    fi
 
     if [ "${target_root_type}" = "crypto_LUKS" ]; then
         target_root_uuid="${target_root_luks_uuid}"
@@ -664,58 +817,23 @@ ab_update_target_partition() {
         target_root_uuid="$(ab_get_uuid_by_label "${target_root_label}")"
     fi
     target_boot_uuid="$(ab_get_uuid_by_label "${target_boot_label}")"
-    fstab="${root_mnt}/etc/fstab"
-    crypttab="${root_mnt}/etc/crypttab"
-
-    if [ -f "${fstab}" ]; then
-        cp "${fstab}" "${fstab}.ota-backup"
-        existing_root_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]]*[[:space:]]*/[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
-        existing_boot_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]]*[[:space:]]*/boot[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
-
-        if [ "${target_root_type}" = "crypto_LUKS" ]; then
-            sed -i -E 's|^UUID=[^[:space:]]+[[:space:]]+/[[:space:]]+|/dev/mapper/armbian-root / |' "${fstab}"
-            sed -i -E 's|^/dev/[^[:space:]]+[[:space:]]+/[[:space:]]+|/dev/mapper/armbian-root / |' "${fstab}"
-        elif [ -n "${existing_root_uuid}" ] && [ -n "${target_root_uuid}" ]; then
-            sed -i "s|UUID=${existing_root_uuid}|UUID=${target_root_uuid}|g" "${fstab}"
-        fi
-        if [ -n "${existing_boot_uuid}" ] && [ -n "${target_boot_uuid}" ]; then
-            sed -i "s|UUID=${existing_boot_uuid}|UUID=${target_boot_uuid}|g" "${fstab}"
-        fi
-
-        sed -i "s|LABEL=armbi_roota|LABEL=${target_root_label}|g" "${fstab}"
-        sed -i "s|LABEL=armbi_rootb|LABEL=${target_root_label}|g" "${fstab}"
-        sed -i "s|LABEL=armbi_boota|LABEL=${target_boot_label}|g" "${fstab}"
-        sed -i "s|LABEL=armbi_bootb|LABEL=${target_boot_label}|g" "${fstab}"
-    fi
-
-    if [ "${target_root_type}" = "crypto_LUKS" ] && [ -f "${crypttab}" ] && [ -n "${target_root_uuid}" ]; then
-        sed -i -E "s|^(armbian-root[[:space:]]+)UUID=[0-9a-fA-F-]+|\\1UUID=${target_root_uuid}|" "${crypttab}"
-    fi
-
-    arm_env=""
-    if [ -n "${target_boot_dev}" ] && [ -b "${target_boot_dev}" ]; then
-        boot_mnt="$(make_ota_work_dir "ab-boot-mnt")"
-        if mount -t ext4 -o rw "${target_boot_dev}" "${boot_mnt}"; then
-            arm_env="${boot_mnt}/armbianEnv.txt"
-            ab_update_armbian_env "${arm_env}" "${target_root_type}" "${target_root_uuid}"
-            umount "${boot_mnt}" 2>/dev/null || true
-        fi
-        rm -rf "${boot_mnt}"
-    fi
-
-    if [ -z "${arm_env}" ] && [ -f "${root_mnt}/boot/armbianEnv.txt" ]; then
-        arm_env="${root_mnt}/boot/armbianEnv.txt"
-        ab_update_armbian_env "${arm_env}" "${target_root_type}" "${target_root_uuid}"
-    fi
+    ab_update_target_boot "${temp_work}" "${root_mnt}" "${target_boot_dev}" \
+        "${target_slot}" "${target_root_type}" "${target_root_uuid}" || {
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+        error_exit "Failed to update target boot partition"
+    }
+    ab_update_target_filesystem_config "${root_mnt}" "${target_root_label}" "${target_boot_label}" \
+        "${target_root_type}" "${target_root_uuid}" "${target_boot_uuid}" || {
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+        error_exit "Failed to update target filesystem configuration"
+    }
 
     sync
-    umount "${root_mnt}" 2>/dev/null || log_warn "Failed to unmount target root partition"
-    if [ "${luks_opened}" -eq 1 ] && [ -n "${luks_mapper}" ]; then
-        cryptsetup luksClose "${luks_mapper}" >/dev/null 2>&1 || log_warn "Failed to close mapper ${luks_mapper}"
-    fi
-    rm -rf "${root_mnt}"
+    ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || \
+        error_exit "Failed to clean up target root partition"
 }
 
+# Public A/B OTA commands
 ab_start_ota() {
     local package_path="$1"
     local current_slot target_slot target_root_label target_boot_label temp_work
@@ -742,7 +860,8 @@ ab_start_ota() {
     ab_update_target_partition "${temp_work}" "${target_root_label}" "${target_boot_label}" "${package_path}" "${current_slot}"
     rm -rf "${temp_work}"
 
-    ab_mark_ready_to_boot "${package_path}" "${current_slot}" "${target_slot}"
+    ab_mark_ready_to_boot "${package_path}" "${current_slot}" "${target_slot}" ||
+        error_exit "Failed to mark AB OTA ready to boot"
     armbian-abctl prepare "${target_slot}" || error_exit "Failed to prepare U-Boot A/B state"
 
     log_info "AB OTA staged successfully. Current slot=${current_slot}, target slot=${target_slot}"
@@ -762,17 +881,14 @@ ab_mark_success() {
     armbian-abctl mark-success "${current_slot}" ||
         error_exit "Failed to mark A/B boot successful"
 
-    state_mark_mode "ab"
-    state_mark_status "success"
-    state_set "CURRENT_SLOT" "${current_slot}"
-    state_set "TARGET_SLOT" ""
-    state_set "COMPLETE_TIME" "$(date -Iseconds)"
+    ab_record_state "success" "${current_slot}" "" ||
+        error_exit "Failed to record successful A/B OTA state"
 
     log_info "AB OTA marked successful on slot ${current_slot}"
 }
 
 ab_rollback() {
-    local last_success try_count max_tries
+    local last_success
     ab_require_tools
 
     if [ "$(ab_uboot_get_env ota_in_progress)" != "1" ]; then
@@ -783,27 +899,10 @@ ab_rollback() {
     last_success="$(ab_uboot_get_env boot_success)"
     [ -n "${last_success}" ] || last_success="a"
 
-    try_count="$(ab_uboot_get_env try_count)"
-    try_count="${try_count:-0}"
-    try_count=$((try_count + 1))
-    max_tries="$(state_get MAX_TRIES)"
-    max_tries="${max_tries:-3}"
+    armbian-abctl rollback || error_exit "Failed to restore A/B boot state"
 
-    if [ "${try_count}" -ge "${max_tries}" ]; then
-        state_mark_mode "ab"
-        state_mark_status "failed"
-        state_set "COMPLETE_TIME" "$(date -Iseconds)"
-        armbian-abctl rollback || true
-        error_exit "Maximum rollback retry count reached"
-    fi
-
-    armbian-abctl rollback || log_error "Failed to restore A/B boot state"
-
-    state_mark_mode "ab"
-    state_mark_status "rollback"
-    state_set "CURRENT_SLOT" "${last_success}"
-    state_set "TARGET_SLOT" ""
-    state_set "COMPLETE_TIME" "$(date -Iseconds)"
+    ab_record_state "rollback" "${last_success}" "" ||
+        error_exit "Failed to record A/B rollback state"
 
     log_info "Rollback configured, rebooting back to slot ${last_success}"
     sync
@@ -839,11 +938,8 @@ ab_switch_slot() {
 
     armbian-abctl mark-success "${target_slot}" || error_exit "Failed to switch A/B boot state"
 
-    state_mark_mode "ab"
-    state_mark_status "slot_switched"
-    state_set "CURRENT_SLOT" "${current_slot}"
-    state_set "TARGET_SLOT" "${target_slot}"
-    state_set "COMPLETE_TIME" "$(date -Iseconds)"
+    ab_record_state "slot_switched" "${current_slot}" "${target_slot}" ||
+        error_exit "Failed to record A/B slot switch state"
 
     log_info "Boot slot switched from ${current_slot} to ${target_slot}; reboot to apply"
 }
@@ -871,7 +967,8 @@ ab_status() {
     for label in "${BOOT_A_LABEL}" "${BOOT_B_LABEL}" "${ROOT_A_LABEL}" "${ROOT_B_LABEL}"; do
         local dev uuid mark slot
         dev="$(ab_get_part_by_label "${label}")"
-        uuid="$(ab_get_uuid_by_label "${label}")"
+        uuid=""
+        [ -n "${dev}" ] && uuid="$(blkid -s UUID -o value "${dev}" 2>/dev/null | head -n1)"
         mark=""
         slot=""
         case "${label}" in
