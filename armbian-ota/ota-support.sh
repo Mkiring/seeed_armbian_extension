@@ -6,6 +6,9 @@
 #
 
 OTA_SUPPORT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly OTA_RUNTIME_SRC="${OTA_SUPPORT_DIR}/runtime"
+readonly OTA_RECOVERY_SRC="${OTA_SUPPORT_DIR}/recovery"
+readonly OTA_AB_SRC="${OTA_SUPPORT_DIR}/ab"
 
 for ota_support_module in \
     image-naming \

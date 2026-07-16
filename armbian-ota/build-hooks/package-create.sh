@@ -67,36 +67,31 @@ EOF
 
 function ota_copy_payload_tools() {
     local ota_temp_dir="$1"
-    local ota_ext_dir
-    ota_ext_dir="${OTA_SUPPORT_DIR}"
-    local runtime_src="${ota_ext_dir}/runtime"
-    local ab_src="${ota_ext_dir}/ab"
-    local recovery_src="${ota_ext_dir}/recovery"
     local payload_tools_dir="${ota_temp_dir}/ota_tools"
 
     mkdir -p "${payload_tools_dir}"
 
-    if [[ -d "${runtime_src}" ]]; then
+    if [[ -d "${OTA_RUNTIME_SRC}" ]]; then
         mkdir -p "${payload_tools_dir}/runtime"
-        cp -a "${runtime_src}/." "${payload_tools_dir}/runtime/" || {
+        cp -a "${OTA_RUNTIME_SRC}/." "${payload_tools_dir}/runtime/" || {
             display_alert "OTA payload" "Failed to copy runtime tools into payload" "err"
             return 1
         }
     else
-        display_alert "OTA payload" "runtime source dir not found: ${runtime_src}" "warn"
+        display_alert "OTA payload" "runtime source dir not found: ${OTA_RUNTIME_SRC}" "warn"
     fi
 
-    if [[ -d "${ab_src}" ]]; then
+    if [[ -d "${OTA_AB_SRC}" ]]; then
         mkdir -p "${payload_tools_dir}/ab"
-        cp -a "${ab_src}/backend.sh" "${payload_tools_dir}/ab/" 2>/dev/null || true
-        cp -a "${ab_src}/lib" "${payload_tools_dir}/ab/" 2>/dev/null || true
-        cp -a "${ab_src}/systemd" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${OTA_AB_SRC}/backend.sh" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${OTA_AB_SRC}/lib" "${payload_tools_dir}/ab/" 2>/dev/null || true
+        cp -a "${OTA_AB_SRC}/systemd" "${payload_tools_dir}/ab/" 2>/dev/null || true
     fi
 
-    if [[ -d "${recovery_src}" ]]; then
+    if [[ -d "${OTA_RECOVERY_SRC}" ]]; then
         mkdir -p "${payload_tools_dir}/recovery"
-        cp -a "${recovery_src}/backend.sh" "${payload_tools_dir}/recovery/" 2>/dev/null || true
-        cp -a "${recovery_src}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${OTA_RECOVERY_SRC}/backend.sh" "${payload_tools_dir}/recovery/" 2>/dev/null || true
+        cp -a "${OTA_RECOVERY_SRC}/initramfs_hooks" "${payload_tools_dir}/recovery/" 2>/dev/null || true
     fi
 
     ota_write_payload_tools_readme "${payload_tools_dir}"

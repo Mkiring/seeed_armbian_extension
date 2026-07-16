@@ -5,7 +5,7 @@
 function ota_configure_persist_fstab() {
     local root_dir="$1"
     local fstab="${root_dir}/etc/fstab"
-    local persist_map="${OTA_SUPPORT_DIR}/runtime/policy/persist-map.txt"
+    local persist_map="${OTA_RUNTIME_SRC}/policy/persist-map.txt"
     local raw line persist_src mount_target
 
     [[ -f "${fstab}" ]] || {
@@ -78,7 +78,7 @@ function ota_seed_persist_path() {
 
 function ota_init_userdata_persist() {
     local root_dir="$1"
-    local persist_map="${OTA_SUPPORT_DIR}/runtime/policy/persist-map.txt"
+    local persist_map="${OTA_RUNTIME_SRC}/policy/persist-map.txt"
     local raw line persist_src mount_target
 
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
