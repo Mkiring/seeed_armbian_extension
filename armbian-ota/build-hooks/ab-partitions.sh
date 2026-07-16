@@ -1,21 +1,11 @@
-function extension_prepare_config__install_overlayroot_userdata() {
-    if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        display_alert "A/B partition OTA" "install overlayroot, partition resize tools and libubootenv-tool" "info"
-        add_packages_to_image overlayroot busybox-static libubootenv-tool util-linux parted e2fsprogs
+# A/B Partition Helpers
 
-    fi
+function rk_ab_encrypted_rootfs_enabled() {
+	[[ "${AB_PART_OTA}" == "yes" ]] && ota_encrypted_rootfs_enabled
 }
 
-#
-# A/B Partition Helpers And Hooks
-#
-
-function rk_ab_autodecrypt_mode_enabled() {
-	[[ "${AB_PART_OTA}" == "yes" && "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]
-}
-
-function rk_ab_secure_fit_boot_mode_enabled() {
-	[[ "${AB_PART_OTA}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]
+function rk_ab_secure_boot_encrypted_rootfs_enabled() {
+	[[ "${AB_PART_OTA}" == "yes" ]] && ota_secure_boot_encrypted_rootfs_enabled
 }
 
 function ota_ab_append_partition() {
@@ -37,7 +27,8 @@ function ota_ab_format_ext4_partition() {
 
 	check_loop_device "${dev}"
 	display_alert "A/B partition OTA" "Formatting ${description} (${dev}) as ext4 with label ${label}" "info"
-	run_host_command_logged mkfs.ext4 -q -L "${label}" "${dev}" || display_alert "A/B partition OTA" "Failed to format ${description}" "warn"
+	run_host_command_logged mkfs.ext4 -q -L "${label}" "${dev}" ||
+		exit_with_error "A/B partition OTA failed to format ${description}" "${dev}"
 }
 
 function ota_ab_format_luks_ext4_partition() {
@@ -48,19 +39,20 @@ function ota_ab_format_luks_ext4_partition() {
 	local mapper_dev="/dev/mapper/${mapper_name}"
 
 	check_loop_device "${dev}"
-	[[ -n "${CRYPTROOT_PASSPHRASE}" ]] || exit_with_error "A/B encrypted OTA requires CRYPTROOT_PASSPHRASE for ${description} LUKS format" "AB_PART_OTA=yes CRYPTROOT_ENABLE=yes RK_AUTO_DECRYP=yes"
+	[[ -n "${CRYPTROOT_PASSPHRASE}" ]] || exit_with_error "CRYPTROOT_PASSPHRASE is required for encrypted A/B OTA"
 	command -v cryptsetup >/dev/null 2>&1 || exit_with_error "cryptsetup not found while formatting encrypted ${description}" "host dependency missing"
 
 	display_alert "A/B partition OTA" "Formatting ${description} (${dev}) as LUKS + ext4(label=${label})" "info"
-	printf "%s" "${CRYPTROOT_PASSPHRASE}" | run_host_command_logged cryptsetup luksFormat ${CRYPTROOT_PARAMETERS} "${dev}" - ||
-		exit_with_error "A/B encrypted OTA failed to luksFormat ${description}" "${dev}"
-	printf "%s" "${CRYPTROOT_PASSPHRASE}" | run_host_command_logged cryptsetup luksOpen "${dev}" "${mapper_name}" - ||
-		exit_with_error "A/B encrypted OTA failed to luksOpen ${description}" "${dev}"
+	printf "%s" "${CRYPTROOT_PASSPHRASE}" | run_host_command_logged cryptsetup luksFormat ${CRYPTROOT_PARAMETERS} "${dev}" - \
+		|| exit_with_error "A/B encrypted OTA failed to luksFormat ${description}" "${dev}"
+	printf "%s" "${CRYPTROOT_PASSPHRASE}" | run_host_command_logged cryptsetup luksOpen "${dev}" "${mapper_name}" - \
+		|| exit_with_error "A/B encrypted OTA failed to luksOpen ${description}" "${dev}"
 	run_host_command_logged mkfs.ext4 -q -L "${label}" "${mapper_dev}" || {
 		run_host_command_logged cryptsetup luksClose "${mapper_name}" || true
 		exit_with_error "A/B encrypted OTA failed to mkfs ${description} mapper" "${mapper_dev}"
 	}
-	run_host_command_logged cryptsetup luksClose "${mapper_name}" || exit_with_error "A/B encrypted OTA failed to luksClose ${description} mapper" "${mapper_name}"
+	run_host_command_logged cryptsetup luksClose "${mapper_name}" \
+		|| exit_with_error "A/B encrypted OTA failed to luksClose ${description} mapper" "${mapper_name}"
 }
 
 function ota_set_default_ab_partition_sizes() {
@@ -97,14 +89,12 @@ function ota_set_default_ab_partition_sizes() {
 	display_alert "A/B partition OTA" "Using AB_ROOTFS_SIZE=${AB_ROOTFS_SIZE} MiB (${rootfs_size_tier} tier)" "info"
 }
 
-function prepare_image_size__ab_part_ota() {
+# Build Hooks (execution order)
+
+function extension_prepare_config__install_overlayroot_userdata() {
 	if [[ "${AB_PART_OTA}" == "yes" ]]; then
-		local security_extra_size=0
-		if rk_ab_autodecrypt_mode_enabled; then
-			security_extra_size=${SECURE_STORAGE_SECURITY_SIZE:-4}
-		fi
-		FIXED_IMAGE_SIZE=$(((AB_ROOTFS_SIZE * 2) + OFFSET + (AB_BOOT_SIZE * 2) + UEFISIZE + EXTRA_ROOTFS_MIB_SIZE + USERDATA + security_extra_size)) # MiB
-		display_alert "A/B partition OTA" "Setting FIXED_IMAGE_SIZE to ${FIXED_IMAGE_SIZE} MiB for equal rootfs_a and rootfs_b" "info"
+		display_alert "A/B partition OTA" "install overlayroot, partition resize tools and libubootenv-tool" "info"
+		add_packages_to_image overlayroot busybox-static libubootenv-tool util-linux parted e2fsprogs
 	fi
 }
 
@@ -113,16 +103,27 @@ function pre_prepare_partitions__ab_part_ota() {
 		USE_HOOK_FOR_PARTITION="yes"
 		ota_set_default_ab_partition_sizes
 		SECURE_STORAGE_SECURITY_SIZE=${SECURE_STORAGE_SECURITY_SIZE:-4}
-        USERDATA=${USERDATA:-256}  # userdata partition by default
-        BOOTFS_TYPE="ext4"
-        ROOTFS_TYPE="ext4"
-        ROOT_FS_LABEL="armbi_roota"
-        BOOT_FS_LABEL="armbi_boota"
-		if rk_ab_autodecrypt_mode_enabled; then
+		USERDATA=${USERDATA:-256} # userdata partition by default
+		BOOTFS_TYPE="ext4"
+		BOOT_FS_LABEL="armbi_boota"
+		ROOTFS_TYPE="ext4"
+		ROOT_FS_LABEL="armbi_roota"
+		if rk_ab_encrypted_rootfs_enabled; then
 			display_alert "A/B partition OTA" "Creating A/B encrypted partitions: boot_a, boot_b, security, rootfs_a, rootfs_b, userdata" "info"
 		else
 			display_alert "A/B partition OTA" "Creating A/B partitions: boot_a, boot_b, rootfs_a, rootfs_b, userdata" "info"
 		fi
+	fi
+}
+
+function prepare_image_size__ab_part_ota() {
+	if [[ "${AB_PART_OTA}" == "yes" ]]; then
+		local security_extra_size=0
+		if rk_ab_encrypted_rootfs_enabled; then
+			security_extra_size=${SECURE_STORAGE_SECURITY_SIZE:-4}
+		fi
+		FIXED_IMAGE_SIZE=$(((AB_ROOTFS_SIZE * 2) + OFFSET + (AB_BOOT_SIZE * 2) + UEFISIZE + EXTRA_ROOTFS_MIB_SIZE + USERDATA + security_extra_size)) # MiB
+		display_alert "A/B partition OTA" "Setting FIXED_IMAGE_SIZE to ${FIXED_IMAGE_SIZE} MiB for equal rootfs_a and rootfs_b" "info"
 	fi
 }
 
@@ -160,7 +161,7 @@ function create_partition_table__ab_part_ota() {
 	ota_ab_append_partition boot_b_index "boot_b" "${AB_BOOT_SIZE}" "${boot_type}"
 	# security partition must be between boot_b and rootfs_a in AB+encrypted auto-decrypt mode.
 	local security_index=""
-	if rk_ab_autodecrypt_mode_enabled; then
+	if rk_ab_encrypted_rootfs_enabled; then
 		local sec_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 		ota_ab_append_partition security_index "security" "${SECURE_STORAGE_SECURITY_SIZE}" "${sec_type}"
 	fi
@@ -172,7 +173,7 @@ function create_partition_table__ab_part_ota() {
 	local rootfs_b_index
 	ota_ab_append_partition rootfs_b_index "rootfs_b" "${AB_ROOTFS_SIZE}" "${root_type}"
 
-	# Add userdata partition with minimal size (1MiB)
+	# Add shared userdata partition.
 	local userdata_index
 	ota_ab_append_partition userdata_index "userdata" "${USERDATA}" "${root_type}"
 
@@ -203,7 +204,7 @@ function format_partitions__ab_part_ota() {
 	# the secure boot hook; leave boot_b unformatted for its first FIT OTA.
 	if [[ -n "${AB_BOOT_B_PART_INDEX}" ]]; then
 		local boot_b_dev="${LOOP}p${AB_BOOT_B_PART_INDEX}"
-		if rk_ab_secure_fit_boot_mode_enabled; then
+		if rk_ab_secure_boot_encrypted_rootfs_enabled; then
 			display_alert "A/B partition OTA" "Secure FIT mode: leaving boot_b as raw partition" "info"
 		else
 			ota_ab_format_ext4_partition "${boot_b_dev}" "armbi_bootb" "boot_b"
@@ -213,7 +214,7 @@ function format_partitions__ab_part_ota() {
 	# Format rootfs_b as ext4 with label armbi_rootb
 	if [[ -n "${AB_ROOTFS_B_PART_INDEX}" ]]; then
 		local rootfs_b_dev="${LOOP}p${AB_ROOTFS_B_PART_INDEX}"
-		if rk_ab_autodecrypt_mode_enabled; then
+		if rk_ab_encrypted_rootfs_enabled; then
 			ota_ab_format_luks_ext4_partition "${rootfs_b_dev}" "armbian-rootb-build" "armbi_rootb" "rootfs_b"
 		else
 			ota_ab_format_ext4_partition "${rootfs_b_dev}" "armbi_rootb" "rootfs_b"
@@ -224,11 +225,5 @@ function format_partitions__ab_part_ota() {
 	if [[ -n "${AB_USERDATA_PART_INDEX}" ]]; then
 		local userdata_dev="${LOOP}p${AB_USERDATA_PART_INDEX}"
 		ota_ab_format_ext4_partition "${userdata_dev}" "armbi_usrdata" "userdata"
-	fi
-
-	# Set PARTLABEL for rootfs_a if not set
-	if [[ -n "${AB_ROOTFS_A_PART_INDEX}" ]]; then
-		display_alert "A/B partition OTA" "Setting PARTLABEL for rootfs_a on partition ${AB_ROOTFS_A_PART_INDEX}" "info"
-		run_host_command_logged parted "${LOOP}" name "${AB_ROOTFS_A_PART_INDEX}" "rootfs_a" || display_alert "A/B partition OTA" "Failed to set PARTLABEL for rootfs_a" "warn"
 	fi
 }

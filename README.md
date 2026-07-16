@@ -170,10 +170,13 @@ Current implementation highlights:
 - `rootfs.tar.gz` (required)
 - `rootfs.sha256`
 - `boot.tar.gz` (when a separate boot partition exists)
-- `boot.sha256`
+- `boot.itb` (secure boot + encrypted rootfs)
+- `boot.sha256` (for `boot.tar.gz` or `boot.itb`)
 - `package.env`
-- `manifest.txt`
-- `ota_tools/` (offline/fallback runtime tools)
+- `version.txt` (image name, build commit, and extension commit)
+
+The OTA package does not include an offline `ota_tools/` bundle. OTA runtime is
+installed into the firmware during image creation.
 
 ## Directory Layout (Simplified)
 

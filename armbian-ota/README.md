@@ -8,7 +8,6 @@ This extension provides two different OTA (Over-The-Air) update mechanisms for A
 Note: When `OTA_ENABLE=yes`, OTA runtime is installed into the firmware by mode:
 - `AB_PART_OTA=yes`: install AB OTA runtime/tools.
 - without `AB_PART_OTA`: install Recovery OTA runtime/tools.
-Payload still includes `ota_tools/` as a fallback/offline bundle.
 
 ## Directory Structure
 
@@ -19,7 +18,7 @@ extensions/armbian-ota/
 │   ├── image-naming.sh                     # Image/package naming helpers
 │   ├── ab-partitions.sh                    # A/B partition hooks
 │   ├── runtime-install.sh                  # Rootfs runtime/tool install hooks
-│   ├── persist.sh                          # Persist fstab and seed hooks
+│   ├── persist.sh                          # Persist and overlayroot hooks
 │   └── package-create.sh                   # OTA package creation hook
 │
 ├── recovery/                           # Recovery OTA mode
@@ -207,6 +206,10 @@ The OTA package (`*-OTA.tar.gz`) contains:
 - `boot.sha256` - Boot partition checksum (optional)
 - `package.env` - OTA mode and package metadata
 - `boot.itb` - FIT boot image (for secure boot)
+- `version.txt` - Image name, version, build commit, and extension commit
+
+The package does not include an offline `ota_tools/` bundle; the required OTA
+runtime is installed into the firmware at image build time.
 
 ## Troubleshooting
 
