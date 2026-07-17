@@ -183,7 +183,9 @@ function rk_secure_boot_run_secondary_fit_signing() {
     (
         cd "${uboot_dir}" || exit 1
         mkdir -p fit
-        ./tools/mkimage -f "${fit_work}/boot-final.its" -k keys/ -K u-boot.dtb -E -p "${fit_padding}" -r fit/boot.itb || exit 1
+        # The U-Boot build phase already embeds key-dev into u-boot.dtb.
+        # Re-injecting it here is redundant and can exhaust DTB free space.
+        ./tools/mkimage -f "${fit_work}/boot-final.its" -k keys/ -E -p "${fit_padding}" -r fit/boot.itb || exit 1
         fdtget -l u-boot.dtb /signature 2>/dev/null | grep -qx 'key-dev' || exit 1
         if [[ -x ./tools/fit_check_sign ]]; then
             ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
