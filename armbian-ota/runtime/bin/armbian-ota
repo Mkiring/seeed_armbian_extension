@@ -85,9 +85,22 @@ normalize_yes_no() {
 }
 
 detect_device_encryption() {
-    local mode="$1" label dev type
+    local mode="$1" label partlabel dev type
 
     if [ "${mode}" = "ab" ]; then
+        # Encrypted A/B images put the filesystem label inside the LUKS
+        # container. Resolve the outer devices by their stable GPT labels
+        # before checking their type, otherwise blkid cannot find a closed
+        # rootfs_a/rootfs_b container by the inner ext4 label.
+        for partlabel in rootfs_a rootfs_b; do
+            dev="$(blkid -t PARTLABEL="${partlabel}" -o device 2>/dev/null | head -n1 || true)"
+            [ -n "${dev}" ] || continue
+            type="$(blkid -o value -s TYPE "${dev}" 2>/dev/null || true)"
+            [ "${type}" = "crypto_LUKS" ] && echo "yes" && return 0
+        done
+
+        # Keep support for older A/B layouts where the root filesystem label
+        # is directly visible on the raw partition.
         for label in armbi_roota armbi_rootb; do
             dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | head -n1 || true)"
             [ -n "${dev}" ] || continue
