@@ -42,6 +42,31 @@ get_cmdline_crypt_uuid() {
     return 1
 }
 
+get_cmdline_ab_slot() {
+    local token
+
+    for token in $(cat /proc/cmdline 2>/dev/null); do
+        case "$token" in
+            armbian.slot=a|armbian.slot=b)
+                echo "${token#armbian.slot=}"
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
+get_luks_device_by_partlabel() {
+    local partlabel="$1"
+    local dev
+
+    dev="$(blkid -t PARTLABEL="$partlabel" -o device 2>/dev/null | first_line || true)"
+    if [ -n "$dev" ] && [ "$(blkid -s TYPE -o value "$dev" 2>/dev/null || true)" = "crypto_LUKS" ]; then
+        echo "$dev"
+    fi
+}
+
 keybox_ready() {
     [ -x /usr/bin/keybox_app ] &&
         [ -x /usr/bin/tee-supplicant ] &&
@@ -124,6 +149,23 @@ if [ -n "$TARGET_LUKS_UUID" ]; then
     if [ -n "$ROOT_DEVICE" ] && [ "$(blkid -s TYPE -o value "$ROOT_DEVICE" 2>/dev/null || true)" != "crypto_LUKS" ]; then
         ROOT_DEVICE=""
     fi
+fi
+
+# A/B images use a stable GPT PARTLABEL for each slot. The LUKS UUID is
+# device-local and may differ from the UUID known when a signed boot.itb was
+# built, so select the requested slot before falling back to arbitrary LUKS
+# discovery. First boot has no persistent U-Boot environment yet and defaults
+# to the populated A slot.
+if [ -z "$ROOT_DEVICE" ]; then
+    AB_SLOT="$(get_cmdline_ab_slot || true)"
+    case "$AB_SLOT" in
+        a|b)
+            ROOT_DEVICE="$(get_luks_device_by_partlabel "rootfs_$AB_SLOT" || true)"
+            ;;
+        *)
+            ROOT_DEVICE="$(get_luks_device_by_partlabel "rootfs_a" || true)"
+            ;;
+    esac
 fi
 
 [ -n "$ROOT_DEVICE" ] || ROOT_DEVICE="$(blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | first_line || true)"

@@ -308,7 +308,10 @@ configure_ab_boot_environment() {
     if [ "${AB_BOOT_MODE}" = "raw-fit" ]; then
         # The Rockchip boot_fit patch loads directly from boot_a or boot_b;
         # distro_bootcmd only supports filesystem-backed boot partitions.
-        AB_BOOTCMD='run ab_preboot; run ab_select_fit_slot; boot_fit'
+        # Keep the kernel/initramfs aligned with the raw FIT slot selected by
+        # U-Boot. The initramfs resolves rootfs_a/rootfs_b by this token,
+        # avoiding a device-local LUKS UUID embedded in a signed FIT.
+        AB_BOOTCMD='run ab_preboot; run ab_select_fit_slot; setenv bootargs "${bootargs} armbian.slot=${boot_slot}"; boot_fit'
     else
         AB_BOOTCMD='run ab_preboot; run distro_bootcmd; boot_fit; bootrkp'
     fi
