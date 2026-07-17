@@ -270,8 +270,18 @@ function rk_secure_storage_create_partition_table() {
     else
         root_type="83"
     fi
-    script+="${p_index} : name=\"rootfs\", start=${next}MiB, type=${root_type}\n"
+    if [[ "${OTA_ENABLE}" == "yes" && "${AB_PART_OTA}" != "yes" && -n "${RECOVERY_ROOTFS_SIZE:-}" ]]; then
+        script+="${p_index} : name=\"rootfs\", start=${next}MiB, size=${RECOVERY_ROOTFS_SIZE}MiB, type=${root_type}\n"
+    else
+        script+="${p_index} : name=\"rootfs\", start=${next}MiB, type=${root_type}\n"
+    fi
     rootpart=${p_index}
+    p_index=$((p_index + 1))
+
+    if [[ "${OTA_ENABLE}" == "yes" && "${AB_PART_OTA}" != "yes" && -n "${RECOVERY_USERDATA_SIZE:-}" ]]; then
+        RECOVERY_USERDATA_PART_INDEX=${p_index}
+        script+="${p_index} : name=\"userdata\", start=$((next + RECOVERY_ROOTFS_SIZE))MiB, size=${RECOVERY_USERDATA_SIZE}MiB, type=${root_type}\n"
+    fi
 
     display_alert "secure-storage" "Custom partition table:\n${script}" "debug"
     printf "%b" "${script}" | run_host_command_logged sfdisk "${SDCARD}.raw" ||

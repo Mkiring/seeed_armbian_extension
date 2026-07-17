@@ -118,8 +118,6 @@ if [ "${OTA_DEBUG:-no}" = "yes" ]; then
 fi
 
 [ -f /usr/share/armbian-ota/state.sh ] && . /usr/share/armbian-ota/state.sh
-[ -f /usr/share/armbian-ota/persist.sh ] && . /usr/share/armbian-ota/persist.sh
-[ -f /usr/share/armbian-ota/preserve.sh ] && . /usr/share/armbian-ota/preserve.sh
 
 # default fallback devices (if detection fails)
 ROOT_DEV=""
@@ -127,7 +125,6 @@ BOOT_DEV=""
 
 ROOT_MNT="/mnt/root"
 BOOT_MNT="/mnt/boot"
-USERDATA_MNT="/mnt/userdata"
 STATE_DIR="${ROOT_MNT}/var/lib/armbian-ota"
 STATE_FILE="${STATE_DIR}/ota-state.env"
 
@@ -135,9 +132,6 @@ OTA_DIR="${ROOT_MNT}/ota_work"
 ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
 BOOT_TAR="${OTA_DIR}/boot.tar.gz"
 BOOT_ITB="${OTA_DIR}/boot.itb"
-PRESERVE_LIST="${ROOT_MNT}/etc/armbian-ota/preserve-list.txt"
-PRESERVE_TAR="${OTA_DIR}/ota-preserve.tar"
-PRESERVE_TMP_LIST="${LOGDIR}/ota-preserve.list"
 
 log "init-premount ota hook start"
 log "LOGFILE=${LOGFILE}"
@@ -162,6 +156,14 @@ get_uuid_by_label() {
 
 # ===== helper: get LUKS UUID for encrypted root backing device =====
 get_luks_uuid_for_root() {
+    local root_luks_dev
+
+    root_luks_dev="$(blkid -t PARTLABEL=rootfs -o device 2>/dev/null | head -n1 || true)"
+    if [ -n "${root_luks_dev}" ] && [ "$(blkid -s TYPE -o value "${root_luks_dev}" 2>/dev/null || true)" = "crypto_LUKS" ]; then
+        blkid -s UUID -o value "${root_luks_dev}" 2>/dev/null | head -n1
+        return 0
+    fi
+
     blkid -t TYPE=crypto_LUKS -s UUID -o value 2>/dev/null | head -n1
 }
 
@@ -394,28 +396,14 @@ HAS_BOOT_ITB=0
 
 log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}"
 
-# initialize /userdata/.persist before cleaning old rootfs
-if command -v ota_persist_init_userdata >/dev/null 2>&1; then
-    ota_persist_init_userdata "${ROOT_MNT}" "${USERDATA_MNT}"
-else
-    log "persist helper not available, skip userdata persist initialization"
-fi
-
-# preserve whitelist paths before cleaning old rootfs
-if command -v ota_preserve_backup_archive >/dev/null 2>&1; then
-    ota_preserve_backup_archive "${ROOT_MNT}" "${PRESERVE_LIST}" "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" "${LOGDIR}"
-else
-    log "preserve helper not available, skip local config preserve"
-fi
-
-# ===== 2) clean rootfs (except ota_work, boot, and userdata) =====
-log "cleaning ${ROOT_MNT} (except ota_work, boot, and userdata)..."
+# ===== 2) clean rootfs (except ota_work and boot) =====
+log "cleaning ${ROOT_MNT} (except ota_work and boot)..."
 start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
 (
     cd "${ROOT_MNT}" || exit 1
     for f in * .[!.]* ..?*; do
         case "$f" in
-            "."|".."|"ota_work"|"boot"|"userdata")
+            "."|".."|"ota_work"|"boot")
                 continue
                 ;;
         esac
@@ -441,11 +429,6 @@ fi
 stop_heartbeat
 
 sync
-if command -v ota_preserve_restore_archive >/dev/null 2>&1; then
-    ota_preserve_restore_archive "${ROOT_MNT}" "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}"
-else
-    log "preserve helper not available, skip local config restore"
-fi
 
 # Force-disable Armbian first-login marker after OTA. If new rootfs ships this
 # file, root login would trigger first-login flow unexpectedly.

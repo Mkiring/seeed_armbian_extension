@@ -20,6 +20,7 @@ function ota_secure_boot_encrypted_rootfs_enabled() {
 
 for ota_support_module in \
     image-naming \
+    recovery-partitions \
     ab-partitions \
     runtime-install \
     persist \

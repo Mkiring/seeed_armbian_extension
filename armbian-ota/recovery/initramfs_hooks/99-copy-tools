@@ -8,6 +8,11 @@ set -e
 
 echo "[99-copy-tools] adding OTA runtime tools into initramfs..." >&2
 
+# Recovery persistence uses three directory-level overlayfs mounts before the
+# real root is switched into place. Include the module for kernels where it is
+# not built in.
+manual_add_modules overlay
+
 copy_exec_first() {
     dest="$1"
     shift
@@ -62,6 +67,4 @@ done <<'EOF'
 /usr/sbin /usr/sbin/reboot /sbin/reboot
 EOF
 
-copy_ota_lib persist.sh
-copy_ota_lib preserve.sh
 copy_ota_lib state.sh

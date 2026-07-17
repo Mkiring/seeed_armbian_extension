@@ -40,8 +40,6 @@ function ota_install_common_runtime_to_rootfs() {
         "${OTA_RUNTIME_SRC}/bin/armbian-ota|${OTA_ROOTFS_SBIN_DIR}/armbian-ota|err|0755"
         "${OTA_RUNTIME_SRC}/lib/common.sh|${OTA_ROOTFS_RUNTIME_DIR}/common.sh|err|0644"
         "${OTA_RUNTIME_SRC}/lib/state.sh|${OTA_ROOTFS_RUNTIME_DIR}/state.sh|err|0644"
-        "${OTA_RUNTIME_SRC}/lib/preserve.sh|${OTA_ROOTFS_RUNTIME_DIR}/preserve.sh|err|0644"
-        "${OTA_RUNTIME_SRC}/policy/preserve-list.txt|${OTA_ROOTFS_CONFIG_DIR}/preserve-list.txt|err|0644"
     )
 
     display_alert "${title}" "Installing common OTA runtime into rootfs" "info"
@@ -52,8 +50,6 @@ function ota_install_recovery_runtime_to_rootfs() {
     local root_dir="$1"
     local title="OTA runtime"
     local -a recovery_file_list=(
-        "${OTA_RUNTIME_SRC}/lib/persist.sh|${OTA_ROOTFS_RUNTIME_DIR}/persist.sh|err|0644"
-        "${OTA_RUNTIME_SRC}/policy/persist-map.txt|${OTA_ROOTFS_CONFIG_DIR}/persist-map.txt|warn|0644"
         "${OTA_RECOVERY_SRC}/backend.sh|${OTA_ROOTFS_RUNTIME_DIR}/backend-recovery.sh|err|0644"
     )
 
@@ -74,13 +70,13 @@ function ota_install_recovery_initramfs() {
     local -a initramfs_hook_list=(
         "${OTA_RECOVERY_SRC}/initramfs_hooks/99-copy-tools|etc/initramfs-tools/hooks/99-copy-tools|err|0755"
         "${OTA_RECOVERY_SRC}/initramfs_hooks/99-ota-apply|etc/initramfs-tools/scripts/init-premount/99-ota-apply|err|0755"
+        "${OTA_RECOVERY_SRC}/initramfs_hooks/99-userdata-overlay|etc/initramfs-tools/scripts/init-bottom/99-userdata-overlay|err|0755"
     )
     local -a initramfs_runtime_file_list=(
         "${OTA_ROOTFS_RUNTIME_DIR}/state.sh"
-        "${OTA_ROOTFS_RUNTIME_DIR}/persist.sh"
-        "${OTA_ROOTFS_RUNTIME_DIR}/preserve.sh"
         "etc/initramfs-tools/hooks/99-copy-tools"
         "etc/initramfs-tools/scripts/init-premount/99-ota-apply"
+        "etc/initramfs-tools/scripts/init-bottom/99-userdata-overlay"
     )
     local ota_runtime_file
 
@@ -120,6 +116,8 @@ function ota_install_ab_runtime_to_rootfs() {
     local title="OTA runtime"
     local -a ab_runtime_file_list=(
         "${OTA_RUNTIME_SRC}/lib/ab-env.sh|${OTA_ROOTFS_RUNTIME_DIR}/ab-env.sh|err|0644"
+        "${OTA_RUNTIME_SRC}/lib/preserve.sh|${OTA_ROOTFS_RUNTIME_DIR}/preserve.sh|err|0644"
+        "${OTA_RUNTIME_SRC}/policy/preserve-list.txt|${OTA_ROOTFS_CONFIG_DIR}/preserve-list.txt|err|0644"
         "${OTA_AB_SRC}/backend.sh|${OTA_ROOTFS_RUNTIME_DIR}/backend-ab.sh|err|0644"
     )
 

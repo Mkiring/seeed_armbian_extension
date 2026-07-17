@@ -67,6 +67,17 @@ get_luks_device_by_partlabel() {
     fi
 }
 
+unlock_luks_device() {
+    local device="$1"
+    local mapper_name="$2"
+    local description="$3"
+
+    /sbin/cryptsetup luksOpen "$device" "$mapper_name" < "$SYSPW_FILE" || {
+        log_step "[Decryption-disk] Error: Failed to unlock ${description}"
+        return 1
+    }
+}
+
 keybox_ready() {
     [ -x /usr/bin/keybox_app ] &&
         [ -x /usr/bin/tee-supplicant ] &&
@@ -168,6 +179,10 @@ if [ -z "$ROOT_DEVICE" ]; then
     esac
 fi
 
+if [ -z "$ROOT_DEVICE" ]; then
+    ROOT_DEVICE="$(get_luks_device_by_partlabel rootfs || true)"
+fi
+
 [ -n "$ROOT_DEVICE" ] || ROOT_DEVICE="$(blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | first_line || true)"
 if [ -z "$ROOT_DEVICE" ]; then
     log_step "[Decryption-disk] Error: No LUKS partition found"
@@ -179,10 +194,20 @@ ROOT_UUID="$(blkid -s UUID -o value "$ROOT_DEVICE" 2>/dev/null || true)"
 log_step "[Decryption-disk] Found LUKS device: ${ROOT_DEVICE} (UUID: ${ROOT_UUID:-unknown})"
 log_step "[Decryption-disk] Unlocking LUKS encrypted partition"
 
-/sbin/cryptsetup luksOpen "$ROOT_DEVICE" "$MAPPER_NAME" < "$SYSPW_FILE" || {
-    log_step "[Decryption-disk] Error: Failed to unlock LUKS partition"
+unlock_luks_device "$ROOT_DEVICE" "$MAPPER_NAME" "root LUKS partition" || {
     exit 1
 }
 
 log_step "[Decryption-disk] root mapper ready: /dev/mapper/${MAPPER_NAME}"
 log_step "[Decryption-disk] LUKS partition unlocked successfully"
+
+USERDATA_DEVICE="$(get_luks_device_by_partlabel userdata || true)"
+if [ -n "$USERDATA_DEVICE" ]; then
+    log_step "[Decryption-disk] Found encrypted userdata: ${USERDATA_DEVICE}"
+    if unlock_luks_device "$USERDATA_DEVICE" armbian-userdata "userdata LUKS partition"; then
+        log_step "[Decryption-disk] userdata mapper ready: /dev/mapper/armbian-userdata"
+    else
+        log_step "[Decryption-disk] Error: encrypted userdata is required but could not be unlocked"
+        exit 1
+    fi
+fi
