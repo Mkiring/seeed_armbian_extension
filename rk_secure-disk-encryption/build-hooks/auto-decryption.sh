@@ -70,13 +70,6 @@ PY
 		return 0
 	fi
 
-	local cached_deb="$(dirname "${BASH_SOURCE[0]}")/host-debs/python3-pycryptodome_3.20.0+dfsg-1_amd64.deb"
-	if [[ -r "${cached_deb}" ]]; then
-		rk_run_host_command apt-get install -y "${cached_deb}" ||
-			exit_with_error "failed to install cached python3-pycryptodome" "apt-get"
-		return 0
-	fi
-
 	rk_run_host_command apt-get install -y python3-pycryptodome ||
 		exit_with_error "failed to install python3-pycryptodome" "apt-get"
 }

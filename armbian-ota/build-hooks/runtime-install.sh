@@ -119,7 +119,7 @@ function ota_install_ab_runtime_to_rootfs() {
     local root_dir="$1"
     local title="OTA runtime"
     local -a ab_runtime_file_list=(
-        "${OTA_RUNTIME_SRC}/bin/armbian-abctl|${OTA_ROOTFS_SBIN_DIR}/armbian-abctl|err|0755"
+        "${OTA_RUNTIME_SRC}/lib/ab-env.sh|${OTA_ROOTFS_RUNTIME_DIR}/ab-env.sh|err|0644"
         "${OTA_AB_SRC}/backend.sh|${OTA_ROOTFS_RUNTIME_DIR}/backend-ab.sh|err|0644"
     )
 

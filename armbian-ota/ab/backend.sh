@@ -16,6 +16,13 @@ AB_OTA_TEE_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-tee-supplicant.log"
 AB_OTA_KEYBOX_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-keybox.log"
 AB_OTA_TEE_PID=""
 
+AB_ENV_LIB="${OTA_RUNTIME_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../runtime/lib" && pwd)}/ab-env.sh"
+[ -r "${AB_ENV_LIB}" ] || {
+    echo "ERROR: A/B U-Boot environment helper not found: ${AB_ENV_LIB}" >&2
+    return 1
+}
+. "${AB_ENV_LIB}"
+
 # Partition and slot helpers
 
 ab_get_slot_partlabel_by_fslabel() {
@@ -353,7 +360,7 @@ ab_get_retry_max() {
 
 # U-Boot environment validation
 ab_require_tools() {
-    ota_require_runtime fw_printenv armbian-abctl blkid mount umount mountpoint tar findmnt sed grep awk reboot dd od tr blockdev
+    ota_require_runtime fw_printenv fw_setenv blkid mount umount mountpoint tar findmnt sed grep awk reboot dd od tr blockdev
 }
 
 ab_env_slot_boot_ready() {
@@ -862,7 +869,7 @@ ab_start_ota() {
 
     ab_mark_ready_to_boot "${package_path}" "${current_slot}" "${target_slot}" ||
         error_exit "Failed to mark AB OTA ready to boot"
-    armbian-abctl prepare "${target_slot}" || error_exit "Failed to prepare U-Boot A/B state"
+    ab_env_prepare "${target_slot}" || error_exit "Failed to prepare U-Boot A/B state"
 
     log_info "AB OTA staged successfully. Current slot=${current_slot}, target slot=${target_slot}"
     log_info "Reboot to boot the new slot"
@@ -878,7 +885,7 @@ ab_mark_success() {
     fi
 
     current_slot="$(ab_get_current_slot)"
-    armbian-abctl mark-success "${current_slot}" ||
+    ab_env_mark_success "${current_slot}" ||
         error_exit "Failed to mark A/B boot successful"
 
     ab_record_state "success" "${current_slot}" "" ||
@@ -899,7 +906,7 @@ ab_rollback() {
     last_success="$(ab_uboot_get_env boot_success)"
     [ -n "${last_success}" ] || last_success="a"
 
-    armbian-abctl rollback || error_exit "Failed to restore A/B boot state"
+    ab_env_rollback || error_exit "Failed to restore A/B boot state"
 
     ab_record_state "rollback" "${last_success}" "" ||
         error_exit "Failed to record A/B rollback state"
@@ -936,7 +943,7 @@ ab_switch_slot() {
         return 0
     fi
 
-    armbian-abctl mark-success "${target_slot}" || error_exit "Failed to switch A/B boot state"
+    ab_env_mark_success "${target_slot}" || error_exit "Failed to switch A/B boot state"
 
     ab_record_state "slot_switched" "${current_slot}" "${target_slot}" ||
         error_exit "Failed to record A/B slot switch state"

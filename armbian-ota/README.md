@@ -241,23 +241,16 @@ Use `armbian-ota switch-slot [a|b]` for manual slot maintenance after OTA has co
 
 Non-secure A/B images store boot state in the fixed raw U-Boot environment
 offset (`0x3f8000`, size `0x8000`) on the selected boot disk.  This works the
-same way for SD, eMMC, and NVMe images. `armbian-abctl` is the userspace
-wrapper around this existing `fw_setenv` backend.
+same way for SD, eMMC, and NVMe images. The A/B backend uses an internal
+helper to manage this `fw_setenv` state.
 
 For Secure Boot A/B packages, the A/B backend verifies `boot.itb` and writes
 it directly to the inactive raw `boot_a` or `boot_b` partition. It never
 mounts a FIT boot partition or treats the FIT image as `boot.tar.gz`.
 When automatic rootfs decryption is enabled, both A/B modes create a shared
 `security` partition and format both rootfs slots as LUKS-backed ext4.
-Slot-state transitions still use the configured A/B U-Boot environment
-backend.
-
-```bash
-armbian-abctl status
-armbian-abctl prepare b
-armbian-abctl mark-success b
-armbian-abctl rollback
-```
+Slot-state transitions use the A/B backend's internal U-Boot environment
+helper.
 
 ### Check U-Boot Environment
 
