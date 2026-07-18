@@ -23,7 +23,7 @@ for ota_support_module in \
     recovery-partitions \
     ab-partitions \
     runtime-install \
-    persist \
+    overlayroot \
     package-create
 do
     # shellcheck source=/dev/null

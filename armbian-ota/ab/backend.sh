@@ -557,18 +557,9 @@ ab_apply_target_rootfs() {
     local package_path="$3"
     local current_slot="$4"
     local target_slot="$5"
-    local preserve_list
 
     empty_mount_dir "${root_mnt}" || return 1
     ab_extract_tar_gz_payload "${temp_work}/${AB_OTA_ROOTFS_TAR}" "${root_mnt}" "rootfs" || return 1
-
-    if command -v ota_preserve_apply_list >/dev/null 2>&1; then
-        preserve_list="/etc/armbian-ota/preserve-list.txt"
-        [ -f "${preserve_list}" ] || preserve_list="${root_mnt}/etc/armbian-ota/preserve-list.txt"
-        ota_preserve_apply_list "/" "${root_mnt}" "${preserve_list}" || return 1
-    else
-        log_warn "preserve helper not available, skip local config preserve"
-    fi
 
     ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
 }

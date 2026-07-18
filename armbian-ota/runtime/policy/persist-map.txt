@@ -1,8 +1,0 @@
-# OTA runtime persist map
-# Format: <persist-source> <mount-target>
-# Paths must be absolute. Lines starting with # are comments.
-#
-# Recovery OTA keeps /userdata as a rootfs directory preserved by
-# preserve-list.txt. A/B OTA keeps /userdata on the separate armbi_usrdata
-# partition via overlayroot.
-/userdata/.persist/home /home

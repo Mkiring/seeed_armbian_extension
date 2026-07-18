@@ -18,9 +18,6 @@ export OTA_SOURCE_ROOT
 
 . "${OTA_RUNTIME_DIR}/common.sh"
 
-[ -f "${OTA_RUNTIME_DIR}/persist.sh" ] && . "${OTA_RUNTIME_DIR}/persist.sh"
-[ -f "${OTA_RUNTIME_DIR}/preserve.sh" ] && . "${OTA_RUNTIME_DIR}/preserve.sh"
-
 HAS_AB_BACKEND=0
 HAS_RECOVERY_BACKEND=0
 

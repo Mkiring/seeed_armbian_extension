@@ -18,7 +18,7 @@ extensions/armbian-ota/
 │   ├── image-naming.sh                     # Image/package naming helpers
 │   ├── ab-partitions.sh                    # A/B partition hooks
 │   ├── runtime-install.sh                  # Rootfs runtime/tool install hooks
-│   ├── persist.sh                          # A/B overlayroot hooks
+│   ├── overlayroot.sh                      # A/B overlayroot hooks
 │   ├── recovery-partitions.sh              # Recovery rootfs + userdata layout
 │   └── package-create.sh                   # OTA package creation hook
 │
@@ -33,12 +33,7 @@ extensions/armbian-ota/
 │   ├── bin/
 │   │   └── armbian-ota                     # Unified CLI entrypoint
 │   ├── lib/
-│   │   ├── common.sh                       # Shared runtime helpers
-│   │   ├── persist.sh                      # Shared userdata persistence helper
-│   │   └── preserve.sh                     # Shared local config preserve helper
-│   └── policy/
-│       ├── persist-map.txt                 # Default persistent bind mount map
-│       └── preserve-list.txt               # Default local config preserve list
+│   │   └── common.sh                       # Shared runtime helpers
 │
 ├── ab/                                 # AB Partition OTA mode
 │   ├── backend.sh                          # AB OTA backend
@@ -125,13 +120,8 @@ The `/userdata` backing store differs by OTA mode:
   Recovery images format userdata as LUKS and unlock it with the same SSKR
   recovery key path before these overlays are mounted.
 
-Recovery OTA deliberately has no preserve-list, persist-map, or rootfs-local
-`/userdata/.persist` compatibility layer. This layout is intended for new
-development images; it does not migrate data from older single-rootfs Recovery
-images.
-
-The A/B backend still uses its preserve whitelist while staging the inactive
-slot; it is unaffected by the Recovery persistence design.
+Neither OTA mode migrates data from older single-rootfs Recovery images;
+this layout is intended for new development images.
 
 ### U-Boot Environment Variables
 

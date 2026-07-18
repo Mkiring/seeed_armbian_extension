@@ -116,8 +116,6 @@ function ota_install_ab_runtime_to_rootfs() {
     local title="OTA runtime"
     local -a ab_runtime_file_list=(
         "${OTA_RUNTIME_SRC}/lib/ab-env.sh|${OTA_ROOTFS_RUNTIME_DIR}/ab-env.sh|err|0644"
-        "${OTA_RUNTIME_SRC}/lib/preserve.sh|${OTA_ROOTFS_RUNTIME_DIR}/preserve.sh|err|0644"
-        "${OTA_RUNTIME_SRC}/policy/preserve-list.txt|${OTA_ROOTFS_CONFIG_DIR}/preserve-list.txt|err|0644"
         "${OTA_AB_SRC}/backend.sh|${OTA_ROOTFS_RUNTIME_DIR}/backend-ab.sh|err|0644"
     )
 
