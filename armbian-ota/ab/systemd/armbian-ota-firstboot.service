@@ -10,6 +10,11 @@ ConditionPathExists=/var/lib/armbian-ota/ota-state.env
 Type=oneshot
 ExecCondition=/usr/bin/grep -qxF OTA_MODE=ab /var/lib/armbian-ota/ota-state.env
 ExecCondition=/usr/bin/grep -Eq '^STATUS=(ready_to_boot|boot_verifying)$' /var/lib/armbian-ota/ota-state.env
+# Require U-Boot ota_in_progress=1 so state and U-Boot must agree an OTA boot
+# is pending; a crash that left state ready_to_boot but uboot unset won't
+# false-trigger mark-success on a non-target boot.
+# (ExecCondition skip is not a failure, so it does not invoke the rollback path.)
+ExecCondition=/bin/sh -c '[ "$(fw_printenv -n ota_in_progress 2>/dev/null || true)" = 1 ]'
 ExecStart=/usr/lib/armbian/armbian-ota-health-check
 ExecStartPost=/usr/sbin/armbian-ota mark-success
 RemainAfterExit=yes

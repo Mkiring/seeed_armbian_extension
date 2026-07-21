@@ -1,8 +1,10 @@
 #!/bin/bash
 
-OTA_STATE_DIR="${OTA_STATE_DIR:-/var/lib/armbian-ota}"
-OTA_STATE_FILE="${OTA_STATE_FILE:-${OTA_STATE_DIR}/ota-state.env}"
 OTA_WORK_DIR="${OTA_WORK_DIR:-/ota_work}"
+# Small/sensitive temp files (passphrase key, sha256 scratch) go to tmpfs so a
+# crash never leaves them on disk. Payload extraction stays in OTA_WORK_DIR
+# (on disk) to avoid OOM'ing RAM with the large rootfs.tar.gz.
+OTA_TMP_DIR="${OTA_TMP_DIR:-/var/run/armbian-ota}"
 OTA_LOCK_FILE="${OTA_LOCK_FILE:-/var/run/armbian-ota.lock}"
 OTA_LOG_DIR="${OTA_LOG_DIR:-/var/log/armbian-ota}"
 OTA_LOG_FILE="${OTA_LOG_FILE:-${OTA_LOG_DIR}/ota.log}"
@@ -92,55 +94,6 @@ empty_mount_dir() {
             rm -rf "${f}" 2>/dev/null || exit 1
         done
     )
-}
-
-state_init() {
-    mkdir -p "${OTA_STATE_DIR}" 2>/dev/null || return 1
-    [ -f "${OTA_STATE_FILE}" ] && return 0
-
-    (
-        OTA_STATE_STATUS=idle
-        ota_state_write_file "${OTA_STATE_FILE}"
-    )
-}
-
-state_get() {
-    local key="$1"
-    if [ -f "${OTA_STATE_FILE}" ]; then
-        grep -E "^${key}=" "${OTA_STATE_FILE}" 2>/dev/null | tail -n1 | cut -d'=' -f2-
-    fi
-}
-
-state_set() {
-    local key="$1"
-    local value="$2"
-    state_init || return 1
-    ota_state_set_key "${OTA_STATE_FILE}" "${key}" "${value}"
-}
-
-state_mark_mode() {
-    state_set "OTA_MODE" "$1"
-}
-
-state_mark_status() {
-    state_set "STATUS" "$1"
-}
-
-state_mark_prepared() {
-    local mode="$1"
-    local status="$2"
-    local package_path="$3"
-    local current_slot="${4:-}"
-    local target_slot="${5:-}"
-
-    state_init || return 1
-    state_mark_mode "${mode}" || return 1
-    state_mark_status "${status}" || return 1
-    state_set "PACKAGE_PATH" "$(basename "${package_path}")" || return 1
-    state_set "CURRENT_SLOT" "${current_slot}" || return 1
-    state_set "TARGET_SLOT" "${target_slot}" || return 1
-    state_set "START_TIME" "$(date -Iseconds)" || return 1
-    state_set "COMPLETE_TIME" "" || return 1
 }
 
 load_package_env_metadata() {
@@ -272,6 +225,6 @@ make_ota_work_dir() {
 make_ota_temp_file() {
     local prefix="${1:-tmp}"
 
-    mkdir -p "${OTA_WORK_DIR}" || error_exit "Failed to create OTA work directory: ${OTA_WORK_DIR}"
-    mktemp "${OTA_WORK_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary file under ${OTA_WORK_DIR}"
+    mkdir -p "${OTA_TMP_DIR}" || error_exit "Failed to create OTA temp directory: ${OTA_TMP_DIR}"
+    mktemp "${OTA_TMP_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary file under ${OTA_TMP_DIR}"
 }

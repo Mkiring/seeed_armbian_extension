@@ -1,5 +1,12 @@
 # A/B U-Boot environment helpers.
 
+AB_PARTITIONS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ab-partitions.sh"
+[ -r "${AB_PARTITIONS_LIB}" ] || {
+    echo "ERROR: A/B partition helper not found: ${AB_PARTITIONS_LIB}" >&2
+    return 1
+}
+. "${AB_PARTITIONS_LIB}"
+
 ab_env_get() {
     fw_printenv -n "$1" 2>/dev/null || true
 }
@@ -31,6 +38,38 @@ ab_env_set() {
     done
 }
 
+ab_env_current_slot() {
+    local root_dev root_part root_partlabel root_uuid root_a_uuid root_b_uuid
+
+    root_dev="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+    [ -n "${root_dev}" ] || root_dev="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    [ -n "${root_dev}" ] || root_dev="$(df / | awk 'NR==2 {print $1}')"
+
+    if [ -n "${root_dev}" ]; then
+        root_part="$(ab_resolve_physical_part_dev "${root_dev}" || true)"
+        root_partlabel="$(blkid -s PARTLABEL -o value "${root_part}" 2>/dev/null || true)"
+        case "${root_partlabel}" in
+            rootfs_a) echo "a"; return 0 ;;
+            rootfs_b) echo "b"; return 0 ;;
+        esac
+
+        root_uuid="$(blkid -o value -s UUID "${root_dev}" 2>/dev/null || true)"
+        root_a_uuid="$(ab_get_uuid_by_label armbi_roota)"
+        root_b_uuid="$(ab_get_uuid_by_label armbi_rootb)"
+
+        if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_a_uuid}" ]; then
+            echo "a"
+            return 0
+        fi
+        if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_b_uuid}" ]; then
+            echo "b"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 ab_env_retry_max() {
     local retry_max
 
@@ -38,21 +77,6 @@ ab_env_retry_max() {
     case "${retry_max}" in
         ''|*[!0-9]*) echo 3 ;;
         *) echo "${retry_max}" ;;
-    esac
-}
-
-ab_env_current_slot() {
-    local root part label
-
-    root="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
-    [ -n "${root}" ] || root="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
-    part="$(lsblk -no PKNAME "${root}" 2>/dev/null | head -n1 || true)"
-    [ -n "${part}" ] && root="/dev/${part}"
-    label="$(blkid -s PARTLABEL -o value "${root}" 2>/dev/null || true)"
-    case "${label}" in
-        rootfs_a) echo a ;;
-        rootfs_b) echo b ;;
-        *) return 1 ;;
     esac
 }
 

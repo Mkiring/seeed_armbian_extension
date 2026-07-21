@@ -10,305 +10,32 @@ BOOT_A_LABEL="armbi_boota"
 BOOT_B_LABEL="armbi_bootb"
 ROOT_A_LABEL="armbi_roota"
 ROOT_B_LABEL="armbi_rootb"
-AB_OTA_BYNAME_DIR="/dev/block/by-name"
-AB_OTA_SYSPW_FILE="/tmp/syspw"
-AB_OTA_TEE_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-tee-supplicant.log"
-AB_OTA_KEYBOX_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-keybox.log"
-AB_OTA_TEE_PID=""
 
-AB_ENV_LIB="${OTA_RUNTIME_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../runtime/lib" && pwd)}/ab-env.sh"
+AB_ENV_LIB="${OTA_RUNTIME_DIR}/ab-env.sh"
 [ -r "${AB_ENV_LIB}" ] || {
     echo "ERROR: A/B U-Boot environment helper not found: ${AB_ENV_LIB}" >&2
     return 1
 }
 . "${AB_ENV_LIB}"
 
-# Partition and slot helpers
-
-ab_get_slot_partlabel_by_fslabel() {
-    case "$1" in
-        "${BOOT_A_LABEL}") echo "boot_a" ;;
-        "${BOOT_B_LABEL}") echo "boot_b" ;;
-        "${ROOT_A_LABEL}") echo "rootfs_a" ;;
-        "${ROOT_B_LABEL}") echo "rootfs_b" ;;
-        *) echo "" ;;
-    esac
+AB_SECURITY_LIB="${OTA_RUNTIME_DIR}/ab-security.sh"
+[ -r "${AB_SECURITY_LIB}" ] || {
+    echo "ERROR: A/B security helper not found: ${AB_SECURITY_LIB}" >&2
+    return 1
 }
+. "${AB_SECURITY_LIB}"
 
-ab_resolve_physical_part_dev() {
-    local dev="$1" pkname
-    [ -n "${dev}" ] || return 1
-
-    case "${dev}" in
-        /dev/mapper/*|/dev/dm-*)
-            pkname="$(lsblk -no PKNAME "${dev}" 2>/dev/null | head -n1)"
-            if [ -n "${pkname}" ]; then
-                echo "/dev/${pkname}"
-                return 0
-            fi
-            ;;
-    esac
-
-    echo "${dev}"
-}
-
-ab_get_part_by_label() {
-    local label="$1" dev partlabel
-
-    dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | head -n1)"
-    if [ -n "${dev}" ]; then
-        ab_resolve_physical_part_dev "${dev}"
-        return 0
-    fi
-
-    partlabel="$(ab_get_slot_partlabel_by_fslabel "${label}")"
-    if [ -n "${partlabel}" ]; then
-        dev="$(blkid -t PARTLABEL="${partlabel}" -o device 2>/dev/null | head -n1)"
-        if [ -n "${dev}" ]; then
-            ab_resolve_physical_part_dev "${dev}"
-            return 0
-        fi
-    fi
-
-    echo ""
-}
-
-ab_get_uuid_by_label() {
-    local label="$1" dev uuid
-    dev="$(ab_get_part_by_label "${label}")"
-    if [ -n "${dev}" ]; then
-        uuid="$(blkid -s UUID -o value "${dev}" 2>/dev/null | head -n1)"
-        if [ -n "${uuid}" ]; then
-            echo "${uuid}"
-            return 0
-        fi
-    fi
-
-    blkid -t LABEL="${label}" -o value -s UUID 2>/dev/null | head -n1
-}
-
-ab_get_security_part() {
-    local dev
-    dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1)"
-    if [ -z "${dev}" ]; then
-        dev="$(blkid -t LABEL=security -o device 2>/dev/null | head -n1)"
-    fi
-    echo "${dev}"
-}
-
-ab_prepare_byname_links() {
-    local disk disk_name entry devnode name sec_dev
-
-    mkdir -p "${AB_OTA_BYNAME_DIR}" 2>/dev/null || true
-
-    for disk in /sys/block/*; do
-        disk_name="$(basename "${disk}")"
-        case "${disk_name}" in
-            loop*|ram*|zram*|dm-*|mtdblock*)
-                continue
-                ;;
-        esac
-
-        for entry in "${disk}"/"${disk_name}"*; do
-            [ -d "${entry}" ] || continue
-            [ -f "${entry}/partition" ] || continue
-
-            devnode="/dev/$(basename "${entry}")"
-            name="$(sed -n 's/^PARTNAME=//p' "${entry}/uevent" | head -n1)"
-            [ -n "${name}" ] || continue
-            ln -sf "${devnode}" "${AB_OTA_BYNAME_DIR}/${name}" 2>/dev/null || true
-        done
-    done
-
-    sec_dev="$(ab_get_security_part)"
-    if [ -n "${sec_dev}" ]; then
-        ln -sf "${sec_dev}" "${AB_OTA_BYNAME_DIR}/security" 2>/dev/null || true
-    fi
-}
-
-# Security partition and keybox helpers
-ab_start_tee_supplicant() {
-    AB_OTA_TEE_PID=""
-
-    [ -x /usr/bin/tee-supplicant ] || return 0
-
-    # A stale tee-supplicant from initramfs may still hold /dev/teepriv0.
-    # Restart it in current rootfs namespace so keybox_app can access TA assets.
-    mkdir -p "$(dirname "${AB_OTA_TEE_LOG}")" "$(dirname "${AB_OTA_KEYBOX_LOG}")" 2>/dev/null || true
-    pkill -9 -x tee-supplicant >/dev/null 2>&1 || true
-    sleep 1
-
-    /usr/bin/tee-supplicant >"${AB_OTA_TEE_LOG}" 2>&1 &
-    AB_OTA_TEE_PID="$!"
-    sleep 1
-    if ! kill -0 "${AB_OTA_TEE_PID}" 2>/dev/null; then
-        [ -f "${AB_OTA_TEE_LOG}" ] && log_error "tee-supplicant log: $(tail -n 1 "${AB_OTA_TEE_LOG}")"
-        return 1
-    fi
-    return 0
-}
-
-ab_stop_tee_supplicant() {
-    if [ -n "${AB_OTA_TEE_PID}" ] && kill -0 "${AB_OTA_TEE_PID}" 2>/dev/null; then
-        kill "${AB_OTA_TEE_PID}" >/dev/null 2>&1 || true
-        wait "${AB_OTA_TEE_PID}" 2>/dev/null || true
-    fi
-    AB_OTA_TEE_PID=""
-}
-
-ab_read_keybox_passphrase() {
-    ab_start_tee_supplicant || return 2
-    if ! /usr/bin/keybox_app >"${AB_OTA_KEYBOX_LOG}" 2>&1; then
-        ab_stop_tee_supplicant
-        return 1
-    fi
-    ab_stop_tee_supplicant
-}
-
-ab_try_keybox_roundtrip() {
-    local out_file="$1"
-
-    cp "${out_file}" "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
-    ab_start_tee_supplicant || {
-        log_warn "Failed to start tee-supplicant in non-SSKR path; keep raw key fallback"
-        return 0
-    }
-    /usr/bin/keybox_app write >"${AB_OTA_KEYBOX_LOG}" 2>&1 || true
-    rm -f "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
-    /usr/bin/keybox_app >"${AB_OTA_KEYBOX_LOG}" 2>&1 || true
-    ab_stop_tee_supplicant
-
-    if [ -s "${AB_OTA_SYSPW_FILE}" ]; then
-        cp "${AB_OTA_SYSPW_FILE}" "${out_file}" 2>/dev/null || true
-    fi
-}
-
-ab_get_security_passphrase_file() {
-    local out_file="$1"
-    local security_dev marker
-
-    [ -n "${out_file}" ] || return 1
-    : > "${out_file}" || return 1
-    chmod 600 "${out_file}" 2>/dev/null || true
-
-    # Keep the same preparation steps as initramfs decryption script.
-    ab_prepare_byname_links
-
-    security_dev="${AB_OTA_BYNAME_DIR}/security"
-    if [ ! -e "${security_dev}" ]; then
-        security_dev="$(ab_get_security_part)"
-    fi
-    [ -n "${security_dev}" ] || {
-        log_error "Security partition not found"
-        return 1
-    }
-
-    marker="$(head -c 4 "${security_dev}" 2>/dev/null || true)"
-    log_info "Security partition marker: ${marker:-<empty>}"
-
-    export SECURITY_STORAGE=SECURITY
-
-    rm -f "${AB_OTA_SYSPW_FILE}" 2>/dev/null || true
-
-    if [ "${marker}" = "SSKR" ]; then
-        [ -x /usr/bin/keybox_app ] || {
-            log_error "SSKR marker detected but /usr/bin/keybox_app is missing"
-            return 1
-        }
-
-        local keybox_status=0
-        ab_read_keybox_passphrase || keybox_status=$?
-        if [ "${keybox_status}" -eq 2 ]; then
-            log_error "Failed to start tee-supplicant in rootfs path"
-            return 1
-        fi
-        if [ "${keybox_status}" -ne 0 ]; then
-            log_error "keybox_app read failed in rootfs path"
-            [ -f "${AB_OTA_KEYBOX_LOG}" ] && log_error "keybox_app log: $(tail -n 1 "${AB_OTA_KEYBOX_LOG}")"
-            return 1
-        fi
-
-        if [ ! -s "${AB_OTA_SYSPW_FILE}" ]; then
-            log_error "keybox_app did not produce ${AB_OTA_SYSPW_FILE}"
-            return 1
-        fi
-        cp "${AB_OTA_SYSPW_FILE}" "${out_file}" || return 1
-        return 0
-    fi
-
-    # Non-SSKR path: same idea as initramfs (read raw 64 bytes first).
-    if ! head -c 64 "${security_dev}" > "${out_file}" 2>/dev/null; then
-        log_error "Failed to read raw passphrase from ${security_dev}"
-        return 1
-    fi
-
-    # Try keybox write/read round-trip as in initramfs script; fallback to raw on failure.
-    if [ -x /usr/bin/keybox_app ]; then
-        ab_try_keybox_roundtrip "${out_file}"
-    fi
-
-    return 0
-}
-
-# Active-slot helpers
-ab_detect_current_slot_from_root() {
-    local root_dev root_part root_partlabel root_uuid root_a_uuid root_b_uuid
-    root_dev=""
-
-    if findmnt -n /media/root-ro >/dev/null 2>&1; then
-        root_dev="$(findmnt -n -o SOURCE /media/root-ro)"
-    fi
-
-    if [ -z "${root_dev}" ]; then
-        root_dev="$(findmnt -n -o SOURCE /)"
-    fi
-
-    if [ -z "${root_dev}" ]; then
-        root_dev="$(df / | awk 'NR==2 {print $1}')"
-    fi
-
-    if [ -n "${root_dev}" ]; then
-        root_part="$(ab_resolve_physical_part_dev "${root_dev}" || true)"
-        root_partlabel="$(blkid -s PARTLABEL -o value "${root_part}" 2>/dev/null || true)"
-        case "${root_partlabel}" in
-            rootfs_a)
-                echo "a"
-                return 0
-                ;;
-            rootfs_b)
-                echo "b"
-                return 0
-                ;;
-        esac
-
-        root_uuid="$(blkid -o value -s UUID "${root_dev}" 2>/dev/null)"
-        root_a_uuid="$(ab_get_uuid_by_label "${ROOT_A_LABEL}")"
-        root_b_uuid="$(ab_get_uuid_by_label "${ROOT_B_LABEL}")"
-
-        if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_a_uuid}" ]; then
-            echo "a"
-            return 0
-        fi
-
-        if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_b_uuid}" ]; then
-            echo "b"
-            return 0
-        fi
-    fi
-
-    echo ""
-}
-
+# Slot helpers
 ab_get_current_slot() {
     local current_slot
 
-    current_slot="$(ab_detect_current_slot_from_root)"
+    current_slot="$(ab_env_current_slot 2>/dev/null || true)"
     if [ -n "${current_slot}" ]; then
         echo "${current_slot}"
         return 0
     fi
 
-    current_slot="$(ab_uboot_get_env "boot_slot")"
+    current_slot="$(ab_env_get "boot_slot")"
     case "${current_slot}" in
         a|b) echo "${current_slot}" ;;
         *) echo "a" ;;
@@ -347,17 +74,6 @@ ab_slot_from_root_label() {
     esac
 }
 
-ab_uboot_get_env() {
-    fw_printenv -n "$1" 2>/dev/null || echo ""
-}
-
-ab_get_retry_max() {
-    local retry_max
-    retry_max="$(ab_uboot_get_env slot_retry_max)"
-    [ -n "${retry_max}" ] || retry_max="3"
-    echo "${retry_max}"
-}
-
 # U-Boot environment validation
 ab_require_tools() {
     ota_require_runtime fw_printenv fw_setenv blkid mount umount mountpoint tar findmnt sed grep awk reboot dd od tr blockdev
@@ -365,15 +81,15 @@ ab_require_tools() {
 
 ab_env_slot_boot_ready() {
     local bootcmd scan preboot devtype devnum part_a part_b boot_mode fit_selector
-    bootcmd="$(ab_uboot_get_env bootcmd)"
-    scan="$(ab_uboot_get_env scan_dev_for_boot_part)"
-    preboot="$(ab_uboot_get_env ab_preboot)"
-    devtype="$(ab_uboot_get_env ab_boot_devtype)"
-    devnum="$(ab_uboot_get_env ab_boot_devnum)"
-    part_a="$(ab_uboot_get_env distro_bootpart_a)"
-    part_b="$(ab_uboot_get_env distro_bootpart_b)"
-    boot_mode="$(ab_uboot_get_env ab_boot_mode)"
-    fit_selector="$(ab_uboot_get_env ab_select_fit_slot)"
+    bootcmd="$(ab_env_get bootcmd)"
+    scan="$(ab_env_get scan_dev_for_boot_part)"
+    preboot="$(ab_env_get ab_preboot)"
+    devtype="$(ab_env_get ab_boot_devtype)"
+    devnum="$(ab_env_get ab_boot_devnum)"
+    part_a="$(ab_env_get distro_bootpart_a)"
+    part_b="$(ab_env_get distro_bootpart_b)"
+    boot_mode="$(ab_env_get ab_boot_mode)"
+    fit_selector="$(ab_env_get ab_select_fit_slot)"
 
     [ -n "${devtype}" ] || return 1
     [ -n "${devnum}" ] || return 1
@@ -427,7 +143,7 @@ ab_validate_environment() {
     ab_require_partition_label "${ROOT_A_LABEL}"
     ab_require_partition_label "${ROOT_B_LABEL}"
 
-    current_slot="$(ab_detect_current_slot_from_root)"
+    current_slot="$(ab_env_current_slot 2>/dev/null || true)"
     case "${current_slot}" in
         a|b) ;;
         *) error_exit "Current rootfs is not running from an AB root partition" ;;
@@ -480,36 +196,6 @@ ab_is_fit_image() {
     [ -f "${image}" ] || return 1
     magic="$(dd if="${image}" bs=4 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
     [ "${magic}" = "d00dfeed" ]
-}
-
-ab_write_target_boot_itb() {
-    local image="$1" target="$2" target_slot="$3"
-    local expected_partlabel image_size target_size partlabel
-
-    case "${target_slot}" in
-        a|b) ;;
-        *) error_exit "Invalid target slot for FIT boot image: ${target_slot}" ;;
-    esac
-
-    [ -f "${image}" ] || error_exit "Missing FIT boot payload: ${image}"
-    [ -b "${target}" ] || error_exit "FIT boot target is not a block device: ${target}"
-
-    expected_partlabel="boot_${target_slot}"
-    partlabel="$(blkid -s PARTLABEL -o value "${target}" 2>/dev/null || true)"
-    [ "${partlabel}" = "${expected_partlabel}" ] ||
-        error_exit "Refusing to write FIT boot image to ${target}: expected PARTLABEL=${expected_partlabel}, found ${partlabel:-<empty>}"
-
-    ab_is_fit_image "${image}" || error_exit "Refusing to write invalid FIT boot image: ${image}"
-
-    image_size="$(stat -c '%s' "${image}" 2>/dev/null || true)"
-    target_size="$(blockdev --getsize64 "${target}" 2>/dev/null || true)"
-    [ -n "${image_size}" ] && [ -n "${target_size}" ] && [ "${image_size}" -le "${target_size}" ] ||
-        error_exit "FIT boot image size check failed: image=${image_size:-unknown}, target=${target_size:-unknown}"
-
-    log_info "Writing FIT boot image ${image} (${image_size} bytes) to target slot ${target_slot}: ${target}"
-    dd if="${image}" of="${target}" bs=4M conv=fsync ||
-        error_exit "Failed to write FIT boot image to ${target}"
-    sync
 }
 
 ab_verify_payload() {
@@ -596,6 +282,36 @@ ab_update_armbian_env() {
     fi
 }
 
+ab_write_target_boot_itb() {
+    local image="$1" target="$2" target_slot="$3"
+    local expected_partlabel image_size target_size partlabel
+
+    case "${target_slot}" in
+        a|b) ;;
+        *) error_exit "Invalid target slot for FIT boot image: ${target_slot}" ;;
+    esac
+
+    [ -f "${image}" ] || error_exit "Missing FIT boot payload: ${image}"
+    [ -b "${target}" ] || error_exit "FIT boot target is not a block device: ${target}"
+
+    expected_partlabel="boot_${target_slot}"
+    partlabel="$(blkid -s PARTLABEL -o value "${target}" 2>/dev/null || true)"
+    [ "${partlabel}" = "${expected_partlabel}" ] ||
+        error_exit "Refusing to write FIT boot image to ${target}: expected PARTLABEL=${expected_partlabel}, found ${partlabel:-<empty>}"
+
+    ab_is_fit_image "${image}" || error_exit "Refusing to write invalid FIT boot image: ${image}"
+
+    image_size="$(stat -c '%s' "${image}" 2>/dev/null || true)"
+    target_size="$(blockdev --getsize64 "${target}" 2>/dev/null || true)"
+    [ -n "${image_size}" ] && [ -n "${target_size}" ] && [ "${image_size}" -le "${target_size}" ] ||
+        error_exit "FIT boot image size check failed: image=${image_size:-unknown}, target=${target_size:-unknown}"
+
+    log_info "Writing FIT boot image ${image} (${image_size} bytes) to target slot ${target_slot}: ${target}"
+    dd if="${image}" of="${target}" bs=4M conv=fsync ||
+        error_exit "Failed to write FIT boot image to ${target}"
+    sync
+}
+
 ab_update_target_boot() {
     local temp_work="$1"
     local root_mnt="$2"
@@ -676,8 +392,8 @@ ab_update_target_filesystem_config() {
 
     if [ -f "${fstab}" ]; then
         cp "${fstab}" "${fstab}.ota-backup" || return 1
-        existing_root_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]]*[[:space:]]*/[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
-        existing_boot_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]]*[[:space:]]*/boot[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
+        existing_root_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]][[:space:]]*/[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
+        existing_boot_uuid="$(grep -m1 'UUID=[0-9a-f-]*[[:space:]][[:space:]]*/boot[[:space:]]' "${fstab}" | sed -n 's/.*UUID=\([0-9a-f-]*\).*/\1/p')"
 
         if [ "${target_root_type}" = "crypto_LUKS" ]; then
             sed -i -E 's|^UUID=[^[:space:]]+[[:space:]]+/[[:space:]]+|/dev/mapper/armbian-root / |' "${fstab}" || return 1
@@ -721,26 +437,6 @@ ab_cleanup_target_root() {
     fi
 
     return "${cleanup_failed}"
-}
-
-ab_record_state() {
-    local status="$1"
-    local current_slot="$2"
-    local target_slot="$3"
-
-    state_mark_mode "ab" || return 1
-    state_mark_status "${status}" || return 1
-    state_set "CURRENT_SLOT" "${current_slot}" || return 1
-    state_set "TARGET_SLOT" "${target_slot}" || return 1
-    state_set "COMPLETE_TIME" "$(date -Iseconds)" || return 1
-}
-
-ab_mark_ready_to_boot() {
-    local package_path="$1"
-    local current_slot="$2"
-    local target_slot="$3"
-
-    state_mark_prepared "ab" "ready_to_boot" "${package_path}" "${current_slot}" "${target_slot}"
 }
 
 ab_update_target_partition() {
@@ -831,6 +527,27 @@ ab_update_target_partition() {
         error_exit "Failed to clean up target root partition"
 }
 
+# OTA state helpers
+ab_record_state() {
+    local status="$1"
+    local current_slot="$2"
+    local target_slot="$3"
+
+    state_mark_mode "ab" || return 1
+    state_mark_status "${status}" || return 1
+    state_set "CURRENT_SLOT" "${current_slot}" || return 1
+    state_set "TARGET_SLOT" "${target_slot}" || return 1
+    state_set "COMPLETE_TIME" "$(date -Iseconds)" || return 1
+}
+
+ab_mark_ready_to_boot() {
+    local package_path="$1"
+    local current_slot="$2"
+    local target_slot="$3"
+
+    state_mark_prepared "ab" "ready_to_boot" "${package_path}" "${current_slot}" "${target_slot}"
+}
+
 # Public A/B OTA commands
 ab_start_ota() {
     local package_path="$1"
@@ -847,7 +564,7 @@ ab_start_ota() {
     target_root_label="$(ab_get_slot_root_label "${target_slot}")"
     target_boot_label="$(ab_get_slot_boot_label "${target_slot}")"
 
-    if [ "$(ab_uboot_get_env ota_in_progress)" = "1" ]; then
+    if [ "$(ab_env_get ota_in_progress)" = "1" ]; then
         error_exit "Another AB OTA boot verification is still in progress"
     fi
 
@@ -870,7 +587,7 @@ ab_mark_success() {
     local current_slot
     ab_require_tools
 
-    if [ "$(state_get OTA_MODE)" != "ab" ] && [ "$(ab_uboot_get_env ota_in_progress)" != "1" ]; then
+    if [ "$(state_get OTA_MODE)" != "ab" ] && [ "$(ab_env_get ota_in_progress)" != "1" ]; then
         log_info "No A/B OTA in progress, nothing to mark"
         return 0
     fi
@@ -889,12 +606,12 @@ ab_rollback() {
     local last_success
     ab_require_tools
 
-    if [ "$(ab_uboot_get_env ota_in_progress)" != "1" ]; then
+    if [ "$(ab_env_get ota_in_progress)" != "1" ]; then
         log_info "No A/B OTA in progress, nothing to rollback"
         return 0
     fi
 
-    last_success="$(ab_uboot_get_env boot_success)"
+    last_success="$(ab_env_get boot_success)"
     [ -n "${last_success}" ] || last_success="a"
 
     ab_env_rollback || error_exit "Failed to restore A/B boot state"
@@ -920,7 +637,7 @@ ab_switch_slot() {
         *) error_exit "Usage: armbian-ota switch-slot [a|b]" ;;
     esac
 
-    if [ "$(ab_uboot_get_env ota_in_progress)" = "1" ]; then
+    if [ "$(ab_env_get ota_in_progress)" = "1" ]; then
         error_exit "Cannot switch slots while A/B OTA is in progress"
     fi
 
@@ -945,7 +662,7 @@ ab_switch_slot() {
 ab_status() {
     local current_slot ota_in_progress
     current_slot="$(ab_get_current_slot)"
-    ota_in_progress="$(ab_uboot_get_env ota_in_progress)"
+    ota_in_progress="$(ab_env_get ota_in_progress)"
 
     echo "=== Armbian OTA Status (A/B) ==="
     echo "Mode: ab"
@@ -954,12 +671,12 @@ ab_status() {
     echo "Target slot: $(state_get TARGET_SLOT)"
     echo ""
     echo "U-Boot Environment:"
-    echo "  boot_slot: $(ab_uboot_get_env boot_slot)"
-    echo "  boot_success: $(ab_uboot_get_env boot_success)"
+    echo "  boot_slot: $(ab_env_get boot_slot)"
+    echo "  boot_success: $(ab_env_get boot_success)"
     echo "  ota_in_progress: ${ota_in_progress}"
-    echo "  try_count: $(ab_uboot_get_env try_count)"
-    echo "  slot_retry_max: $(ab_get_retry_max)"
-    echo "  slot_retry_left: $(ab_uboot_get_env slot_retry_left)"
+    echo "  try_count: $(ab_env_get try_count)"
+    echo "  slot_retry_max: $(ab_env_retry_max)"
+    echo "  slot_retry_left: $(ab_env_get slot_retry_left)"
     echo ""
     echo "Partitions:"
     for label in "${BOOT_A_LABEL}" "${BOOT_B_LABEL}" "${ROOT_A_LABEL}" "${ROOT_B_LABEL}"; do
