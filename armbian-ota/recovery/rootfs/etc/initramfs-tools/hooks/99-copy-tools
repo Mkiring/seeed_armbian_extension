@@ -68,3 +68,6 @@ done <<'EOF'
 EOF
 
 copy_ota_lib state.sh
+copy_ota_lib ota-log.sh
+copy_ota_lib ota-device.sh
+copy_ota_lib ota-payload.sh

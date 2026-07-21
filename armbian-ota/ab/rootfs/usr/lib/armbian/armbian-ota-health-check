@@ -2,15 +2,12 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/../../runtime/lib/common.sh" ]; then
-    . "${SCRIPT_DIR}/../../runtime/lib/common.sh"
-elif [ -f /usr/share/armbian-ota/common.sh ]; then
-    . /usr/share/armbian-ota/common.sh
-else
-    echo "ERROR: Cannot find OTA common library" >&2
+OTA_RUNTIME_DIR="/usr/share/armbian-ota"
+[ -f "${OTA_RUNTIME_DIR}/common.sh" ] || {
+    echo "ERROR: OTA runtime libraries not found at ${OTA_RUNTIME_DIR}" >&2
     exit 1
-fi
+}
+. "${OTA_RUNTIME_DIR}/common.sh"
 
 resolve_physical_part_dev() {
     local dev="$1" pkname

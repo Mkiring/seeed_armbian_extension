@@ -1,0 +1,134 @@
+#!/bin/bash
+
+OTA_RUNTIME_DIR="/usr/share/armbian-ota"
+[ -f "${OTA_RUNTIME_DIR}/common.sh" ] || {
+    echo "ERROR: OTA runtime libraries not found at ${OTA_RUNTIME_DIR}" >&2
+    exit 1
+}
+export OTA_RUNTIME_DIR
+. "${OTA_RUNTIME_DIR}/common.sh"
+
+HAS_BACKEND=""
+for _mode in ab recovery; do
+    if [ -f "${OTA_RUNTIME_DIR}/${_mode}/backend.sh" ]; then
+        . "${OTA_RUNTIME_DIR}/${_mode}/backend.sh"
+        HAS_BACKEND="${_mode}"
+        break
+    fi
+done
+
+require_mode_backend() {
+    local mode="$1"
+
+    [ "${HAS_BACKEND}" = "${mode}" ] || \
+        error_exit "${mode} OTA backend is not installed on this firmware (have: ${HAS_BACKEND:-none})"
+}
+
+detect_device_encryption() {
+    local mode="$1" partlabel dev
+
+    if [ "${mode}" = "ab" ]; then
+        # Encrypted A/B: ext4 label is inside the LUKS container, so probe by GPT PARTLABEL.
+        for partlabel in rootfs_a rootfs_b; do
+            dev="$(blkid -t PARTLABEL="${partlabel}" -o device 2>/dev/null | head -n1 || true)"
+            [ -n "${dev}" ] || continue
+            [ "$(blkid -o value -s TYPE "${dev}" 2>/dev/null || true)" = "crypto_LUKS" ] && { echo "yes"; return 0; }
+        done
+        echo "no"
+    elif blkid -t TYPE=crypto_LUKS >/dev/null 2>&1 || [ -e /dev/mapper/armbian-root ]; then
+        echo "yes"
+    else
+        echo "no"
+    fi
+}
+
+check_ota_pkg() {
+    local package_path="$1" package_encrypted device_encrypted
+
+    [ -f "${package_path}" ] || error_exit "OTA package not found: ${package_path}"
+    load_package_env_metadata "${package_path}" || error_exit "OTA package metadata missing package.env"
+
+    OTA_CLI_MODE="$(package_env_get_value "OTA_MODE" || true)"
+    case "${OTA_CLI_MODE}" in
+        ab|recovery) ;;
+        *) error_exit "Invalid OTA_MODE in package metadata: ${OTA_CLI_MODE:-<empty>} (expected ab or recovery)" ;;
+    esac
+
+    package_encrypted="$(package_env_get_value "OTA_ENCRYPTED" || true)"
+    case "${package_encrypted:-no}" in
+        yes|no) ;;
+        *) error_exit "Invalid OTA_ENCRYPTED in package metadata: ${package_encrypted} (expected yes or no)" ;;
+    esac
+
+    device_encrypted="$(detect_device_encryption "${OTA_CLI_MODE}")"
+    [ "${package_encrypted}" = "${device_encrypted}" ] ||
+        error_exit "OTA package encryption mismatch: package=${package_encrypted}, device=${device_encrypted}"
+}
+
+call_mode_action() {
+    local mode="$1" action="$2" package="${3:-}"
+    require_mode_backend "${mode}"
+    case "${action}" in
+        start) "${mode}_start_ota" "${package}" ;;
+        status|mark-success|rollback) "${mode}_${action//-/_}" ;;
+        *) error_exit "Unsupported action: ${action}" ;;
+    esac
+}
+
+dispatch_by_state_mode() {
+    local action="$1" current_mode
+    current_mode="$(state_get OTA_MODE)"
+
+    case "${current_mode}" in
+        ab|recovery) call_mode_action "${current_mode}" "${action}"; return ;;
+    esac
+
+    [ "${action}" = "status" ] || \
+        error_exit "No OTA mode recorded in ${OTA_STATE_FILE}. Start an OTA first."
+    echo "=== Armbian OTA Status ==="
+    echo "Mode: unknown"
+    echo "Status: $(state_get STATUS)"
+}
+
+case "${1:-}" in
+    start)
+        shift
+        ensure_root
+        [ $# -eq 1 ] || error_exit "start requires exactly one argument: the OTA package path"
+        case "$1" in -*) error_exit "Unknown option: $1" ;; esac
+        OTA_CLI_PACKAGE="$1"
+        check_ota_pkg "${OTA_CLI_PACKAGE}"
+        call_mode_action "${OTA_CLI_MODE}" "start" "${OTA_CLI_PACKAGE}"
+        ;;
+    status)
+        state_init
+        dispatch_by_state_mode "status"
+        ;;
+    switch-slot)
+        shift
+        ensure_root
+        require_mode_backend "ab"
+        ab_switch_slot "${1:-}"
+        ;;
+    
+    # internal
+    mark-success)
+        ensure_root
+        state_init
+        dispatch_by_state_mode "mark-success"
+        ;;
+    rollback)
+        ensure_root
+        state_init
+        dispatch_by_state_mode "rollback"
+        ;;
+    *)
+        cat <<'EOF'
+Usage:
+  armbian-ota start <ota-package.tar.gz>
+  armbian-ota status
+  armbian-ota switch-slot [a|b]
+EOF
+        exit 1
+        ;;
+esac

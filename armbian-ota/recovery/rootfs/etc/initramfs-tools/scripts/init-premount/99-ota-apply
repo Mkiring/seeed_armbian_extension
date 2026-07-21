@@ -1,0 +1,101 @@
+#!/bin/sh
+#
+# initramfs-tools init-premount hook: OTA update (orchestrator).
+#
+# Recovery OTA is applied in a single linear transaction. All helpers live in
+# the initramfs-specific POSIX sh libraries under /usr/share/armbian-ota/:
+# ota-log.sh, ota-device.sh, ota-payload.sh, plus state.sh. This script only
+# sources them and drives the ordered steps.
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+[ -f /usr/share/armbian-ota/state.sh ] && . /usr/share/armbian-ota/state.sh
+. /usr/share/armbian-ota/ota-log.sh
+. /usr/share/armbian-ota/ota-device.sh
+. /usr/share/armbian-ota/ota-payload.sh
+
+# Enable verbose shell tracing only when explicitly requested.
+if [ "${OTA_DEBUG:-no}" = "yes" ]; then
+    set -x
+fi
+
+# transaction layout
+ROOT_MNT="/mnt/root"
+BOOT_MNT="/mnt/boot"
+STATE_DIR="${ROOT_MNT}/var/lib/armbian-ota"
+STATE_FILE="${STATE_DIR}/ota-state.env"
+OTA_DIR="${ROOT_MNT}/ota_work"
+ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
+BOOT_TAR="${OTA_DIR}/boot.tar.gz"
+BOOT_ITB="${OTA_DIR}/boot.itb"
+
+ota_log_init
+log "init-premount ota hook start"
+log "LOGFILE=${LOGFILE}"
+touch "${LOGDIR}/ota_ran.init-premount"
+
+# 1) probe devices (sets ROOT_DEV, ROOT_UUID, BOOT_DEV, BOOT_UUID,
+#    HAS_BOOT_PART, AUTO_DECRYPT_MODE)
+ota_detect_devices
+
+# 2) mount root + validate state
+if [ -z "${ROOT_DEV}" ]; then
+    log "ROOT_DEV is empty, skip OTA"
+    exit 0
+fi
+
+mkdir -p "${ROOT_MNT}"
+log "mounting ${ROOT_DEV} -> ${ROOT_MNT} ..."
+if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
+    log "cannot mount ${ROOT_DEV}, skip OTA"
+    exit 0
+fi
+
+ota_validate_recovery_state || {
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    exit 0
+}
+
+# 3) apply rootfs (clean + extract + first-login markers)
+ota_apply_rootfs || {
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    exit 0
+}
+
+# 4-6) apply boot (mount + extract boot.tar.gz, write boot.itb)
+ota_apply_boot || {
+    if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
+        umount "${BOOT_MNT}" 2>/dev/null || true
+    fi
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    exit 0
+}
+
+# 7) fix UUIDs in armbianEnv.txt / fstab / crypttab
+ota_patch_config
+
+# 8) cleanup payload
+log "  delete OTA payload directory ${OTA_DIR} ..."
+rm -rf "${OTA_DIR}" || true
+
+# 9) commit success state
+ota_commit_success_state
+
+# 10) unmount partitions
+ota_unmount_all
+
+sync
+
+# 11) reboot
+ota_reboot

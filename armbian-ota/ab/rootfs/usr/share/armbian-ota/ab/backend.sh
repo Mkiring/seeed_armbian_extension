@@ -11,14 +11,14 @@ BOOT_B_LABEL="armbi_bootb"
 ROOT_A_LABEL="armbi_roota"
 ROOT_B_LABEL="armbi_rootb"
 
-AB_ENV_LIB="${OTA_RUNTIME_DIR}/ab-env.sh"
+AB_ENV_LIB="${OTA_RUNTIME_DIR}/ab/env.sh"
 [ -r "${AB_ENV_LIB}" ] || {
     echo "ERROR: A/B U-Boot environment helper not found: ${AB_ENV_LIB}" >&2
     return 1
 }
 . "${AB_ENV_LIB}"
 
-AB_SECURITY_LIB="${OTA_RUNTIME_DIR}/ab-security.sh"
+AB_SECURITY_LIB="${OTA_RUNTIME_DIR}/ab/security.sh"
 [ -r "${AB_SECURITY_LIB}" ] || {
     echo "ERROR: A/B security helper not found: ${AB_SECURITY_LIB}" >&2
     return 1

@@ -14,38 +14,36 @@ Note: When `OTA_ENABLE=yes`, OTA runtime is installed into the firmware by mode:
 ```
 extensions/armbian-ota/
 ├── ota-support.sh                          # Main build hook entry point
-├── build-hooks/                            # Build-time hook implementation
-│   ├── image-naming.sh                     # Image/package naming helpers
-│   ├── ab-partitions.sh                    # A/B partition hooks
-│   ├── runtime-install.sh                  # Rootfs runtime/tool install hooks
-│   ├── overlayroot.sh                      # A/B overlayroot hooks
-│   ├── recovery-partitions.sh              # Recovery rootfs + userdata layout
-│   └── package-create.sh                   # OTA package creation hook
+├── common/                                 # Shared OTA functionality
+│   ├── build-hooks/
+│   │   ├── image-naming.sh                 # Image/package naming helpers
+│   │   ├── package-create.sh               # OTA package creation hook
+│   │   └── rootfs-install.sh               # Rootfs rsync helper
+│   └── rootfs/usr/                         # Shared CLI and runtime libraries
 │
-├── recovery/                           # Recovery OTA mode
-│   ├── backend.sh                          # Recovery OTA backend
-│   ├── initramfs_hooks/
-│   │   ├── 99-copy-tools                   # Initramfs hook for recovery OTA
-│   │   ├── 99-ota-apply                    # Recovery OTA apply script
-│   │   └── 99-userdata-overlay             # Persistent directory overlays
+├── recovery/                               # Recovery OTA mode
+│   ├── build-hooks/
+│   │   ├── partitions.sh                   # Recovery rootfs + userdata layout
+│   │   └── runtime-install.sh              # Recovery rootfs and initramfs setup
+│   └── rootfs/
+│       ├── etc/initramfs-tools/            # Initramfs hooks and scripts
+│       └── usr/share/armbian-ota/recovery/ # Recovery backend
 │
-├── runtime/                                # Unified OTA runtime
-│   ├── bin/
-│   │   └── armbian-ota                     # Unified CLI entrypoint
-│   ├── lib/
-│   │   └── common.sh                       # Shared runtime helpers
-│
-├── ab/                                 # AB Partition OTA mode
-│   ├── backend.sh                          # AB OTA backend
-│   ├── lib/
-│   │   ├── armbian-ota-health-check        # First boot health check
-│   │   ├── armbian-ota-init-uboot          # U-Boot environment initializer
-│   │   └── armbian-resize-userdata         # Resize shared userdata partition
-│   ├── systemd/
-│   │   ├── armbian-ota-firstboot.service   # Health check service
-│   │   ├── armbian-ota-rollback.service    # Rollback service
-│   │   └── armbian-resize-userdata.service # Resize shared userdata partition
+└── ab/                                     # A/B partition OTA mode
+    ├── build-hooks/
+    │   ├── partitions.sh                   # A/B partition hooks
+    │   ├── overlayroot.sh                  # A/B overlayroot setup
+    │   └── runtime-install.sh              # A/B rootfs and services setup
+    └── rootfs/
+        ├── etc/systemd/system/             # A/B systemd units
+        └── usr/
+            ├── lib/armbian/                # A/B runtime executables
+            └── share/armbian-ota/ab/       # A/B backend and libraries
 ```
+
+The build hooks install `common/rootfs` first, then install the selected mode
+overlay with `rsync`.  Files under each `rootfs/` directory therefore mirror
+their final paths in the image.
 
 ## Recovery OTA Mode
 
@@ -155,9 +153,6 @@ armbian-ota start Armbian_xxx-OTA.tar.gz
 
 # Manually switch to the other boot slot after OTA has completed
 armbian-ota switch-slot
-
-# Mark as successful (if automatic marking failed)
-armbian-ota mark-success
 ```
 
 ## Build Configuration
@@ -256,16 +251,16 @@ fw_setenv ota_in_progress 0
 
 ### Adding New Features
 
-1. For Recovery OTA: Modify files in `recovery/`
-2. For AB OTA: Modify files in `ab/`
-3. For shared functionality: Use `runtime/`
-4. For build-time hook logic: Use `build-hooks/`
+1. For Recovery OTA: Modify files in `recovery/rootfs/` or `recovery/build-hooks/`
+2. For AB OTA: Modify files in `ab/rootfs/` or `ab/build-hooks/`
+3. For shared functionality: Use `common/rootfs/` or `common/build-hooks/`
 
 ### Build Hook Entry Points
 
-In `ota-support.sh` and `build-hooks/*.sh`:
+In `ota-support.sh` and `*/build-hooks/*.sh`:
 - Recovery initramfs hook installation: `pre_update_initramfs__*`
-- Runtime/assets installation: `pre_umount_final_image__89x_*`
+- Runtime/assets installation: `pre_update_initramfs__89x_*`
+- Resize userdata service enablement: `pre_umount_final_image__896_*`
 - OTA package creation: `pre_umount_final_image__901_*`
 - U-Boot env tool build: `pre_package_uboot_image__*`
 

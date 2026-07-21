@@ -1,6 +1,6 @@
 # A/B U-Boot environment helpers.
 
-AB_PARTITIONS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ab-partitions.sh"
+AB_PARTITIONS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/partitions.sh"
 [ -r "${AB_PARTITIONS_LIB}" ] || {
     echo "ERROR: A/B partition helper not found: ${AB_PARTITIONS_LIB}" >&2
     return 1
