@@ -131,16 +131,16 @@ ota_validate_recovery_state() {
     return 0
 }
 
-# ===== clean rootfs (except ota_work and boot) + extract rootfs.tar.gz =====
+# ===== clean rootfs (except boot) + extract rootfs.tar.gz =====
 # Returns 1 (caller unmounts+aborts) on clean/extract failure.
 ota_apply_rootfs() {
-    log "cleaning ${ROOT_MNT} (except ota_work and boot)..."
+    log "cleaning ${ROOT_MNT} (except boot)..."
     start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
     (
         cd "${ROOT_MNT}" || exit 1
         for f in * .[!.]* ..?*; do
             case "$f" in
-                "."|".."|"ota_work"|"boot")
+                "."|".."|"boot")
                     continue
                     ;;
             esac

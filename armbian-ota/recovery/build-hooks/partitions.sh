@@ -54,7 +54,7 @@ function ota_recovery_append_partition() {
 
 function extension_prepare_config__install_recovery_userdata_tools() {
     if ota_recovery_enabled; then
-        add_packages_to_image busybox-static
+        add_packages_to_image overlayroot busybox-static
     fi
 }
 

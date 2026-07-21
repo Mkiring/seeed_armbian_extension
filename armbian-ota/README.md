@@ -24,6 +24,7 @@ extensions/armbian-ota/
 │
 ├── recovery/                               # Recovery OTA mode
 │   ├── build-hooks/
+│   │   ├── overlayroot.sh                  # Recovery full-root overlayroot setup
 │   │   ├── partitions.sh                   # Recovery rootfs + userdata layout
 │   │   └── runtime-install.sh              # Recovery rootfs and initramfs setup
 │   └── rootfs/
@@ -59,7 +60,7 @@ OTA_ENABLE=yes
 
 ### How It Works
 
-1. OTA package is extracted to `/ota_work/`
+1. OTA package is extracted to `userdata/ota-recovery/ota_work/`
 2. Initramfs hooks are installed and `update-initramfs` is executed
 3. On reboot, initramfs applies OTA payload to current rootfs
 4. A separate userdata partition supplies persistent overlays for `/etc`,
@@ -107,17 +108,15 @@ overlay filesystem. This is required because tools such as `useradd` and
 `groupadd` update those files by writing a temporary file and renaming it over
 the original.
 
-The `/userdata` backing store differs by OTA mode:
+Both OTA modes use overlayroot with the final `userdata` partition as the
+writable upper layer. The rootfs is the read-only lower layer, so runtime
+writes—including `/home` and `/var/lib`—persist on `armbi_usrdata` without
+changing the OTA rootfs. Encrypted Recovery images use the initramfs-unlocked
+`/dev/mapper/armbian-userdata` mapper as the overlayroot backing device.
 
-- **A/B OTA**: overlayroot is enabled and uses the dedicated `armbi_usrdata`
-  partition as the writable upper layer. Rootfs slots stay read-only, and
-  runtime writes such as `/home` are persisted by overlayroot on `armbi_usrdata`.
-- **Recovery OTA**: the image has a dedicated final `userdata` partition,
-  formatted as `armbi_usrdata`. An initramfs init-bottom hook mounts three
-  independent overlayfs instances: `/etc`, `/home`, and `/var/lib`. Recovery
-  OTA rewrites only rootfs and never copies or modifies userdata. Encrypted
-  Recovery images format userdata as LUKS and unlock it with the same SSKR
-  recovery key path before these overlays are mounted.
+Recovery OTA stores its pending payload and state in `userdata/ota-recovery/`
+rather than the overlay rootfs. The initramfs mounts this transaction store,
+rewrites only the raw rootfs lower layer, and leaves userdata intact.
 
 Neither OTA mode migrates data from older single-rootfs Recovery images;
 this layout is intended for new development images.

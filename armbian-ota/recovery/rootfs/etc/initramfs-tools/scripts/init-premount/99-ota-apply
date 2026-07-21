@@ -33,12 +33,63 @@ fi
 # transaction layout
 ROOT_MNT="/mnt/root"
 BOOT_MNT="/mnt/boot"
-STATE_DIR="${ROOT_MNT}/var/lib/armbian-ota"
-STATE_FILE="${STATE_DIR}/ota-state.env"
-OTA_DIR="${ROOT_MNT}/ota_work"
-ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
-BOOT_TAR="${OTA_DIR}/boot.tar.gz"
-BOOT_ITB="${OTA_DIR}/boot.itb"
+USERDATA_MNT="/mnt/userdata"
+RECOVERY_TRANSACTION_DIR="${USERDATA_MNT}/ota-recovery"
+STATE_DIR=""
+STATE_FILE=""
+OTA_DIR=""
+ROOTFS_TAR=""
+BOOT_TAR=""
+BOOT_ITB=""
+
+find_userdata_device() {
+    local dev
+
+    if [ -b /dev/mapper/armbian-userdata ]; then
+        printf '%s\n' /dev/mapper/armbian-userdata
+        return 0
+    fi
+
+    dev="$(blkid -t PARTLABEL=userdata -o device 2>/dev/null | head -n1 || true)"
+    if [ -n "${dev}" ] && [ "$(blkid -s TYPE -o value "${dev}" 2>/dev/null || true)" = "ext4" ]; then
+        printf '%s\n' "${dev}"
+        return 0
+    fi
+
+    dev="$(blkid -t LABEL=armbi_usrdata -o device 2>/dev/null | head -n1 || true)"
+    if [ -n "${dev}" ] && [ "$(blkid -s TYPE -o value "${dev}" 2>/dev/null || true)" = "ext4" ]; then
+        printf '%s\n' "${dev}"
+    fi
+}
+
+mount_recovery_transaction_store() {
+    local userdata_dev
+
+    userdata_dev="$(find_userdata_device)"
+    [ -n "${userdata_dev}" ] || {
+        log "userdata partition is unavailable"
+        return 1
+    }
+
+    mkdir -p "${USERDATA_MNT}"
+    mount -t ext4 -o rw "${userdata_dev}" "${USERDATA_MNT}" || {
+        log "failed to mount userdata ${userdata_dev}"
+        return 1
+    }
+
+    STATE_DIR="${RECOVERY_TRANSACTION_DIR}/state"
+    STATE_FILE="${STATE_DIR}/ota-state.env"
+    OTA_DIR="${RECOVERY_TRANSACTION_DIR}/ota_work"
+    ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
+    BOOT_TAR="${OTA_DIR}/boot.tar.gz"
+    BOOT_ITB="${OTA_DIR}/boot.itb"
+}
+
+unmount_recovery_transaction_store() {
+    if mountpoint -q "${USERDATA_MNT}"; then
+        umount "${USERDATA_MNT}" 2>/dev/null || log "WARN: failed to unmount ${USERDATA_MNT}"
+    fi
+}
 
 ota_log_init
 log "init-premount ota hook start"
@@ -55,21 +106,28 @@ if [ -z "${ROOT_DEV}" ]; then
     exit 0
 fi
 
+if ! mount_recovery_transaction_store; then
+    exit 0
+fi
+
 mkdir -p "${ROOT_MNT}"
 log "mounting ${ROOT_DEV} -> ${ROOT_MNT} ..."
 if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
     log "cannot mount ${ROOT_DEV}, skip OTA"
+    unmount_recovery_transaction_store
     exit 0
 fi
 
 ota_validate_recovery_state || {
     umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
     exit 0
 }
 
 # 3) apply rootfs (clean + extract + first-login markers)
 ota_apply_rootfs || {
     umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
     exit 0
 }
 
@@ -79,6 +137,7 @@ ota_apply_boot || {
         umount "${BOOT_MNT}" 2>/dev/null || true
     fi
     umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
     exit 0
 }
 
@@ -94,6 +153,7 @@ ota_commit_success_state
 
 # 10) unmount partitions
 ota_unmount_all
+unmount_recovery_transaction_store
 
 sync
 

@@ -61,6 +61,7 @@ done <<'EOF'
 /usr/bin /usr/bin/dd /bin/dd
 /usr/bin /usr/bin/mount /bin/mount
 /usr/bin /usr/bin/umount /bin/umount
+/usr/bin /usr/bin/mountpoint /bin/mountpoint
 /usr/sbin /usr/sbin/blkid /sbin/blkid
 /usr/bin /usr/bin/udevadm /bin/udevadm
 /usr/bin /usr/bin/sleep /bin/sleep

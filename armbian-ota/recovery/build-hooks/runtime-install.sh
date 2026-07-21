@@ -19,7 +19,6 @@ function ota_install_recovery_initramfs() {
         "${OTA_ROOTFS_RUNTIME_DIR}/ota-payload.sh"
         "etc/initramfs-tools/hooks/99-copy-tools"
         "etc/initramfs-tools/scripts/init-premount/99-ota-apply"
-        "etc/initramfs-tools/scripts/init-bottom/99-userdata-overlay"
     )
     local ota_runtime_file runtime_hash
 
