@@ -18,21 +18,38 @@ function ota_secure_boot_encrypted_rootfs_enabled() {
     [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]] && ota_encrypted_rootfs_enabled
 }
 
-for ota_support_module in \
-    common/build-hooks/image-naming \
-    common/build-hooks/rootfs-install \
-    common/build-hooks/overlayroot \
-    common/build-hooks/userdata-resize \
-    recovery/build-hooks/partitions \
-    recovery/build-hooks/overlayroot \
-    recovery/build-hooks/runtime-install \
-    ab/build-hooks/partitions \
-    ab/build-hooks/overlayroot \
-    ab/build-hooks/runtime-install \
-    common/build-hooks/package-create
-do
+if [[ "${OTA_ENABLE:-}" == "yes" ]]; then
+    for ota_support_module in \
+        common/build-hooks/image-naming \
+        common/build-hooks/partitions \
+        common/build-hooks/rootfs-install \
+        common/build-hooks/overlayroot \
+        common/build-hooks/userdata-resize
+    do
+        # shellcheck source=/dev/null
+        source "${OTA_SUPPORT_DIR}/${ota_support_module}.sh"
+    done
+
+    if [[ "${AB_PART_OTA:-}" == "yes" ]]; then
+        for ota_support_module in \
+            ab/build-hooks/partitions \
+            ab/build-hooks/runtime-install
+        do
+            # shellcheck source=/dev/null
+            source "${OTA_SUPPORT_DIR}/${ota_support_module}.sh"
+        done
+    else
+        for ota_support_module in \
+            recovery/build-hooks/partitions \
+            recovery/build-hooks/runtime-install
+        do
+            # shellcheck source=/dev/null
+            source "${OTA_SUPPORT_DIR}/${ota_support_module}.sh"
+        done
+    fi
+
     # shellcheck source=/dev/null
-    source "${OTA_SUPPORT_DIR}/${ota_support_module}.sh"
-done
+    source "${OTA_SUPPORT_DIR}/common/build-hooks/package-create.sh"
+fi
 
 unset ota_support_module

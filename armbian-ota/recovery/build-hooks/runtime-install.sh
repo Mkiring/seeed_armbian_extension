@@ -49,10 +49,6 @@ function ota_install_recovery_initramfs() {
 }
 
 function pre_update_initramfs__894_install_recovery_ota_hooks() {
-    if [[ "${OTA_ENABLE}" != "yes" || "${AB_PART_OTA}" == "yes" ]]; then
-        return 0
-    fi
-
     ota_install_recovery_runtime_to_rootfs "${MOUNT}" || return 1
     ota_install_recovery_initramfs "${MOUNT}"
 }

@@ -18,6 +18,7 @@ extensions/armbian-ota/
 │   ├── build-hooks/
 │   │   ├── image-naming.sh                 # Image/package naming helpers
 │   │   ├── package-create.sh               # OTA package creation hook
+│   │   ├── partitions.sh                   # Common partition primitives
 │   │   ├── rootfs-install.sh               # Rootfs rsync helper
 │   │   └── userdata-resize.sh              # Shared userdata resize hook
 │   └── rootfs/                             # Shared CLI, runtime and userdata resize service
@@ -111,8 +112,9 @@ the original.
 Both OTA modes use overlayroot with the final `userdata` partition as the
 writable upper layer. The rootfs is the read-only lower layer, so runtime
 writes—including `/home` and `/var/lib`—persist on `armbi_usrdata` without
-changing the OTA rootfs. Encrypted Recovery images use the initramfs-unlocked
-`/dev/mapper/armbian-userdata` mapper as the overlayroot backing device.
+changing the OTA rootfs. Encrypted A/B and Recovery images use the
+initramfs-unlocked `/dev/mapper/armbian-userdata` mapper as the overlayroot
+backing device.
 
 Recovery OTA stores its pending payload and state in `userdata/ota-recovery/`
 rather than the overlay rootfs. The initramfs mounts this transaction store,
@@ -168,17 +170,28 @@ Add to your board configuration or build command:
 # For AB Partition OTA
 OTA_ENABLE=yes
 AB_PART_OTA=yes
-AB_BOOT_SIZE=256        # Boot partition size in MiB
-AB_ROOTFS_SIZE_TIER=mid # minimal=4096, mid=6144, full=8192 MiB per rootfs
-# AB_ROOTFS_SIZE=8192   # Optional explicit rootfs partition size override
-USERDATA=256            # Userdata partition size in MiB
+OTA_BOOT_SIZE=256       # Boot partition size in MiB
+# OTA_ROOTFS_SIZE=4096  # Optional rootfs partition size override
+OTA_USERDATA_SIZE=1024  # Userdata partition size in MiB
+OTA_SECURITY_SIZE=4     # Security partition size in MiB (encrypted images)
 
 # For Recovery OTA
 OTA_ENABLE=yes
 # leave AB_PART_OTA unset
-RECOVERY_USERDATA_SIZE=1024 # Optional userdata partition size in MiB
-# RECOVERY_ROOTFS_SIZE=4096 # Optional explicit rootfs partition size in MiB
+OTA_BOOT_SIZE=256       # Used when a separate boot partition is required
+# OTA_ROOTFS_SIZE=4096  # Optional rootfs partition size override
+OTA_USERDATA_SIZE=1024  # Userdata partition size in MiB
+OTA_SECURITY_SIZE=4     # Security partition size in MiB (encrypted images)
 ```
+
+When unset, `OTA_ROOTFS_SIZE` is calculated from the built rootfs size plus
+`EXTRA_ROOTFS_MIB_SIZE`, then adds 30% headroom. The same size-variable
+policy applies to both A/B and Recovery OTA modes.
+
+Both OTA modes require a GPT partition table. Their boot, rootfs, userdata,
+and security partitions are located by GPT partition labels.
+Both OTA layouts boot through U-Boot and do not include BIOS or UEFI
+partitions.
 
 ## OTA Package Contents
 

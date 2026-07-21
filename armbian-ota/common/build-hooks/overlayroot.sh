@@ -12,6 +12,14 @@ function ota_set_config_option() {
     fi
 }
 
+function ota_overlayroot_device_options() {
+    if ota_encrypted_rootfs_enabled; then
+        printf '%s\n' 'dev=/dev/mapper/armbian-userdata,timeout=30'
+    else
+        printf '%s\n' 'dev=LABEL=armbi_usrdata'
+    fi
+}
+
 function ota_configure_overlayroot() {
     local root_dir="$1"
     local title="$2"
@@ -44,4 +52,10 @@ function ota_configure_overlayroot() {
         rm -f "${root_dir}/etc/update-motd.d/97-overlayroot"
         display_alert "${title}" "Removed overlayroot MOTD mount dump" "info"
     fi
+}
+
+# Configure overlayroot before Armbian rebuilds the final initramfs.
+function pre_update_initramfs__892_config_overlayroot() {
+    ota_configure_overlayroot "${MOUNT}" "OTA" \
+        "$(ota_overlayroot_device_options)"
 }

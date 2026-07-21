@@ -55,6 +55,10 @@ function create_partition_table__secure_storage() {
     rk_secure_storage_create_partition_table
 }
 
+function prepare_image_size__secure_storage_partitions() {
+    rk_secure_storage_prepare_image_size
+}
+
 function post_create_partitions__920_verify_secure_storage_layout() {
     rk_secure_storage_verify_layout
 }

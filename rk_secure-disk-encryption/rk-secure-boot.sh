@@ -89,7 +89,7 @@ function pre_prepare_partitions__040_require_secure_storage_hook() {
     fi
 }
 
-function pre_prepare_partitions__set_raw_boot_partition() {
+function pre_prepare_partitions__050_set_raw_boot_partition() {
     if ! rk_autodecrypt_fit_boot_required; then
         return 0
     fi
@@ -98,8 +98,8 @@ function pre_prepare_partitions__set_raw_boot_partition() {
 
     BOOTPART_REQUIRED="yes"
 
-    # Ensure boot partition has enough space (set to 256 MiB)
-    export BOOTSIZE=256
+    # Keep raw FIT boot size aligned with the shared OTA partition policy.
+    export BOOTSIZE=${OTA_BOOT_SIZE:-256}
     display_alert "secure-uboot" "Forcing boot partition size: ${BOOTSIZE} MiB" "info"
 
     # Disable standard boot filesystem handling

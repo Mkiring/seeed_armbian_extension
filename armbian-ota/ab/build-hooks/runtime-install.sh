@@ -19,10 +19,6 @@ function ota_enable_ab_runtime_services() {
 }
 
 function pre_update_initramfs__895_install_ab_ota_runtime() {
-    if [[ "${OTA_ENABLE}" != "yes" || "${AB_PART_OTA}" != "yes" ]]; then
-        return 0
-    fi
-
     ota_install_ab_runtime_to_rootfs "${MOUNT}" || return 1
     ota_enable_ab_runtime_services "${MOUNT}"
 }

@@ -217,17 +217,50 @@ function rk_secure_storage_write_passphrase() {
 }
 function rk_secure_storage_prepare_partitions() {
     USE_HOOK_FOR_PARTITION="yes"
-    SECURE_STORAGE_SECURITY_SIZE=${SECURE_STORAGE_SECURITY_SIZE:-4}
+    [[ "${OTA_ENABLE:-}" == "yes" ]] || {
+        BIOSSIZE=0
+        UEFISIZE=0
+    }
     SECURE_STORAGE_SECURITY_FS_TYPE=${SECURE_STORAGE_SECURITY_FS_TYPE:-none}
-    display_alert "secure-storage" "security(${SECURE_STORAGE_SECURITY_SIZE}MiB) partitions" "info"
+    display_alert "secure-storage" "security(${OTA_SECURITY_SIZE:-4}MiB) partitions" "info"
+}
+
+function rk_secure_storage_load_ota_partition_size_policy() {
+    if [[ "$(type -t ota_get_default_partition_sizes || true)" == "function" ]]; then
+        return 0
+    fi
+
+    local extension_root helper
+    extension_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    helper="${extension_root}/armbian-ota/common/build-hooks/partitions.sh"
+    [[ -f "${helper}" ]] || exit_with_error "OTA partition size helper not found" "${helper}"
+
+    # shellcheck source=/dev/null
+    source "${helper}"
+}
+
+function rk_secure_storage_prepare_image_size() {
+    [[ "${OTA_ENABLE:-}" == "yes" ]] && return 0
+
+    local boot_size=0
+    rk_secure_storage_load_ota_partition_size_policy
+    ota_get_default_partition_sizes
+
+    if [[ -n "${BOOTFS_TYPE:-}" || "${BOOTPART_REQUIRED:-}" == "yes" ]]; then
+        BOOTSIZE=${OTA_BOOT_SIZE}
+        boot_size=${BOOTSIZE}
+    fi
+
+    FIXED_IMAGE_SIZE=$((OFFSET + boot_size + OTA_SECURITY_SIZE + OTA_ROOTFS_SIZE))
+    display_alert "secure-storage" "Setting FIXED_IMAGE_SIZE=${FIXED_IMAGE_SIZE} MiB (boot=${boot_size} MiB, security=${OTA_SECURITY_SIZE} MiB, rootfs=${OTA_ROOTFS_SIZE} MiB)" "info"
 }
 
 function rk_secure_storage_create_partition_table() {
-    if [[ "${AB_PART_OTA}" == "yes" ]]; then
-        if [[ -n "${SECURE_STORAGE_SECURITY_PART_INDEX}" ]]; then
-            display_alert "secure-storage" "AB mode detected, reusing security partition index ${SECURE_STORAGE_SECURITY_PART_INDEX}" "info"
+    if [[ "${OTA_ENABLE:-}" == "yes" ]]; then
+        if [[ -n "${SECURE_STORAGE_SECURITY_PART_INDEX:-}" ]]; then
+            display_alert "secure-storage" "OTA layout detected, reusing security partition index ${SECURE_STORAGE_SECURITY_PART_INDEX}" "info"
         else
-            display_alert "secure-storage" "AB mode detected but security partition index is unset" "warn"
+            exit_with_error "OTA security partition index is unset" "OTA partition table must be created before secure-storage"
         fi
         return 0
     fi
@@ -240,16 +273,6 @@ function rk_secure_storage_create_partition_table() {
         script+="table-length: ${gpt_table_length}\n"
     fi
 
-    if [[ -n "${BIOSSIZE}" && ${BIOSSIZE} -gt 0 ]]; then
-        [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]] || exit_with_error "BIOS partition only supports GPT" "BIOSSIZE=${BIOSSIZE}"
-        script+="${p_index} : name=\"bios\", start=${next}MiB, size=${BIOSSIZE}MiB, type=21686148-6449-6E6F-744E-656564454649\n"
-        next=$((next + BIOSSIZE)); p_index=$((p_index + 1))
-    fi
-    if [[ -n "${UEFISIZE}" && ${UEFISIZE} -gt 0 ]]; then
-        local efi_type="C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
-        script+="${p_index} : name=\"efi\", start=${next}MiB, size=${UEFISIZE}MiB, type=${efi_type}\n"
-        next=$((next + UEFISIZE)); p_index=$((p_index + 1))
-    fi
     if [[ -n "${BOOTSIZE}" && ${BOOTSIZE} -gt 0 && ( -n "${BOOTFS_TYPE}" || "${BOOTPART_REQUIRED}" == "yes" ) ]]; then
         local boot_type="BC13C2FF-59E6-4262-A352-B275FD6F7172"
         if [[ "${BOOT_RAW_MODE}" == "yes" ]]; then
@@ -261,8 +284,8 @@ function rk_secure_storage_create_partition_table() {
 
     local sec_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
     local security_part_index=${p_index}
-    script+="${p_index} : name=\"security\", start=${next}MiB, size=${SECURE_STORAGE_SECURITY_SIZE}MiB, type=${sec_type}\n"
-    next=$((next + SECURE_STORAGE_SECURITY_SIZE)); p_index=$((p_index + 1))
+    script+="${p_index} : name=\"security\", start=${next}MiB, size=${OTA_SECURITY_SIZE}MiB, type=${sec_type}\n"
+    next=$((next + OTA_SECURITY_SIZE)); p_index=$((p_index + 1))
 
     local root_type
     if [[ "${IMAGE_PARTITION_TABLE}" == "gpt" ]]; then
@@ -270,18 +293,8 @@ function rk_secure_storage_create_partition_table() {
     else
         root_type="83"
     fi
-    if [[ "${OTA_ENABLE}" == "yes" && "${AB_PART_OTA}" != "yes" && -n "${RECOVERY_ROOTFS_SIZE:-}" ]]; then
-        script+="${p_index} : name=\"rootfs\", start=${next}MiB, size=${RECOVERY_ROOTFS_SIZE}MiB, type=${root_type}\n"
-    else
-        script+="${p_index} : name=\"rootfs\", start=${next}MiB, type=${root_type}\n"
-    fi
+    script+="${p_index} : name=\"rootfs\", start=${next}MiB, size=${OTA_ROOTFS_SIZE}MiB, type=${root_type}\n"
     rootpart=${p_index}
-    p_index=$((p_index + 1))
-
-    if [[ "${OTA_ENABLE}" == "yes" && "${AB_PART_OTA}" != "yes" && -n "${RECOVERY_USERDATA_SIZE:-}" ]]; then
-        RECOVERY_USERDATA_PART_INDEX=${p_index}
-        script+="${p_index} : name=\"userdata\", start=$((next + RECOVERY_ROOTFS_SIZE))MiB, size=${RECOVERY_USERDATA_SIZE}MiB, type=${root_type}\n"
-    fi
 
     display_alert "secure-storage" "Custom partition table:\n${script}" "debug"
     printf "%b" "${script}" | run_host_command_logged sfdisk "${SDCARD}.raw" ||
