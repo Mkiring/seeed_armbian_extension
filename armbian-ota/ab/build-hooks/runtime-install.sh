@@ -26,16 +26,3 @@ function pre_update_initramfs__895_install_ab_ota_runtime() {
     ota_install_ab_runtime_to_rootfs "${MOUNT}" || return 1
     ota_enable_ab_runtime_services "${MOUNT}"
 }
-
-function pre_umount_final_image__896_install_resize_userdata_service() {
-    if [[ "${AB_PART_OTA}" != "yes" ]]; then
-        return 0
-    fi
-
-    local title="A/B partition OTA"
-
-    display_alert "${title}" "Enabling armbian-resize-userdata service" "info"
-    chroot "${MOUNT}" systemctl enable armbian-resize-userdata.service || {
-        display_alert "${title}" "Failed to enable armbian-resize-userdata.service" "warn"
-    }
-}

@@ -21,6 +21,7 @@ function ota_secure_boot_encrypted_rootfs_enabled() {
 for ota_support_module in \
     common/build-hooks/image-naming \
     common/build-hooks/rootfs-install \
+    common/build-hooks/userdata-resize \
     recovery/build-hooks/partitions \
     recovery/build-hooks/runtime-install \
     ab/build-hooks/partitions \

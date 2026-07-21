@@ -148,7 +148,7 @@ resize_ext4_filesystem() {
     resize2fs "${partdev}"
 }
 
-find_userdata_dev() {
+find_userdata_partition() {
     local dev
 
     dev="$(blkid -t PARTLABEL="${USERDATA_PARTLABEL}" -o device 2>/dev/null | head -n1 || true)"
@@ -160,28 +160,58 @@ find_userdata_dev() {
     blkid -t LABEL="${USERDATA_FSLABEL}" -o device 2>/dev/null | head -n1 || true
 }
 
+resize_luks_userdata() {
+    local userdata_part="$1"
+    local mapper_name="armbian-userdata"
+    local mapper_dev="/dev/mapper/${mapper_name}"
+
+    command -v cryptsetup >/dev/null 2>&1 ||
+        fail "cryptsetup is required to resize encrypted userdata"
+    cryptsetup isLuks "${userdata_part}" >/dev/null 2>&1 ||
+        fail "${userdata_part} is not a LUKS partition"
+    [ -b "${mapper_dev}" ] ||
+        fail "encrypted userdata mapper is unavailable: ${mapper_dev}"
+
+    log "resizing LUKS mapping ${mapper_name}"
+    cryptsetup resize "${mapper_name}" ||
+        fail "failed to resize encrypted userdata mapping"
+    resize_ext4_filesystem "${mapper_dev}"
+}
+
 main() {
-    local userdata_dev resize_status
+    local userdata_part userdata_type resize_status
 
     require_commands
 
-    userdata_dev="$(find_userdata_dev)"
-    if [ -z "${userdata_dev}" ]; then
+    userdata_part="$(find_userdata_partition)"
+    if [ -z "${userdata_part}" ]; then
         warn "userdata partition not found"
         systemctl disable "${SERVICE_NAME}" >/dev/null 2>&1 || true
         return 0
     fi
 
-    log "resizing userdata partition: ${userdata_dev}"
+    log "resizing userdata partition: ${userdata_part}"
     resize_status=0
-    resize_partition_to_end "${userdata_dev}" || resize_status=$?
+    resize_partition_to_end "${userdata_part}" || resize_status=$?
     if [ "${resize_status}" -eq "${RETRY_EXIT_STATUS}" ]; then
         exit "${RETRY_EXIT_STATUS}"
     fi
     if [ "${resize_status}" -ne 0 ] && [ "${resize_status}" -ne 2 ]; then
         exit "${resize_status}"
     fi
-    resize_ext4_filesystem "${userdata_dev}"
+
+    userdata_type="$(blkid -s TYPE -o value "${userdata_part}" 2>/dev/null || true)"
+    case "${userdata_type}" in
+        ext4)
+            resize_ext4_filesystem "${userdata_part}"
+            ;;
+        crypto_LUKS)
+            resize_luks_userdata "${userdata_part}"
+            ;;
+        *)
+            fail "unsupported userdata filesystem: ${userdata_type:-unknown}"
+            ;;
+    esac
 
     systemctl disable "${SERVICE_NAME}" >/dev/null 2>&1 || true
 }

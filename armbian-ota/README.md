@@ -18,8 +18,9 @@ extensions/armbian-ota/
 │   ├── build-hooks/
 │   │   ├── image-naming.sh                 # Image/package naming helpers
 │   │   ├── package-create.sh               # OTA package creation hook
-│   │   └── rootfs-install.sh               # Rootfs rsync helper
-│   └── rootfs/usr/                         # Shared CLI and runtime libraries
+│   │   ├── rootfs-install.sh               # Rootfs rsync helper
+│   │   └── userdata-resize.sh              # Shared userdata resize hook
+│   └── rootfs/                             # Shared CLI, runtime and userdata resize service
 │
 ├── recovery/                               # Recovery OTA mode
 │   ├── build-hooks/
@@ -120,6 +121,11 @@ The `/userdata` backing store differs by OTA mode:
 
 Neither OTA mode migrates data from older single-rootfs Recovery images;
 this layout is intended for new development images.
+
+On first boot, `armbian-resize-userdata.service` expands the final `userdata`
+partition to use available disk space in both modes. For encrypted Recovery
+images it then expands the existing `armbian-userdata` LUKS mapping and its
+inner ext4 filesystem.
 
 ### U-Boot Environment Variables
 
