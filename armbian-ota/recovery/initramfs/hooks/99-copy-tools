@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# initramfs-tools hook: add OTA runtime tools into initramfs
+# initramfs-tools hook: add recovery OTA tools into initramfs
 
 set -e
 
@@ -33,6 +33,19 @@ copy_ota_lib() {
 
     [ -f "${src}" ] || {
         echo "[99-copy-tools] missing required OTA library: ${src}" >&2
+        return 1
+    }
+    mkdir -p "$(dirname "${dest}")"
+    cp -p "${src}" "${dest}"
+}
+
+copy_recovery_initramfs_lib() {
+    lib="$1"
+    src="/etc/initramfs-tools/ota/recovery/${lib}"
+    dest="${DESTDIR}/usr/share/armbian-ota/recovery/${lib}"
+
+    [ -f "${src}" ] || {
+        echo "[99-copy-tools] missing required recovery initramfs library: ${src}" >&2
         return 1
     }
     mkdir -p "$(dirname "${dest}")"
@@ -72,6 +85,6 @@ done <<'EOF'
 EOF
 
 copy_ota_lib state.sh
-copy_ota_lib recovery/log.sh
-copy_ota_lib recovery/device.sh
-copy_ota_lib recovery/payload.sh
+copy_recovery_initramfs_lib log.sh
+copy_recovery_initramfs_lib device.sh
+copy_recovery_initramfs_lib payload.sh

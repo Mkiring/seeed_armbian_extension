@@ -8,6 +8,7 @@
 OTA_SUPPORT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly OTA_COMMON_ROOTFS="${OTA_SUPPORT_DIR}/common/rootfs"
 readonly OTA_RECOVERY_ROOTFS="${OTA_SUPPORT_DIR}/recovery/rootfs"
+readonly OTA_RECOVERY_INITRAMFS="${OTA_SUPPORT_DIR}/recovery/initramfs"
 readonly OTA_AB_ROOTFS="${OTA_SUPPORT_DIR}/ab/rootfs"
 
 function ota_encrypted_rootfs_enabled() {

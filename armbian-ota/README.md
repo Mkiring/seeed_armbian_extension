@@ -28,9 +28,9 @@ extensions/armbian-ota/
 │   │   ├── overlayroot.sh                  # Recovery full-root overlayroot setup
 │   │   ├── partitions.sh                   # Recovery rootfs + userdata layout
 │   │   └── runtime-install.sh              # Recovery rootfs and initramfs setup
-│   └── rootfs/
-│       ├── etc/initramfs-tools/            # Initramfs hooks and scripts
-│       └── usr/share/armbian-ota/recovery/ # Recovery backend
+│   ├── initramfs/                           # Initramfs hooks, scripts and libraries
+│   └── rootfs/usr/share/armbian-ota/recovery/
+│                                               # Recovery backend
 │
 └── ab/                                     # A/B partition OTA mode
     ├── build-hooks/
@@ -269,7 +269,7 @@ fw_setenv ota_in_progress 0
 
 ### Adding New Features
 
-1. For Recovery OTA: Modify files in `recovery/rootfs/` or `recovery/build-hooks/`
+1. For Recovery OTA: Modify files in `recovery/rootfs/`, `recovery/initramfs/`, or `recovery/build-hooks/`
 2. For AB OTA: Modify files in `ab/rootfs/` or `ab/build-hooks/`
 3. For shared functionality: Use `common/rootfs/` or `common/build-hooks/`
 

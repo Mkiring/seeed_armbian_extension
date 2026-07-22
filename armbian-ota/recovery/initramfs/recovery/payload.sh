@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# initramfs OTA library: payload apply, FIT write, config patch, state commit.
+# Recovery initramfs source: payload apply, FIT write, config patch, state commit.
 #
 # Sourced by 99-ota-apply AFTER recovery/log.sh and recovery/device.sh (uses log/heartbeat
 # and device primitives) and state.sh (uses ota_state_write_file).

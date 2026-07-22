@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# initramfs OTA library: block device / partition / UUID / LUKS / FIT probing.
+# Recovery initramfs source: block device / partition / UUID / LUKS / FIT probing.
 #
 # Sourced by 99-ota-apply after recovery/log.sh (primitives are silent; only
 # ota_detect_devices logs). /bin/sh + busybox (blkid, udevadm).

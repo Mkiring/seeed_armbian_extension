@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# initramfs OTA library: logging, heartbeat, reboot.
+# Recovery initramfs source: logging, heartbeat, reboot.
 #
 # Sourced by 99-ota-apply (and future initramfs hooks). Self-contained:
 # only needs /bin/sh + busybox userland. Sets LOGDIR/LOGFILE defaults that

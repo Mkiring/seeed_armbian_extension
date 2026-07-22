@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# initramfs-tools init-premount hook: OTA update (orchestrator).
+# Recovery initramfs init-premount hook: OTA update orchestrator.
 #
 # Recovery OTA is applied in a single linear transaction. All helpers live in
 # the initramfs-specific POSIX sh libraries under /usr/share/armbian-ota/:
