@@ -19,6 +19,8 @@ AB_ENV_LIB="${OTA_RUNTIME_DIR}/ab/env.sh"
 readonly AB_FW_ENV_OFFSET="0x3f8000"
 readonly AB_FW_ENV_SIZE="0x8000"
 readonly AB_FW_ENV_ERASE_SIZE="0x1000"
+readonly AB_STATE_DIR="/var/lib/armbian-ota"
+readonly AB_UBOOT_INITIALIZED_FILE="${AB_STATE_DIR}/uboot_initialized"
 
 # Logging
 log() {
@@ -33,30 +35,7 @@ log_error() {
     log "ERROR: $@" >&2
 }
 
-ensure_initial_env() {
-    local initial_env="/etc/u-boot-initial-env"
-
-    # libubootenv has no compiled-in default.  On a freshly provisioned raw
-    # environment, fw_setenv needs this file to construct the first valid
-    # CRC-protected image.  Do not replace an administrator-provided default.
-    if [ -s "${initial_env}" ]; then
-        return 0
-    fi
-
-    mkdir -p /etc
-    cat > "${initial_env}" <<'EOF'
-# Default values for first-time A/B U-Boot environment initialization.
-boot_slot=a
-boot_success=a
-ota_in_progress=0
-try_count=0
-slot_retry_max=3
-slot_retry_left=3
-EOF
-    chmod 0644 "${initial_env}"
-    log_info "Installed fallback U-Boot default environment: ${initial_env}"
-}
-
+# /dev/nvme0n1p1 -> /dev/nvme0n1
 get_parent_disk_dev() {
     local dev="$1" pkname base
     [ -n "${dev}" ] || return 1
@@ -69,16 +48,8 @@ get_parent_disk_dev() {
 
     base="$(basename "${dev}")"
     case "${base}" in
-        nvme*n*p[0-9]*)
+        mmcblk*p[0-9]*|nvme*n*p[0-9]*)
             echo "/dev/${base%p[0-9]*}"
-            return 0
-            ;;
-        mmcblk*p[0-9]*)
-            echo "/dev/${base%p[0-9]*}"
-            return 0
-            ;;
-        sd*[0-9]*)
-            echo "/dev/${base%%[0-9]*}"
             return 0
             ;;
     esac
@@ -86,17 +57,14 @@ get_parent_disk_dev() {
     echo "${dev}"
 }
 
+# /dev/nvme0n1p1 -> 1
 get_partition_number_from_dev() {
     local dev="$1"
     local base
     base="$(basename "${dev}")"
 
+    # /dev/mmcblk0p1 or /dev/nvme0n1p1 -> 1
     if [[ "${base}" =~ p([0-9]+)$ ]]; then
-        echo "${BASH_REMATCH[1]}"
-        return 0
-    fi
-
-    if [[ "${base}" =~ ([0-9]+)$ ]]; then
         echo "${BASH_REMATCH[1]}"
         return 0
     fi
@@ -124,48 +92,23 @@ get_uboot_bootdev_from_part() {
     return 1
 }
 
-get_part_uuid() {
-    local dev="$1"
-    [ -n "${dev}" ] || return 1
-    blkid -o value -s UUID "${dev}" 2>/dev/null | head -n1
-}
-
-set_env_if_missing() {
-    local key="$1" value="$2" current
-
-    current="$(fw_printenv -n "${key}" 2>/dev/null || true)"
-    if [ -z "${current}" ]; then
-        fw_setenv "${key}" "${value}"
-        log_info "Set ${key} to '${value}'"
+# A/B partition and boot media discovery.
+detect_ab_boot_partitions() {
+    boot_a_dev="$(ab_get_part_by_label "${BOOT_A_LABEL}")"
+    boot_b_dev="$(ab_get_part_by_label "${BOOT_B_LABEL}")"
+    if [ -z "${boot_a_dev}" ] || [ -z "${boot_b_dev}" ]; then
+        log_error "Cannot find one or more A/B boot partitions by label"
+        log_error "boot_a=${boot_a_dev:-<none>} boot_b=${boot_b_dev:-<none>}"
+        exit 1
     fi
 }
 
-ensure_fw_env_config() {
-    local boot_part_dev="$1" fw_env_device
-
-    fw_env_device="$(get_parent_disk_dev "${boot_part_dev}")" || {
-        log_error "Failed to detect U-Boot environment device"
-        return 1
-    }
-
-    mkdir -p /etc
-    printf '%s %s %s %s\n' \
-        "${fw_env_device}" "${AB_FW_ENV_OFFSET}" "${AB_FW_ENV_SIZE}" "${AB_FW_ENV_ERASE_SIZE}" \
-        > /etc/fw_env.config
-    log_info "Installed fw_env.config: ${fw_env_device} ${AB_FW_ENV_OFFSET} ${AB_FW_ENV_SIZE} ${AB_FW_ENV_ERASE_SIZE}"
-}
-
-detect_ab_partitions() {
-    # Boot partitions use filesystem labels first; raw FIT boot partitions use
-    # GPT PARTLABEL. Root partitions use GPT PARTLABEL for encrypted A/B too.
-    boot_a_dev="$(ab_get_part_by_label "${BOOT_A_LABEL}")"
-    boot_b_dev="$(ab_get_part_by_label "${BOOT_B_LABEL}")"
+detect_ab_root_partitions() {
     root_a_dev="$(ab_get_part_by_label "${ROOT_A_LABEL}")"
     root_b_dev="$(ab_get_part_by_label "${ROOT_B_LABEL}")"
-
-    if [ -z "${boot_a_dev}" ] || [ -z "${boot_b_dev}" ] || [ -z "${root_a_dev}" ] || [ -z "${root_b_dev}" ]; then
-        log_error "Cannot find one or more A/B partitions by label"
-        log_error "boot_a=${boot_a_dev:-<none>} boot_b=${boot_b_dev:-<none>} root_a=${root_a_dev:-<none>} root_b=${root_b_dev:-<none>}"
+    if [ -z "${root_a_dev}" ] || [ -z "${root_b_dev}" ]; then
+        log_error "Cannot find one or more A/B root partitions by label"
+        log_error "root_a=${root_a_dev:-<none>} root_b=${root_b_dev:-<none>}"
         exit 1
     fi
 
@@ -192,15 +135,19 @@ detect_ab_boot_configuration() {
 
     boot_a_uuid="$(ab_get_uuid_by_label "${BOOT_A_LABEL}")"
     boot_b_uuid="$(ab_get_uuid_by_label "${BOOT_B_LABEL}")"
-    root_a_uuid="$(get_part_uuid "${root_a_dev}")"
-    root_b_uuid="$(get_part_uuid "${root_b_dev}")"
-    boot_a_fstype="$(blkid -s TYPE -o value "${boot_a_dev}" 2>/dev/null || true)"
-    boot_b_fstype="$(blkid -s TYPE -o value "${boot_b_dev}" 2>/dev/null || true)"
-    AB_BOOT_MODE="filesystem"
+    root_a_uuid="$(ab_get_uuid_by_dev "${root_a_dev}")"
+    root_b_uuid="$(ab_get_uuid_by_dev "${root_b_dev}")"
+    boot_a_fstype="$(ab_get_fstype_by_dev "${boot_a_dev}")"
+    boot_b_fstype="$(ab_get_fstype_by_dev "${boot_b_dev}")"
     if [ -z "${boot_a_fstype}" ] && [ -z "${boot_b_fstype}" ]; then
         AB_BOOT_MODE="raw-fit"
+    elif [ -n "${boot_a_fstype}" ] && [ -n "${boot_b_fstype}" ]; then
+        AB_BOOT_MODE="filesystem"
+    else
+        log_error "A/B boot partitions use inconsistent formats: boot_a=${boot_a_fstype:-<raw>} boot_b=${boot_b_fstype:-<raw>}"
+        exit 1
     fi
-    CURRENT_SLOT="$(ab_env_current_slot || echo "a")"
+    CURRENT_SLOT="$(ab_get_current_root_slot || echo "a")"
 
     log_info "Detected partition layout:"
     log_info "  boot_a: ${boot_a_dev} (partition ${BOOT_A_PART})"
@@ -217,93 +164,60 @@ detect_ab_boot_configuration() {
     log_info "  root_b: ${root_b_uuid:-<not found>}"
 }
 
+ensure_fw_env_config() {
+    local boot_part_dev="$1" fw_env_device
+
+    fw_env_device="$(get_parent_disk_dev "${boot_part_dev}")" || {
+        log_error "Failed to detect U-Boot environment device"
+        return 1
+    }
+
+    mkdir -p /etc
+    printf '%s %s %s %s\n' \
+        "${fw_env_device}" "${AB_FW_ENV_OFFSET}" "${AB_FW_ENV_SIZE}" "${AB_FW_ENV_ERASE_SIZE}" \
+        > /etc/fw_env.config
+    log_info "Installed fw_env.config: ${fw_env_device} ${AB_FW_ENV_OFFSET} ${AB_FW_ENV_SIZE} ${AB_FW_ENV_ERASE_SIZE}"
+}
+
 configure_ab_boot_environment() {
-    local orig_bootcmd
-
-    ensure_fw_env_config "${boot_a_dev}"
-
-    if ! fw_printenv -n orig_bootcmd >/dev/null 2>&1; then
-        orig_bootcmd="$(fw_printenv -n bootcmd 2>/dev/null || true)"
-        if [ -n "${orig_bootcmd}" ]; then
-            fw_setenv orig_bootcmd "${orig_bootcmd}"
-            log_info "Saved original bootcmd"
-        fi
-    fi
-
-    set_env_if_missing boot_slot "${CURRENT_SLOT}"
-    set_env_if_missing boot_success "${CURRENT_SLOT}"
-    set_env_if_missing ota_in_progress 0
-    set_env_if_missing try_count 0
-    set_env_if_missing slot_retry_max 3
-    set_env_if_missing slot_retry_left "$(fw_printenv -n slot_retry_max 2>/dev/null || echo 3)"
-
-    AB_PREBOOT='if test "${ota_in_progress}" = "1"; then if test "${slot_retry_left}" = "0"; then setenv boot_slot ${boot_success}; setenv ota_in_progress 0; setenv slot_retry_left ${slot_retry_max}; saveenv; reset; fi; setexpr slot_retry_left ${slot_retry_left} - 1; saveenv; fi'
-    AB_SCAN_DEV_FOR_BOOT_PART='if test "${devtype}" = "${ab_boot_devtype}" && test "${devnum}" = "${ab_boot_devnum}"; then if test "${boot_slot}" = "b"; then setenv devplist ${distro_bootpart_b}; else setenv devplist ${distro_bootpart_a}; fi; else part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi; boot_android ${devtype} ${devnum}; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done'
-    AB_SELECT_FIT_SLOT='if test "${boot_slot}" = "b"; then setenv boot_fit_part boot_b; else setenv boot_fit_part boot_a; fi'
-
-    if [ "${AB_BOOT_MODE}" = "raw-fit" ]; then
-        # The Rockchip boot_fit patch loads directly from boot_a or boot_b;
-        # distro_bootcmd only supports filesystem-backed boot partitions.
-        # Keep the kernel/initramfs aligned with the raw FIT slot selected by
-        # U-Boot. The initramfs resolves rootfs_a/rootfs_b by this token,
-        # avoiding a device-local LUKS UUID embedded in a signed FIT.
-        AB_BOOTCMD='run ab_preboot; run ab_select_fit_slot; setenv bootargs "${bootargs} armbian.slot=${boot_slot}"; boot_fit'
-    else
-        AB_BOOTCMD='run ab_preboot; run distro_bootcmd; boot_fit; bootrkp'
-    fi
-
-    mkdir -p /var/lib/armbian-ota
-    TEMP_ENV=$(mktemp /var/lib/armbian-ota/uboot-env.XXXXXX)
-    trap 'rm -f "${TEMP_ENV:-}"' EXIT
-
-    log_info "Set distro_bootpart_a=${BOOT_A_PART}, distro_bootpart_b=${BOOT_B_PART}, ab_boot_devtype=${BOOT_DEVTYPE}, ab_boot_devnum=${BOOT_DEVNUM}, boot_targets=${BOOT_DEVTYPE}${BOOT_DEVNUM}"
-
-    # Keep standard distro_bootcmd scanning order. For the selected boot
-    # media, scan only the slot selected by boot_slot; other media stay stock.
-    {
-        printf 'distro_bootpart_a=%s\n' "${BOOT_A_PART}"
-        printf 'distro_bootpart_b=%s\n' "${BOOT_B_PART}"
-        printf 'ab_boot_devtype=%s\n' "${BOOT_DEVTYPE}"
-        printf 'ab_boot_devnum=%s\n' "${BOOT_DEVNUM}"
-        printf 'boot_targets=%s%s\n' "${BOOT_DEVTYPE}" "${BOOT_DEVNUM}"
-        printf 'ab_boot_mode=%s\n' "${AB_BOOT_MODE}"
-        printf 'ab_preboot=%s\n' "${AB_PREBOOT}"
-        printf 'ab_select_fit_slot=%s\n' "${AB_SELECT_FIT_SLOT}"
-        printf 'bootcmd=%s\n' "${AB_BOOTCMD}"
-        if [ "${AB_BOOT_MODE}" = "filesystem" ]; then
-            printf 'scan_dev_for_boot_part=%s\n' "${AB_SCAN_DEV_FOR_BOOT_PART}"
-        fi
-    } > "${TEMP_ENV}"
-
-    log_info "Modified bootcmd"
-    fw_setenv -s "${TEMP_ENV}"
+    ensure_fw_env_config "${boot_a_dev}" || return 1
+    ab_env_initialize_default "${CURRENT_SLOT}" || return 1
+    ab_env_repair_defaults "${CURRENT_SLOT}" || return 1
+    ab_env_set \
+        "distro_bootpart_a=${BOOT_A_PART}" \
+        "distro_bootpart_b=${BOOT_B_PART}" \
+        "ab_boot_devtype=${BOOT_DEVTYPE}" \
+        "ab_boot_devnum=${BOOT_DEVNUM}" \
+        "boot_targets=${BOOT_DEVTYPE}${BOOT_DEVNUM}" \
+        "ab_boot_mode=${AB_BOOT_MODE}" || return 1
+    log_info "Configured A/B boot environment"
 }
 
 mark_uboot_initialized() {
-    mkdir -p /var/lib/armbian-ota
-    cat > /var/lib/armbian-ota/uboot_initialized << EOF
+    mkdir -p "${AB_STATE_DIR}" || return 1
+    cat > "${AB_UBOOT_INITIALIZED_FILE}" << EOF
 # u-boot AB partition environment initialized
 $(date)
-boot_a_part=${BOOT_A_PART}
-boot_b_part=${BOOT_B_PART}
-root_a_part=${ROOT_A_PART}
-root_b_part=${ROOT_B_PART}
-boot_a_dev=${boot_a_dev}
-boot_b_dev=${boot_b_dev}
-root_a_dev=${root_a_dev}
-root_b_dev=${root_b_dev}
 boot_devtype=${BOOT_DEVTYPE}
 boot_devnum=${BOOT_DEVNUM}
 boot_mode=${AB_BOOT_MODE}
+boot_a_part=${BOOT_A_PART}
+boot_a_dev=${boot_a_dev}
 boot_a_uuid=${boot_a_uuid}
-boot_b_uuid=${boot_b_uuid}
+root_a_part=${ROOT_A_PART}
+root_a_dev=${root_a_dev}
 root_a_uuid=${root_a_uuid}
+boot_b_part=${BOOT_B_PART}
+boot_b_dev=${boot_b_dev}
+boot_b_uuid=${boot_b_uuid}
+root_b_part=${ROOT_B_PART}
+root_b_dev=${root_b_dev}
 root_b_uuid=${root_b_uuid}
 EOF
 }
 
 # Check if already initialized
-if [ "${1:-}" != "--force" ] && [ -f /var/lib/armbian-ota/uboot_initialized ]; then
+if [ "${1:-}" != "--force" ] && [ -f "${AB_UBOOT_INITIALIZED_FILE}" ]; then
     log_info "u-boot AB environment already initialized"
     exit 0
 fi
@@ -314,10 +228,9 @@ if ! command -v fw_printenv >/dev/null 2>&1 || ! command -v fw_setenv >/dev/null
     exit 1
 fi
 
-ensure_initial_env
-
 log_info "=== Initializing u-boot AB partition boot environment ==="
-detect_ab_partitions
+detect_ab_boot_partitions
+detect_ab_root_partitions
 detect_ab_boot_configuration
 configure_ab_boot_environment
 mark_uboot_initialized

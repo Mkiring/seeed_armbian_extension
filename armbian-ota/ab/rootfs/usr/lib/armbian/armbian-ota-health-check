@@ -69,7 +69,7 @@ main() {
     log_info "Running A/B OTA health check"
 
     expected_slot="$(state_get TARGET_SLOT)"
-    current_slot="$(ab_env_current_slot || true)"
+    current_slot="$(ab_get_current_root_slot || true)"
 
     if [ -z "${current_slot}" ]; then
         log_error "Cannot determine current AB slot"

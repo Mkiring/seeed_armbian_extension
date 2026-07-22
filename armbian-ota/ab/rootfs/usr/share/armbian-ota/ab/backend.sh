@@ -37,7 +37,7 @@ ab_validate_environment() {
     ab_require_partition_label "${ROOT_A_LABEL}"
     ab_require_partition_label "${ROOT_B_LABEL}"
 
-    current_slot="$(ab_env_current_slot 2>/dev/null || true)"
+    current_slot="$(ab_get_current_root_slot 2>/dev/null || true)"
     case "${current_slot}" in
         a|b) ;;
         *) error_exit "Current rootfs is not running from an AB root partition" ;;
@@ -48,7 +48,7 @@ ab_validate_environment() {
 ab_get_current_slot() {
     local current_slot
 
-    current_slot="$(ab_env_current_slot 2>/dev/null || true)"
+    current_slot="$(ab_get_current_root_slot 2>/dev/null || true)"
     if [ -n "${current_slot}" ]; then
         echo "${current_slot}"
         return 0
@@ -78,8 +78,8 @@ ab_start_ota() {
 
     current_slot="$(ab_get_current_slot)"
     target_slot="$(ab_get_target_slot)"
-    target_root_label="$(ab_get_slot_root_label "${target_slot}")"
     target_boot_label="$(ab_get_slot_boot_label "${target_slot}")"
+    target_root_label="$(ab_get_slot_root_label "${target_slot}")"
 
     if [ "$(ab_env_get ota_in_progress)" = "1" ]; then
         error_exit "Another AB OTA boot verification is still in progress"
@@ -188,8 +188,7 @@ ab_status() {
     echo "  boot_slot: $(ab_env_get boot_slot)"
     echo "  boot_success: $(ab_env_get boot_success)"
     echo "  ota_in_progress: ${ota_in_progress}"
-    echo "  try_count: $(ab_env_get try_count)"
-    echo "  slot_retry_max: $(ab_env_retry_max)"
+    echo "  slot_retry_max: $(ab_env_initial_get slot_retry_max)"
     echo "  slot_retry_left: $(ab_env_get slot_retry_left)"
     echo ""
     echo "Partitions:"

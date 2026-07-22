@@ -29,6 +29,14 @@ ab_get_slot_root_label() {
     esac
 }
 
+ab_get_slot_by_label() {
+    case "$1" in
+        "${BOOT_A_LABEL}"|"${ROOT_A_LABEL}") echo "a" ;;
+        "${BOOT_B_LABEL}"|"${ROOT_B_LABEL}") echo "b" ;;
+        *) return 1 ;;
+    esac
+}
+
 ab_get_slot_boot_partlabel() {
     case "$1" in
         a) echo "boot_a" ;;
@@ -41,14 +49,6 @@ ab_get_slot_root_partlabel() {
     case "$1" in
         a) echo "rootfs_a" ;;
         b) echo "rootfs_b" ;;
-        *) return 1 ;;
-    esac
-}
-
-ab_get_slot_by_label() {
-    case "$1" in
-        "${BOOT_A_LABEL}"|"${ROOT_A_LABEL}") echo "a" ;;
-        "${BOOT_B_LABEL}"|"${ROOT_B_LABEL}") echo "b" ;;
         *) return 1 ;;
     esac
 }
@@ -72,15 +72,16 @@ ab_get_slot_partlabel_by_fslabel() {
 }
 
 ab_resolve_physical_part_dev() {
-    local dev="$1" pkname
+    local dev="$1" physical_part
 
     [ -n "${dev}" ] || return 1
 
     case "${dev}" in
         /dev/mapper/*|/dev/dm-*)
-            pkname="$(lsblk -no PKNAME "${dev}" 2>/dev/null | head -n1)"
-            if [ -n "${pkname}" ]; then
-                echo "/dev/${pkname}"
+            physical_part="$(lsblk -snro PATH,TYPE "${dev}" 2>/dev/null |
+                awk '$2 == "part" { print $1; exit }')"
+            if [ -n "${physical_part}" ]; then
+                echo "${physical_part}"
                 return 0
             fi
             ;;
@@ -110,12 +111,33 @@ ab_get_part_by_label() {
     echo ""
 }
 
+ab_get_fstype_by_dev() {
+    local dev="$1"
+
+    [ -n "${dev}" ] || return 1
+    blkid -o value -s TYPE "${dev}" 2>/dev/null | head -n1
+}
+
+ab_get_partlabel_by_dev() {
+    local dev="$1"
+
+    [ -n "${dev}" ] || return 1
+    blkid -o value -s PARTLABEL "${dev}" 2>/dev/null | head -n1
+}
+
+ab_get_uuid_by_dev() {
+    local dev="$1"
+
+    [ -n "${dev}" ] || return 1
+    blkid -o value -s UUID "${dev}" 2>/dev/null | head -n1
+}
+
 ab_get_uuid_by_label() {
     local label="$1" dev uuid
 
     dev="$(ab_get_part_by_label "${label}")"
     if [ -n "${dev}" ]; then
-        uuid="$(blkid -s UUID -o value "${dev}" 2>/dev/null | head -n1)"
+        uuid="$(ab_get_uuid_by_dev "${dev}")"
         if [ -n "${uuid}" ]; then
             echo "${uuid}"
             return 0
@@ -123,4 +145,36 @@ ab_get_uuid_by_label() {
     fi
 
     blkid -t LABEL="${label}" -o value -s UUID 2>/dev/null | head -n1
+}
+
+# Identify the running root slot by PARTLABEL, with a UUID fallback.
+ab_get_current_root_slot() {
+    local current_slot root_dev root_part root_partlabel root_uuid root_a_uuid root_b_uuid
+
+    root_dev="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+    [ -n "${root_dev}" ] || root_dev="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    [ -n "${root_dev}" ] || root_dev="$(df / | awk 'NR==2 {print $1}')"
+    [ -n "${root_dev}" ] || return 1
+
+    root_part="$(ab_resolve_physical_part_dev "${root_dev}" || true)"
+    root_partlabel="$(ab_get_partlabel_by_dev "${root_part}" || true)"
+    current_slot="$(ab_get_slot_by_root_partlabel "${root_partlabel}" || true)"
+    if [ -n "${current_slot}" ]; then
+        echo "${current_slot}"
+        return 0
+    fi
+
+    root_uuid="$(ab_get_uuid_by_dev "${root_dev}" || true)"
+    root_a_uuid="$(ab_get_uuid_by_label "${ROOT_A_LABEL}")"
+    root_b_uuid="$(ab_get_uuid_by_label "${ROOT_B_LABEL}")"
+    if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_a_uuid}" ]; then
+        echo "a"
+        return 0
+    fi
+    if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_b_uuid}" ]; then
+        echo "b"
+        return 0
+    fi
+
+    return 1
 }

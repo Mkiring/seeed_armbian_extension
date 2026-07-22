@@ -120,7 +120,7 @@ ab_write_target_boot_itb() {
 
     expected_partlabel="$(ab_get_slot_boot_partlabel "${target_slot}")" ||
         error_exit "Invalid target slot for FIT boot image: ${target_slot}"
-    partlabel="$(blkid -s PARTLABEL -o value "${target}" 2>/dev/null || true)"
+    partlabel="$(ab_get_partlabel_by_dev "${target}" || true)"
     [ "${partlabel}" = "${expected_partlabel}" ] ||
         error_exit "Refusing to write FIT boot image to ${target}: expected PARTLABEL=${expected_partlabel}, found ${partlabel:-<empty>}"
 
@@ -288,7 +288,7 @@ ab_update_target_partition() {
     target_boot_dev="$(ab_get_part_by_label "${target_boot_label}")"
     [ -n "${target_root_dev}" ] || error_exit "Cannot find target root partition: ${target_root_label}"
 
-    target_root_type="$(blkid -o value -s TYPE "${target_root_dev}" 2>/dev/null || true)"
+    target_root_type="$(ab_get_fstype_by_dev "${target_root_dev}" || true)"
     target_root_mount_dev="${target_root_dev}"
     target_root_luks_uuid=""
     security_dev=""
@@ -318,7 +318,7 @@ ab_update_target_partition() {
         key_file=""
 
         target_root_mount_dev="/dev/mapper/${luks_mapper}"
-        target_root_luks_uuid="$(blkid -s UUID -o value "${target_root_dev}" 2>/dev/null || true)"
+        target_root_luks_uuid="$(ab_get_uuid_by_dev "${target_root_dev}" || true)"
         luks_opened=1
         log_info "Encrypted target slot ${target_slot}: root=${target_root_dev} mapper=${target_root_mount_dev}"
     else
