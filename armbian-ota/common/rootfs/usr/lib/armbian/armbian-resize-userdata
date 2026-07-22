@@ -33,7 +33,7 @@ require_commands() {
 get_parent_disk_dev() {
     local partdev="$1" pkname base
 
-    pkname="$(lsblk -no PKNAME "${partdev}" 2>/dev/null | head -n1 || true)"
+    pkname="$(lsblk -dno PKNAME "${partdev}" 2>/dev/null || true)"
     if [ -n "${pkname}" ]; then
         echo "/dev/${pkname}"
         return 0
@@ -79,7 +79,7 @@ partition_after_start() {
 resize_partition_to_end() {
     local partdev="$1" diskdev partnum partstart partend capacity sector_size lastsector trailing expected_size actual_size
 
-    [ "$(lsblk -no TYPE "${partdev}" 2>/dev/null | head -n1)" = "part" ] ||
+    [ "$(lsblk -dno TYPE "${partdev}" 2>/dev/null)" = "part" ] ||
         fail "${partdev} is not a partition"
 
     diskdev="$(get_parent_disk_dev "${partdev}")" ||
@@ -127,7 +127,7 @@ resize_partition_to_end() {
     udevadm settle || true
 
     expected_size=$((sector_size * (lastsector - partstart + 1)))
-    actual_size="$(lsblk -bno SIZE "${partdev}" 2>/dev/null | head -n1 || true)"
+    actual_size="$(lsblk -bdno SIZE "${partdev}" 2>/dev/null || true)"
     if [ "${actual_size}" != "${expected_size}" ]; then
         warn "kernel has not reloaded ${partdev} size yet; retrying shortly (reboot if retries do not succeed)"
         return "${RETRY_EXIT_STATUS}"
@@ -146,6 +146,51 @@ resize_ext4_filesystem() {
 
     log "resizing ext4 filesystem on ${partdev}"
     resize2fs "${partdev}"
+}
+
+resize_luks_mapping() {
+    local userdata_part="$1" mapper_name="$2"
+    local table table_size target_type data_offset userdata_size target_size new_table
+
+    command -v blockdev >/dev/null 2>&1 ||
+        fail "blockdev is required to resize encrypted userdata"
+    command -v dmsetup >/dev/null 2>&1 ||
+        fail "dmsetup is required to resize encrypted userdata"
+
+    table="$(dmsetup table "${mapper_name}" 2>/dev/null)" ||
+        fail "failed to read LUKS mapping ${mapper_name}"
+    [ "$(printf '%s\n' "${table}" | wc -l)" -eq 1 ] ||
+        fail "unsupported multi-target LUKS mapping: ${mapper_name}"
+
+    table_size="$(printf '%s\n' "${table}" | awk 'NR == 1 { print $2 }')"
+    target_type="$(printf '%s\n' "${table}" | awk 'NR == 1 { print $3 }')"
+    data_offset="$(printf '%s\n' "${table}" | awk 'NR == 1 { print $8 }')"
+    case "${table_size}:${data_offset}" in
+        *[!0-9:]*|:*) fail "failed to parse LUKS mapping ${mapper_name}" ;;
+    esac
+    [ "${target_type}" = "crypt" ] ||
+        fail "unsupported LUKS mapping target: ${target_type}"
+
+    userdata_size="$(blockdev --getsz "${userdata_part}")" ||
+        fail "failed to read ${userdata_part} size"
+    target_size=$((userdata_size - data_offset))
+    [ "${target_size}" -ge "${table_size}" ] ||
+        fail "refusing to shrink LUKS mapping ${mapper_name}"
+    if [ "${target_size}" -eq "${table_size}" ]; then
+        log "LUKS mapping already uses available space"
+        return 0
+    fi
+
+    new_table="$(printf '%s\n' "${table}" | awk -v size="${target_size}" 'NR == 1 { $2 = size } { print }')"
+    log "resizing LUKS mapping ${mapper_name} to ${target_size} sectors"
+    dmsetup suspend "${mapper_name}" ||
+        fail "failed to suspend LUKS mapping ${mapper_name}"
+    if ! printf '%s\n' "${new_table}" | dmsetup load "${mapper_name}"; then
+        dmsetup resume "${mapper_name}" || warn "failed to resume ${mapper_name} after loading error"
+        fail "failed to load resized LUKS mapping ${mapper_name}"
+    fi
+    dmsetup resume "${mapper_name}" ||
+        fail "failed to resume resized LUKS mapping ${mapper_name}"
 }
 
 find_userdata_partition() {
@@ -172,9 +217,7 @@ resize_luks_userdata() {
     [ -b "${mapper_dev}" ] ||
         fail "encrypted userdata mapper is unavailable: ${mapper_dev}"
 
-    log "resizing LUKS mapping ${mapper_name}"
-    cryptsetup resize "${mapper_name}" ||
-        fail "failed to resize encrypted userdata mapping"
+    resize_luks_mapping "${userdata_part}" "${mapper_name}"
     resize_ext4_filesystem "${mapper_dev}"
 }
 
