@@ -31,7 +31,10 @@ copy_ota_lib() {
     src="/usr/share/armbian-ota/${lib}"
     dest="${DESTDIR}/usr/share/armbian-ota/${lib}"
 
-    [ -f "${src}" ] || return 0
+    [ -f "${src}" ] || {
+        echo "[99-copy-tools] missing required OTA library: ${src}" >&2
+        return 1
+    }
     mkdir -p "$(dirname "${dest}")"
     cp -p "${src}" "${dest}"
 }
@@ -69,6 +72,6 @@ done <<'EOF'
 EOF
 
 copy_ota_lib state.sh
-copy_ota_lib ota-log.sh
-copy_ota_lib ota-device.sh
-copy_ota_lib ota-payload.sh
+copy_ota_lib recovery/log.sh
+copy_ota_lib recovery/device.sh
+copy_ota_lib recovery/payload.sh

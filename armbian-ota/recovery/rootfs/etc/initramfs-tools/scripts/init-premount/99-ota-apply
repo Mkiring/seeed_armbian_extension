@@ -4,8 +4,8 @@
 #
 # Recovery OTA is applied in a single linear transaction. All helpers live in
 # the initramfs-specific POSIX sh libraries under /usr/share/armbian-ota/:
-# ota-log.sh, ota-device.sh, ota-payload.sh, plus state.sh. This script only
-# sources them and drives the ordered steps.
+# recovery/log.sh, recovery/device.sh, recovery/payload.sh, plus state.sh.
+# This script only sources them and drives the ordered steps.
 
 PREREQ=""
 
@@ -20,10 +20,10 @@ case "$1" in
         ;;
 esac
 
-[ -f /usr/share/armbian-ota/state.sh ] && . /usr/share/armbian-ota/state.sh
-. /usr/share/armbian-ota/ota-log.sh
-. /usr/share/armbian-ota/ota-device.sh
-. /usr/share/armbian-ota/ota-payload.sh
+. /usr/share/armbian-ota/state.sh
+. /usr/share/armbian-ota/recovery/log.sh
+. /usr/share/armbian-ota/recovery/device.sh
+. /usr/share/armbian-ota/recovery/payload.sh
 
 # Enable verbose shell tracing only when explicitly requested.
 if [ "${OTA_DEBUG:-no}" = "yes" ]; then

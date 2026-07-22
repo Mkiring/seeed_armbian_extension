@@ -2,9 +2,53 @@
 
 # ===== OP-TEE / keybox mechanism =====
 AB_OTA_SYSPW_FILE="/tmp/syspw"
-AB_OTA_TEE_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-tee-supplicant.log"
-AB_OTA_KEYBOX_LOG="${OTA_WORK_DIR:-/ota_work}/armbian-ota-keybox.log"
+AB_OTA_TEE_LOG="${OTA_WORK_DIR}/armbian-ota-tee-supplicant.log"
+AB_OTA_KEYBOX_LOG="${OTA_WORK_DIR}/armbian-ota-keybox.log"
 AB_OTA_TEE_PID=""
+AB_OTA_BYNAME_DIR="/dev/block/by-name"
+
+# ===== security partition discovery =====
+ab_get_security_part() {
+    local dev
+
+    dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1)"
+    if [ -z "${dev}" ]; then
+        dev="$(blkid -t LABEL=security -o device 2>/dev/null | head -n1)"
+    fi
+    echo "${dev}"
+}
+
+ab_prepare_byname_links() {
+    local disk disk_name entry devnode name sec_dev
+
+    mkdir -p "${AB_OTA_BYNAME_DIR}" 2>/dev/null || true
+
+    for disk in /sys/block/*; do
+        disk_name="$(basename "${disk}")"
+        case "${disk_name}" in
+            loop*|ram*|zram*|dm-*|mtdblock*)
+                continue
+                ;;
+        esac
+
+        for entry in "${disk}"/"${disk_name}"*; do
+            [ -d "${entry}" ] || continue
+            [ -f "${entry}/partition" ] || continue
+
+            devnode="/dev/$(basename "${entry}")"
+            name="$(sed -n 's/^PARTNAME=//p' "${entry}/uevent" | head -n1)"
+            [ -n "${name}" ] || continue
+            ln -sf "${devnode}" "${AB_OTA_BYNAME_DIR}/${name}" 2>/dev/null || true
+        done
+    done
+
+    sec_dev="$(ab_get_security_part)"
+    if [ -n "${sec_dev}" ]; then
+        ln -sf "${sec_dev}" "${AB_OTA_BYNAME_DIR}/security" 2>/dev/null || true
+    fi
+}
+
+# ===== OP-TEE / keybox mechanism =====
 
 ab_start_tee_supplicant() {
     AB_OTA_TEE_PID=""
@@ -62,49 +106,7 @@ ab_try_keybox_roundtrip() {
     fi
 }
 
-# ===== security partition + passphrase retrieval =====
-AB_OTA_BYNAME_DIR="/dev/block/by-name"
-
-ab_get_security_part() {
-    local dev
-
-    dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1)"
-    if [ -z "${dev}" ]; then
-        dev="$(blkid -t LABEL=security -o device 2>/dev/null | head -n1)"
-    fi
-    echo "${dev}"
-}
-
-ab_prepare_byname_links() {
-    local disk disk_name entry devnode name sec_dev
-
-    mkdir -p "${AB_OTA_BYNAME_DIR}" 2>/dev/null || true
-
-    for disk in /sys/block/*; do
-        disk_name="$(basename "${disk}")"
-        case "${disk_name}" in
-            loop*|ram*|zram*|dm-*|mtdblock*)
-                continue
-                ;;
-        esac
-
-        for entry in "${disk}"/"${disk_name}"*; do
-            [ -d "${entry}" ] || continue
-            [ -f "${entry}/partition" ] || continue
-
-            devnode="/dev/$(basename "${entry}")"
-            name="$(sed -n 's/^PARTNAME=//p' "${entry}/uevent" | head -n1)"
-            [ -n "${name}" ] || continue
-            ln -sf "${devnode}" "${AB_OTA_BYNAME_DIR}/${name}" 2>/dev/null || true
-        done
-    done
-
-    sec_dev="$(ab_get_security_part)"
-    if [ -n "${sec_dev}" ]; then
-        ln -sf "${sec_dev}" "${AB_OTA_BYNAME_DIR}/security" 2>/dev/null || true
-    fi
-}
-
+# ===== passphrase retrieval =====
 ab_get_security_passphrase_file() {
     local out_file="$1"
     local security_dev marker

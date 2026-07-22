@@ -90,3 +90,17 @@ state_mark_prepared() {
     state_set "START_TIME" "$(date -Iseconds)" || return 1
     state_set "COMPLETE_TIME" "" || return 1
 }
+
+state_mark_completed() {
+    local mode="$1"
+    local status="$2"
+    local current_slot="${3:-}"
+    local target_slot="${4:-}"
+
+    state_init || return 1
+    state_mark_mode "${mode}" || return 1
+    state_mark_status "${status}" || return 1
+    state_set "CURRENT_SLOT" "${current_slot}" || return 1
+    state_set "TARGET_SLOT" "${target_slot}" || return 1
+    state_set "COMPLETE_TIME" "$(date -Iseconds)" || return 1
+}

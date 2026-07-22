@@ -1,48 +1,18 @@
 #!/bin/bash
 
-RECOVERY_OVERLAY_BACKING_DIR="${RECOVERY_OVERLAY_BACKING_DIR:-/media/root-rw}"
-RECOVERY_TRANSACTION_DIR="${RECOVERY_TRANSACTION_DIR:-${RECOVERY_OVERLAY_BACKING_DIR}/ota-recovery}"
-
-function recovery_configure_transaction_store() {
-    OTA_WORK_DIR="${RECOVERY_TRANSACTION_DIR}/ota_work"
-    OTA_STATE_DIR="${RECOVERY_TRANSACTION_DIR}/state"
-    OTA_STATE_FILE="${OTA_STATE_DIR}/ota-state.env"
-}
-
-recovery_configure_transaction_store
-
-RECOVERY_ROOTFS_TAR="${OTA_WORK_DIR}/rootfs.tar.gz"
-RECOVERY_ROOTFS_SHA="${OTA_WORK_DIR}/rootfs.sha256"
-RECOVERY_BOOT_TAR="${OTA_WORK_DIR}/boot.tar.gz"
-RECOVERY_BOOT_ITB="${OTA_WORK_DIR}/boot.itb"
-RECOVERY_BOOT_SHA="${OTA_WORK_DIR}/boot.sha256"
+RECOVERY_OVERLAY_BACKING_DIR="/media/root-rw"
+RECOVERY_TRANSACTION_DIR="${RECOVERY_OVERLAY_BACKING_DIR}/ota-recovery"
+OTA_WORK_DIR="${RECOVERY_TRANSACTION_DIR}/ota_work"
+OTA_STATE_DIR="${RECOVERY_TRANSACTION_DIR}/state"
+OTA_STATE_FILE="${OTA_STATE_DIR}/ota-state.env"
 
 recovery_require_tools() {
-    ota_require_runtime tar sha256sum mount umount mountpoint sed grep awk
+    ota_require_runtime tar sha256sum mount umount mountpoint sed grep awk dd od tr
 }
 
 recovery_require_transaction_store() {
     mountpoint -q "${RECOVERY_OVERLAY_BACKING_DIR}" ||
         error_exit "Recovery overlayroot backing store is unavailable: ${RECOVERY_OVERLAY_BACKING_DIR}"
-}
-
-recovery_verify_payload() {
-    [ -f "${RECOVERY_BOOT_ITB}" ] && [ -f "${RECOVERY_BOOT_TAR}" ] &&
-        error_exit "OTA package contains both boot.itb and boot.tar.gz; refusing ambiguous boot payload"
-
-    verify_payload_archives "${OTA_WORK_DIR}" \
-        "rootfs.tar.gz" "rootfs.sha256" \
-        "boot.tar.gz" "boot.sha256"
-
-    if [ -f "${RECOVERY_BOOT_ITB}" ]; then
-        verify_sha256 "${RECOVERY_BOOT_ITB}" "${RECOVERY_BOOT_SHA}" "boot.itb"
-    fi
-}
-
-recovery_mark_prepared() {
-    local package_path="$1"
-
-    state_mark_prepared "recovery" "prepared" "${package_path}"
 }
 
 recovery_start_ota() {
@@ -55,8 +25,10 @@ recovery_start_ota() {
     assert_package_mode_matches "${package_path}" "recovery"
 
     extract_ota_package "${package_path}" "${OTA_WORK_DIR}"
-    recovery_verify_payload
-    recovery_mark_prepared "${package_path}"
+    ota_verify_payload "${OTA_WORK_DIR}" \
+        "${OTA_PAYLOAD_ROOTFS_TAR}" "${OTA_PAYLOAD_ROOTFS_SHA}" \
+        "${OTA_PAYLOAD_BOOT_TAR}" "${OTA_PAYLOAD_BOOT_SHA}" "${OTA_PAYLOAD_BOOT_ITB}"
+    state_mark_prepared "recovery" "prepared" "${package_path}"
 
     log_info "Recovery OTA prepared successfully"
     log_info "Reboot to apply the update in initramfs"
@@ -65,10 +37,7 @@ recovery_start_ota() {
 recovery_mark_success() {
     init_logging
     acquire_lock || error_exit "Cannot acquire OTA lock"
-    state_init
-    state_mark_mode "recovery"
-    state_mark_status "success"
-    state_set "COMPLETE_TIME" "$(date -Iseconds)"
+    state_mark_completed "recovery" "success"
     log_info "Recovery OTA marked successful"
 }
 

@@ -2,7 +2,7 @@
 #
 # initramfs OTA library: block device / partition / UUID / LUKS / FIT probing.
 #
-# Sourced by 99-ota-apply after ota-log.sh (primitives are silent; only
+# Sourced by 99-ota-apply after recovery/log.sh (primitives are silent; only
 # ota_detect_devices logs). /bin/sh + busybox (blkid, udevadm).
 
 # ===== helper: get DEV + UUID by LABEL (e.g. /dev/mmcblk0p5 + UUID) =====

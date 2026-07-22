@@ -14,9 +14,9 @@ function ota_install_recovery_initramfs() {
     local title="Recovery OTA initramfs"
     local -a initramfs_runtime_file_list=(
         "${OTA_ROOTFS_RUNTIME_DIR}/state.sh"
-        "${OTA_ROOTFS_RUNTIME_DIR}/ota-log.sh"
-        "${OTA_ROOTFS_RUNTIME_DIR}/ota-device.sh"
-        "${OTA_ROOTFS_RUNTIME_DIR}/ota-payload.sh"
+        "${OTA_ROOTFS_RUNTIME_DIR}/recovery/log.sh"
+        "${OTA_ROOTFS_RUNTIME_DIR}/recovery/device.sh"
+        "${OTA_ROOTFS_RUNTIME_DIR}/recovery/payload.sh"
         "etc/initramfs-tools/hooks/99-copy-tools"
         "etc/initramfs-tools/scripts/init-premount/99-ota-apply"
     )

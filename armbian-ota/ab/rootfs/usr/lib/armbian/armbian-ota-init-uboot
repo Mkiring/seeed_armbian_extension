@@ -7,6 +7,14 @@
 
 set -e
 
+OTA_RUNTIME_DIR="/usr/share/armbian-ota"
+AB_ENV_LIB="${OTA_RUNTIME_DIR}/ab/env.sh"
+[ -r "${AB_ENV_LIB}" ] || {
+    echo "ERROR: A/B U-Boot environment helper not found: ${AB_ENV_LIB}" >&2
+    exit 1
+}
+. "${AB_ENV_LIB}"
+
 # U-Boot environment location. The device is detected at runtime.
 readonly AB_FW_ENV_OFFSET="0x3f8000"
 readonly AB_FW_ENV_SIZE="0x8000"
@@ -49,23 +57,6 @@ EOF
     log_info "Installed fallback U-Boot default environment: ${initial_env}"
 }
 
-resolve_physical_part_dev() {
-    local dev="$1" pkname
-    [ -n "${dev}" ] || return 1
-
-    case "${dev}" in
-        /dev/mapper/*|/dev/dm-*)
-            pkname="$(lsblk -no PKNAME "${dev}" 2>/dev/null | head -n1)"
-            if [ -n "${pkname}" ]; then
-                echo "/dev/${pkname}"
-                return 0
-            fi
-            ;;
-    esac
-
-    echo "${dev}"
-}
-
 get_parent_disk_dev() {
     local dev="$1" pkname base
     [ -n "${dev}" ] || return 1
@@ -93,13 +84,6 @@ get_parent_disk_dev() {
     esac
 
     echo "${dev}"
-}
-
-get_part_dev_by_partlabel() {
-    local partlabel="$1" dev
-    dev="$(blkid -t PARTLABEL="${partlabel}" -o device 2>/dev/null | head -n1)"
-    [ -n "${dev}" ] || return 1
-    resolve_physical_part_dev "${dev}"
 }
 
 get_partition_number_from_dev() {
@@ -146,45 +130,6 @@ get_part_uuid() {
     blkid -o value -s UUID "${dev}" 2>/dev/null | head -n1
 }
 
-get_fs_uuid_by_label() {
-    local fslabel="$1"
-    blkid -t LABEL="${fslabel}" -o value -s UUID 2>/dev/null | head -n1
-}
-
-get_cmdline_root_uuid() {
-    local token
-
-    for token in $(cat /proc/cmdline 2>/dev/null); do
-        case "${token}" in
-            root=UUID=*)
-                echo "${token#root=UUID=}"
-                return 0
-                ;;
-        esac
-    done
-}
-
-detect_current_slot() {
-    local root_src root_uuid
-
-    root_src="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
-    if [ -z "${root_src}" ]; then
-        root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
-    fi
-
-    root_uuid="$(blkid -o value -s UUID "${root_src}" 2>/dev/null | head -n1)"
-    if [ -z "${root_uuid}" ]; then
-        root_uuid="$(get_cmdline_root_uuid)"
-    fi
-
-    if [ -n "${root_uuid}" ] && [ "${root_uuid}" = "${root_b_uuid}" ]; then
-        echo "b"
-        return 0
-    fi
-
-    echo "a"
-}
-
 set_env_if_missing() {
     local key="$1" value="$2" current
 
@@ -213,19 +158,10 @@ ensure_fw_env_config() {
 detect_ab_partitions() {
     # Boot partitions use filesystem labels first; raw FIT boot partitions use
     # GPT PARTLABEL. Root partitions use GPT PARTLABEL for encrypted A/B too.
-    boot_a_dev="$(blkid -t LABEL="armbi_boota" -o device 2>/dev/null | head -n1)"
-    boot_b_dev="$(blkid -t LABEL="armbi_bootb" -o device 2>/dev/null | head -n1)"
-    [ -n "${boot_a_dev}" ] || boot_a_dev="$(get_part_dev_by_partlabel "boot_a" || true)"
-    [ -n "${boot_b_dev}" ] || boot_b_dev="$(get_part_dev_by_partlabel "boot_b" || true)"
-    root_a_dev="$(get_part_dev_by_partlabel "rootfs_a" || true)"
-    root_b_dev="$(get_part_dev_by_partlabel "rootfs_b" || true)"
-
-    if [ -z "${root_a_dev}" ]; then
-        root_a_dev="$(resolve_physical_part_dev "$(blkid -t LABEL="armbi_roota" -o device 2>/dev/null | head -n1)" || true)"
-    fi
-    if [ -z "${root_b_dev}" ]; then
-        root_b_dev="$(resolve_physical_part_dev "$(blkid -t LABEL="armbi_rootb" -o device 2>/dev/null | head -n1)" || true)"
-    fi
+    boot_a_dev="$(ab_get_part_by_label "${BOOT_A_LABEL}")"
+    boot_b_dev="$(ab_get_part_by_label "${BOOT_B_LABEL}")"
+    root_a_dev="$(ab_get_part_by_label "${ROOT_A_LABEL}")"
+    root_b_dev="$(ab_get_part_by_label "${ROOT_B_LABEL}")"
 
     if [ -z "${boot_a_dev}" ] || [ -z "${boot_b_dev}" ] || [ -z "${root_a_dev}" ] || [ -z "${root_b_dev}" ]; then
         log_error "Cannot find one or more A/B partitions by label"
@@ -254,8 +190,8 @@ detect_ab_boot_configuration() {
         exit 1
     fi
 
-    boot_a_uuid="$(get_fs_uuid_by_label "armbi_boota")"
-    boot_b_uuid="$(get_fs_uuid_by_label "armbi_bootb")"
+    boot_a_uuid="$(ab_get_uuid_by_label "${BOOT_A_LABEL}")"
+    boot_b_uuid="$(ab_get_uuid_by_label "${BOOT_B_LABEL}")"
     root_a_uuid="$(get_part_uuid "${root_a_dev}")"
     root_b_uuid="$(get_part_uuid "${root_b_dev}")"
     boot_a_fstype="$(blkid -s TYPE -o value "${boot_a_dev}" 2>/dev/null || true)"
@@ -264,7 +200,7 @@ detect_ab_boot_configuration() {
     if [ -z "${boot_a_fstype}" ] && [ -z "${boot_b_fstype}" ]; then
         AB_BOOT_MODE="raw-fit"
     fi
-    CURRENT_SLOT="$(detect_current_slot)"
+    CURRENT_SLOT="$(ab_env_current_slot || echo "a")"
 
     log_info "Detected partition layout:"
     log_info "  boot_a: ${boot_a_dev} (partition ${BOOT_A_PART})"

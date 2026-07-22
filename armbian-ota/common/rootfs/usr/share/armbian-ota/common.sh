@@ -9,9 +9,27 @@ OTA_LOCK_FILE="${OTA_LOCK_FILE:-/var/run/armbian-ota.lock}"
 OTA_LOG_DIR="${OTA_LOG_DIR:-/var/log/armbian-ota}"
 OTA_LOG_FILE="${OTA_LOG_FILE:-${OTA_LOG_DIR}/ota.log}"
 
+# OTA package payload file names shared by A/B and recovery modes.
+OTA_PAYLOAD_ROOTFS_TAR="rootfs.tar.gz"
+OTA_PAYLOAD_ROOTFS_SHA="rootfs.sha256"
+OTA_PAYLOAD_BOOT_TAR="boot.tar.gz"
+OTA_PAYLOAD_BOOT_ITB="boot.itb"
+OTA_PAYLOAD_BOOT_SHA="boot.sha256"
+
 COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${COMMON_LIB_DIR}/state.sh"
 unset COMMON_LIB_DIR
+
+ota_source_library() {
+    local library_path="$1"
+    local library_name="$2"
+
+    [ -r "${library_path}" ] || {
+        echo "ERROR: ${library_name} not found: ${library_path}" >&2
+        return 1
+    }
+    . "${library_path}"
+}
 
 init_logging() {
     mkdir -p "${OTA_LOG_DIR}" "${OTA_STATE_DIR}"
@@ -82,20 +100,6 @@ ota_require_runtime() {
     acquire_lock || error_exit "Cannot acquire OTA lock"
 }
 
-empty_mount_dir() {
-    local mount_dir="$1" f
-
-    (
-        cd "${mount_dir}" || exit 1
-        for f in * .[!.]* ..?*; do
-            case "${f}" in
-                .|..|lost+found) continue ;;
-            esac
-            rm -rf "${f}" 2>/dev/null || exit 1
-        done
-    )
-}
-
 load_package_env_metadata() {
     local package_path="$1"
     local manifest_entry
@@ -159,6 +163,29 @@ assert_package_mode_matches() {
     fi
 }
 
+make_ota_work_dir() {
+    local prefix="${1:-work}"
+
+    mkdir -p "${OTA_WORK_DIR}" || error_exit "Failed to create OTA work directory: ${OTA_WORK_DIR}"
+    mktemp -d "${OTA_WORK_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary directory under ${OTA_WORK_DIR}"
+}
+
+make_ota_temp_file() {
+    local prefix="${1:-tmp}"
+
+    mkdir -p "${OTA_TMP_DIR}" || error_exit "Failed to create OTA temp directory: ${OTA_TMP_DIR}"
+    mktemp "${OTA_TMP_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary file under ${OTA_TMP_DIR}"
+}
+
+extract_ota_package() {
+    local package_path="$1"
+    local dest_dir="$2"
+
+    rm -rf "${dest_dir}"
+    mkdir -p "${dest_dir}"
+    tar -xzf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+}
+
 verify_sha256() {
     local payload="$1"
     local sha_file="$2"
@@ -206,25 +233,44 @@ verify_payload_archives() {
     fi
 }
 
-extract_ota_package() {
-    local package_path="$1"
-    local dest_dir="$2"
+ota_is_fit_image() {
+    local image="$1" magic
 
-    rm -rf "${dest_dir}"
-    mkdir -p "${dest_dir}"
-    tar -xzf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+    [ -f "${image}" ] || return 1
+    magic="$(dd if="${image}" bs=4 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    [ "${magic}" = "d00dfeed" ]
 }
 
-make_ota_work_dir() {
-    local prefix="${1:-work}"
+ota_verify_payload() {
+    local work_dir="$1"
+    local rootfs_tar="$2"
+    local rootfs_sha="$3"
+    local boot_tar="$4"
+    local boot_sha="$5"
+    local boot_itb="$6"
 
-    mkdir -p "${OTA_WORK_DIR}" || error_exit "Failed to create OTA work directory: ${OTA_WORK_DIR}"
-    mktemp -d "${OTA_WORK_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary directory under ${OTA_WORK_DIR}"
+    [ -f "${work_dir}/${boot_itb}" ] && [ -f "${work_dir}/${boot_tar}" ] &&
+        error_exit "OTA package contains both ${boot_itb} and ${boot_tar}; refusing ambiguous boot payload"
+
+    verify_payload_archives "${work_dir}" "${rootfs_tar}" "${rootfs_sha}" "${boot_tar}" "${boot_sha}"
+
+    if [ -f "${work_dir}/${boot_itb}" ]; then
+        verify_sha256 "${work_dir}/${boot_itb}" "${work_dir}/${boot_sha}" "${boot_itb}"
+        ota_is_fit_image "${work_dir}/${boot_itb}" ||
+            error_exit "Invalid FIT boot image in OTA package: ${boot_itb}"
+    fi
 }
 
-make_ota_temp_file() {
-    local prefix="${1:-tmp}"
+empty_mount_dir() {
+    local mount_dir="$1" f
 
-    mkdir -p "${OTA_TMP_DIR}" || error_exit "Failed to create OTA temp directory: ${OTA_TMP_DIR}"
-    mktemp "${OTA_TMP_DIR}/${prefix}.XXXXXX" || error_exit "Failed to create OTA temporary file under ${OTA_TMP_DIR}"
+    (
+        cd "${mount_dir}" || exit 1
+        for f in * .[!.]* ..?*; do
+            case "${f}" in
+                .|..|lost+found) continue ;;
+            esac
+            rm -rf "${f}" 2>/dev/null || exit 1
+        done
+    )
 }
