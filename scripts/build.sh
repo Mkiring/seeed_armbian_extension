@@ -102,9 +102,20 @@ validate_option() {
 }
 
 clear_uboot_cache() {
-    echo "Clearing U-Boot artifact cache for $BOARD..."
-    rm -f output/debs/linux-u-boot-${BOARD}-*.deb
-    rm -f output/packages-hashed/u-boot-${BOARD}-*.tar 2>/dev/null
+    # Full secure boot changes both the Debian package and artifact names by
+    # appending "-secure".  Keep the other variant intact so one workflow can
+    # produce and publish both packages.
+    local variant_suffix=""
+    if [[ "$SECURITY_PROFILE" == "secure-boot" ]]; then
+        variant_suffix="-secure"
+    fi
+
+    local package_name="linux-u-boot-${BOARD}-${BRANCH}${variant_suffix}"
+    local artifact_name="uboot-${BOARD}-${BRANCH}${variant_suffix}"
+
+    echo "Clearing U-Boot artifact cache for ${package_name}..."
+    rm -f "output/debs/${package_name}_"*.deb
+    rm -f "output/packages-hashed/${artifact_name}_"*.tar 2>/dev/null
     echo "U-Boot cache cleared."
 }
 
@@ -140,7 +151,10 @@ append_security_args() {
 
     if [[ "$require_passphrase" == "yes" ]]; then
         [[ -z "$CRYPTROOT_PASSPHRASE" ]] && die "CRYPTROOT_PASSPHRASE is required for encrypted builds. Set it in environment."
-        BUILD_CMD+=(CRYPTROOT_ENABLE=yes CRYPTROOT_PASSPHRASE="$CRYPTROOT_PASSPHRASE")
+        # Keep this out of argv and build logs. The Docker extension forwards the
+        # already-exported variable using `--env CRYPTROOT_PASSPHRASE`.
+        export CRYPTROOT_PASSPHRASE
+        BUILD_CMD+=(CRYPTROOT_ENABLE=yes)
     else
         BUILD_CMD+=(CRYPTROOT_ENABLE=yes)
     fi
@@ -358,8 +372,12 @@ fi
 # U-Boot is an Armbian artifact: cache hit skips postprocess entirely, so
 # usbplug/spi_nor.img would not be regenerated.
 if [[ "$RK_COMPILE_USBPLUG" == "yes" ]]; then
-    echo "RK_COMPILE_USBPLUG requires postprocess; forcing U-Boot cache clear."
-    clear_uboot_cache
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        echo "[DRY RUN] RK_COMPILE_USBPLUG would clear the matching U-Boot artifact cache."
+    else
+        echo "RK_COMPILE_USBPLUG requires postprocess; forcing U-Boot cache clear."
+        clear_uboot_cache
+    fi
 fi
 
 # ── Print summary ───────────────────────────────────────────────────────────
