@@ -249,6 +249,10 @@ main() {
             resize_ext4_filesystem "${userdata_part}"
             ;;
         crypto_LUKS)
+            if [ "${resize_status}" -eq 0 ]; then
+                warn "encrypted userdata partition resized; reboot is required to reopen the LUKS mapper before resizing its ext4 filesystem"
+                return 0
+            fi
             resize_luks_userdata "${userdata_part}"
             ;;
         *)

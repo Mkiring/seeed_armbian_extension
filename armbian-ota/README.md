@@ -124,9 +124,10 @@ Neither OTA mode migrates data from older single-rootfs Recovery images;
 this layout is intended for new development images.
 
 On first boot, `armbian-resize-userdata.service` expands the final `userdata`
-partition to use available disk space in both modes. For encrypted Recovery
-images it then expands the existing `armbian-userdata` LUKS mapping and its
-inner ext4 filesystem.
+partition to use available disk space in both modes. For encrypted A/B and
+Recovery images, it logs that a reboot is required after expanding the
+partition. The next boot reopens the `armbian-userdata` LUKS mapper at its new
+size, then expands its inner ext4 filesystem.
 
 ### U-Boot Environment Variables
 
