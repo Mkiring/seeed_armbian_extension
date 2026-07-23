@@ -6,6 +6,7 @@ rk_secure_boot_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rk_secure_boot_extension_dir="${rk_secure_boot_dir}"
 
 source "${rk_secure_boot_dir}/build-hooks/common.sh"
+source "${rk_secure_boot_dir}/build-hooks/uboot-package-name.sh"
 source "${rk_secure_boot_dir}/build-hooks/secure-boot-uboot.sh"
 source "${rk_secure_boot_dir}/build-hooks/secure-boot-image.sh"
 
