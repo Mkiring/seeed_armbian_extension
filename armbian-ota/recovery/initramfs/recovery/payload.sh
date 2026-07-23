@@ -12,40 +12,24 @@
 # HAS_BOOT_PART, AUTO_DECRYPT_MODE.
 # Sets globals: HAS_BOOT_TAR, HAS_BOOT_ITB, DO_BOOT_OTA, BOOT_MNT (reassigned).
 
-# ===== tar extract helper with fallback and stderr logging =====
-extract_tar_with_fallback() {
+# ===== tar extract helper with stderr logging =====
+extract_tar() {
     archive="$1"
     target="$2"
     label="$3"
     err_file="${LOGDIR}/${label}.tar.stderr.log"
-    rc=0
 
     rm -f "${err_file}" 2>/dev/null || true
 
-    # Preferred mode: preserve metadata when supported.
-    log "${label}: run tar --xattrs --acls --numeric-owner -xpf ${archive} -C ${target}"
-    if tar --xattrs --acls --numeric-owner -xpf "${archive}" -C "${target}" 2>"${err_file}"; then
-        log "${label}: metadata extract succeeded"
-        log_tail "${label}" "${err_file}" 20
-        rm -f "${err_file}" 2>/dev/null || true
-        return 0
-    fi
-    rc=$?
-
-    log "WARN: ${label} metadata extract failed (rc=${rc}), retrying with plain tar -xzf"
-    log_tail "${label} metadata stderr" "${err_file}" 40
-
-    rm -f "${err_file}" 2>/dev/null || true
     log "${label}: run tar -xzf ${archive} -C ${target}"
     if tar -xzf "${archive}" -C "${target}" 2>"${err_file}"; then
-        log "${label}: plain extract succeeded"
+        log "${label}: extract succeeded"
         log_tail "${label}" "${err_file}" 20
         rm -f "${err_file}" 2>/dev/null || true
         return 0
     fi
-    rc=$?
 
-    log "ERROR: ${label} extract failed in both metadata and plain modes (plain rc=${rc})"
+    log "ERROR: ${label} extract failed"
     log_tail "${label} stderr" "${err_file}" 80
     rm -f "${err_file}" 2>/dev/null || true
     return 1
@@ -155,7 +139,7 @@ ota_apply_rootfs() {
 
     log "extracting ${ROOTFS_TAR} -> ${ROOT_MNT} ..."
     start_heartbeat "extracting rootfs.tar.gz to ${ROOT_MNT}"
-    if ! extract_tar_with_fallback "${ROOTFS_TAR}" "${ROOT_MNT}" "rootfs"; then
+    if ! extract_tar "${ROOTFS_TAR}" "${ROOT_MNT}" "rootfs"; then
         stop_heartbeat
         log "ERROR: extract rootfs.tar.gz failed, abort OTA"
         return 1
@@ -216,7 +200,7 @@ ota_apply_boot() {
     if [ "$DO_BOOT_OTA" -eq 1 ]; then
         log "extracting ${BOOT_TAR} -> ${BOOT_MNT} ..."
         start_heartbeat "extracting boot.tar.gz to ${BOOT_MNT}"
-        if ! extract_tar_with_fallback "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
+        if ! extract_tar "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
             stop_heartbeat
             log "ERROR: extract boot.tar.gz failed, system may be broken"
         fi
