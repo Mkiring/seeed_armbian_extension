@@ -19,7 +19,6 @@ function build_custom_uboot__100_autodecrypt_prepare_defconfig() {
     fi
 
     rk_autodecrypt_install_patch_uboot_target_wrapper
-    rk_autodecrypt_prepare_defconfig_for_current_tree
 }
 
 #
