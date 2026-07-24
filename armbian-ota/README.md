@@ -242,6 +242,13 @@ offset (`0x3f8000`, size `0x8000`) on the selected boot disk.  This works the
 same way for SD, eMMC, and NVMe images. The A/B backend uses an internal
 helper to manage this `fw_setenv` state.
 
+Filesystem A/B images package U-Boot's complete compiled default environment
+and merge the A/B variables into `/etc/u-boot-initial-env`. On the first
+boot, U-Boot uses its compiled default environment; the runtime then creates
+the persistent environment with `fw_setenv -f`. This prevents that
+initialization from discarding commands such as `distro_bootcmd` and
+`scan_dev_for_boot`.
+
 For Secure Boot A/B packages, the A/B backend verifies `boot.itb` and writes
 it directly to the inactive raw `boot_a` or `boot_b` partition. It never
 mounts a FIT boot partition or treats the FIT image as `boot.tar.gz`.

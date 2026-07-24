@@ -5,6 +5,7 @@ function ota_install_ab_runtime_to_rootfs() {
 
     ota_install_common_runtime_to_rootfs "${root_dir}" || return 1
     ota_sync_rootfs "A/B OTA runtime" "${OTA_AB_ROOTFS}" "${root_dir}"
+    ota_ab_write_complete_initial_env "${root_dir}"
 }
 
 function ota_enable_ab_runtime_services() {
