@@ -50,9 +50,14 @@ function ota_partition_append() {
     local name="$2"
     local size="$3"
     local type="$4"
+    local attrs="${5:-}"
 
     printf -v "${index_var}" '%s' "${p_index}"
-    script+="${p_index} : name=\"${name}\", start=${next}MiB, size=${size}MiB, type=${type}\\n"
+    script+="${p_index} : name=\"${name}\", start=${next}MiB, size=${size}MiB, type=${type}"
+    if [[ -n "${attrs}" ]]; then
+        script+=", attrs=\"${attrs}\""
+    fi
+    script+="\\n"
     next=$((next + size))
     p_index=$((p_index + 1))
 }

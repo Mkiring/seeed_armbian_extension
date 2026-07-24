@@ -42,7 +42,15 @@ function create_partition_table__ab_part_ota() {
         boot_type=${data_type}
     fi
     local boot_a_index boot_b_index rootfs_a_index rootfs_b_index userdata_index
-    ota_partition_append boot_a_index "boot_a" "${OTA_BOOT_SIZE}" "${boot_type}"
+    # U-Boot's default distro scan only considers GPT partitions with the
+    # LegacyBIOSBootable attribute. Mark filesystem boot_a as the deterministic
+    # fallback when the persistent environment is absent or invalid. A valid
+    # A/B environment selects either slot explicitly.
+    if ota_raw_boot_enabled; then
+        ota_partition_append boot_a_index "boot_a" "${OTA_BOOT_SIZE}" "${boot_type}"
+    else
+        ota_partition_append boot_a_index "boot_a" "${OTA_BOOT_SIZE}" "${boot_type}" "LegacyBIOSBootable"
+    fi
     ota_partition_append boot_b_index "boot_b" "${OTA_BOOT_SIZE}" "${boot_type}"
 
     local security_index=""
