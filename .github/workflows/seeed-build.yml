@@ -555,8 +555,6 @@ jobs:
           if [[ -d cache/sources/fit-keys ]]; then
               export UBOOT_FIT_KEYS_BACKUP_DIR="/armbian/cache/sources/fit-keys"
           fi
-              export UBOOT_FIT_KEYS_BACKUP_DIR="/armbian/cache/sources/fit-keys"
-          fi
 
           # shellcheck disable=SC2086
           ./seeed-build.sh \
