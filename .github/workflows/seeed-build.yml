@@ -378,26 +378,8 @@ jobs:
           ls -lh cache/sources/linux-kernel-worktree/panthor-fallback/drivers/gpu/arm/bifrost/mali_csffw.bin
           file cache/sources/linux-kernel-worktree/panthor-fallback/drivers/gpu/arm/bifrost/mali_csffw.bin || true
 
-      - name: Symlink extension into armbian-build
-        # The extension is THIS repo (checked out at extension_ref above).
-        # Copy it into the path the board config expects:
-        #   cache/sources/seeed_armbian_extension
-        # The board config then symlinks extensions/seeed_armbian_extension
-        # → cache/sources/seeed_armbian_extension and calls enable_extension.
-        # We must COPY (not symlink) because Docker only mounts the
-        # armbian-build/ subdirectory; a symlink to $GITHUB_WORKSPACE
-        # would be broken inside the container.
-        run: |
-          mkdir -p armbian-build/cache/sources
-          rsync -a --exclude='.git' --exclude='.github' \
-              "$GITHUB_WORKSPACE/" armbian-build/cache/sources/seeed_armbian_extension/
-          echo "=== extension copied ==="
-          ls -la armbian-build/cache/sources/seeed_armbian_extension/seeed_armbian_extension.sh
-          ls -la armbian-build/cache/sources/seeed_armbian_extension/scripts/build.sh
-
-      - name: Patch extension to skip armbian-imager + copy DTBs
-        # These patches apply to THIS repo's files (the extension itself).
-        # No cache/sources/ prefix — we're in the extension root.
+      - name: Patch extension (armbian-imager + DTB hooks)
+        # Apply patches to THIS repo's files FIRST, before copying.
         run: |
           cat >> seeed_armbian_extension.sh <<'EOF'
 
@@ -437,6 +419,18 @@ jobs:
           EOF
           echo "Patched seeed_armbian_extension.sh with DTB copy hook"
 
+      - name: Copy extension into armbian-build (after patching)
+        # Copy the PATCHED extension into the path the board config expects.
+        # Must COPY (not symlink) because Docker only mounts the
+        # armbian-build/ subdirectory. Copy AFTER patching so the
+        # armbian-imager and DTB hooks are included.
+        run: |
+          mkdir -p armbian-build/cache/sources
+          rsync -a --exclude='.git' --exclude='.github' \
+              "$GITHUB_WORKSPACE/" armbian-build/cache/sources/seeed_armbian_extension/
+          echo "=== extension copied (with patches) ==="
+          tail -5 armbian-build/cache/sources/seeed_armbian_extension/seeed_armbian_extension.sh
+
       - name: Pre-create rkbin symlink for A/B OTA
         run: |
           cd armbian-build
@@ -465,8 +459,10 @@ jobs:
           DEV_CRT: ${{ secrets.DEV_CRT }}
 
       - name: Symlink build.sh into armbian-build root
+        # Point to the COPY inside armbian-build (not $GITHUB_WORKSPACE
+        # which is outside Docker's mount).
         run: |
-          ln -sf "$GITHUB_WORKSPACE/scripts/build.sh" armbian-build/seeed-build.sh
+          ln -sf cache/sources/seeed_armbian_extension/scripts/build.sh armbian-build/seeed-build.sh
           ls -la armbian-build/seeed-build.sh
 
       - name: Restore docker image cache
