@@ -267,6 +267,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Save patches to /tmp before branch switch
+        # The workflow + .github/patches/ live on seeed-build.
+        # Switching to extension_ref (e.g. fix/secure_boot) replaces
+        # the working tree, so the patch files disappear.
+        # Copy them to /tmp first so they survive the switch.
+        run: |
+          mkdir -p /tmp/workflow-patches
+          cp -v .github/patches/*.patch /tmp/workflow-patches/ 2>/dev/null || echo "No patch files found"
+          ls -la /tmp/workflow-patches/
+
       - name: Switch to extension_ref branch
         # The workflow file lives on seeed-build, but the actual extension
         # code to compile may be on a different branch (fix/secure_boot, etc.).
@@ -341,9 +351,10 @@ jobs:
         # which calls the GitHub API directly and has no cache fallback.
         # Apply our patch that adds version caching, deb caching, mirror
         # support, and graceful degradation when the API is unreachable.
+        # Patch file is at /tmp/workflow-patches/ (saved before branch switch).
         run: |
           cd armbian-build
-          git apply "$GITHUB_WORKSPACE/.github/patches/radxa-aic8800.sh.patch"
+          git apply /tmp/workflow-patches/radxa-aic8800.sh.patch
           echo "=== aic8800 patch applied ==="
           grep -c 'aic8800_download_file_with_cache' extensions/radxa-aic8800.sh
 
