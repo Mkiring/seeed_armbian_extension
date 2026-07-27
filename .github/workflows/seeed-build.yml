@@ -1,0 +1,792 @@
+name: "Seeed Build"
+
+on:
+  workflow_dispatch:
+    inputs:
+      # ── Boards (multi-select via checkboxes) ─────────────────────────
+      board_rk3576:
+        description: "Board: reComputer rk3576 DevKit"
+        type: boolean
+        default: true
+      board_rk3588:
+        description: "Board: reComputer rk3588 DevKit"
+        type: boolean
+        default: false
+
+      # ── Releases ──────────────────────────────────────────────────────
+      release_bookworm:
+        description: "Release: Debian 12 (bookworm)"
+        type: boolean
+        default: false
+      release_trixie:
+        description: "Release: Debian 13 (trixie)"
+        type: boolean
+        default: true
+      release_jammy:
+        description: "Release: Ubuntu 22.04 (jammy)"
+        type: boolean
+        default: false
+      release_noble:
+        description: "Release: Ubuntu 24.04 (noble)"
+        type: boolean
+        default: false
+      release_plucky:
+        description: "Release: Ubuntu 26.04 (plucky)"
+        type: boolean
+        default: false
+
+      # ── Tiers ─────────────────────────────────────────────────────────
+      tier_cli:
+        description: "Tier: cli (no desktop, build.sh --minimal)"
+        type: boolean
+        default: false
+      tier_minimal:
+        description: "Tier: minimal desktop"
+        type: boolean
+        default: false
+      tier_mid:
+        description: "Tier: mid desktop"
+        type: boolean
+        default: true
+      tier_full:
+        description: "Tier: full desktop"
+        type: boolean
+        default: false
+
+      # ── OTA modes (each selected mode becomes a separate matrix entry) ──
+      ota_plain:
+        description: "OTA: none (plain image, no recovery/ab framework)"
+        type: boolean
+        default: false
+      ota_recovery:
+        description: "OTA: recovery"
+        type: boolean
+        default: false
+      ota_ab:
+        description: "OTA: A/B dual-partition"
+        type: boolean
+        default: false
+
+      # ── Security profiles (each becomes a separate matrix dimension) ──
+      secure_rootfs:
+        description: "Security: secure-rootfs (LUKS root + OP-TEE/SSKR auto-unlock)"
+        type: boolean
+        default: false
+      secure_boot:
+        description: "Security: secure-boot (Secure U-Boot + secure-rootfs; requires DEV_CRT + PRIVATE_KEY_PEM secrets)"
+        type: boolean
+        default: false
+
+      # ── Other options ─────────────────────────────────────────────────
+      desktop:
+        description: "Desktop environment (used only when tier != cli)"
+        required: true
+        type: choice
+        options:
+          - gnome
+          - xfce
+          - kde-plasma
+          - mate
+          - cinnamon
+        default: gnome
+      build_mode:
+        description: "Build mode (full = kernel+uboot+rootfs+image)"
+        required: true
+        type: choice
+        options:
+          - full
+          - kernel
+          - uboot
+          - minimal
+        default: full
+      extension_ref:
+        description: "seeed_armbian_extension ref (branch/tag/commit)"
+        required: true
+        type: string
+        default: "main"
+      clear_kernel_cache:
+        description: "Clear kernel deb/worktree cache before build"
+        required: false
+        type: boolean
+        default: false
+      clear_rootfs_cache:
+        description: "Clear rootfs cache before build"
+        required: false
+        type: boolean
+        default: false
+      publish_release:
+        description: "Publish a GitHub Release per board (one release per board, all matrix artifacts grouped)"
+        required: false
+        type: boolean
+        default: false
+      release_tag_suffix:
+        description: "Release tag suffix (auto: v{YYYYMMDD-HHMM}-{board} if empty)"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  # Whole matrix is one concurrency group — two dispatches don't overlap.
+  group: seeed-build-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_CCACHE: "yes"
+  USE_CCACHE: "yes"
+  ENABLE_SEEED_RK_EXTENSION: "yes"
+  KERNEL_CONFIGURE: "no"
+  VENDOR: "Armbian"
+  DOCKER_IMAGE: "ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-noble-latest"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      boards: ${{ steps.gen.outputs.boards }}
+      count: ${{ steps.gen.outputs.count }}
+    steps:
+      - name: Generate matrix JSON from checkbox inputs
+        id: gen
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json, os, itertools
+
+          def flag(name):
+              v = os.environ.get(name, "false").strip().lower()
+              return v in ("true", "1", "yes", "on")
+
+          # Boards
+          boards = []
+          if flag("BOARD_RK3576"): boards.append("recomputer-rk3576-devkit")
+          if flag("BOARD_RK3588"): boards.append("recomputer-rk3588-devkit")
+
+          # Releases
+          releases = []
+          if flag("REL_BOOKWORM"): releases.append("bookworm")
+          if flag("REL_TRIXIE"):   releases.append("trixie")
+          if flag("REL_JAMMY"):    releases.append("jammy")
+          if flag("REL_NOBLE"):    releases.append("noble")
+          if flag("REL_PLUCKY"):   releases.append("plucky")
+
+          # Tiers
+          tiers = []
+          if flag("TIER_CLI"):     tiers.append("cli")
+          if flag("TIER_MINIMAL"):tiers.append("minimal")
+          if flag("TIER_MID"):     tiers.append("mid")
+          if flag("TIER_FULL"):    tiers.append("full")
+
+          # OTA modes. Each selected mode becomes its own matrix entry.
+          # If none selected, fall back to a single plain entry per
+          # (board, release, tier) so the matrix still produces a build.
+          otas = []
+          if flag("OTA_PLAIN"):    otas.append("")
+          if flag("OTA_RECOVERY"): otas.append("recovery")
+          if flag("OTA_AB"):       otas.append("ab")
+          if not otas:
+              otas = [""]  # plain image when no OTA box is checked
+
+          # Security profiles. Each selected profile becomes its own
+          # matrix dimension. If none selected, entries have no security
+          # profile (empty string).
+          securities = []
+          if flag("SECURE_ROOTFS"): securities.append("secure-rootfs")
+          if flag("SECURE_BOOT"):   securities.append("secure-boot")
+          if not securities:
+              securities = [""]  # no security profile
+
+          errs = []
+          if not boards:   errs.append("select at least one board")
+          if not releases: errs.append("select at least one release")
+          if not tiers:    errs.append("select at least one tier")
+          if errs:
+              raise SystemExit("ERROR: " + "; ".join(errs))
+
+          entries = []
+          for (b, r, t, p, s) in itertools.product(boards, releases, tiers, otas, securities):
+              entries.append({
+                  "board": b,
+                  "release": r,
+                  "tier": t,
+                  "profile": p,
+                  "security": s,
+                  "is_cli": 1 if t == "cli" else 0,
+              })
+
+          print(f"::group::Matrix entries ({len(entries)})")
+          for e in entries:
+              print(f"  board={e['board']:<28} release={e['release']:<10} tier={e['tier']:<8} profile={e['profile'] or '(none)'} security={e['security'] or '(none)'}")
+          print("::endgroup::")
+
+          boards_unique = list(dict.fromkeys(boards))
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps({'include': entries})}\n")
+              f.write(f"boards={json.dumps(boards_unique)}\n")
+              f.write(f"count={len(entries)}\n")
+          PY
+        env:
+          BOARD_RK3576: ${{ inputs.board_rk3576 }}
+          BOARD_RK3588: ${{ inputs.board_rk3588 }}
+          REL_BOOKWORM: ${{ inputs.release_bookworm }}
+          REL_TRIXIE:   ${{ inputs.release_trixie }}
+          REL_JAMMY:    ${{ inputs.release_jammy }}
+          REL_NOBLE:    ${{ inputs.release_noble }}
+          REL_PLUCKY:   ${{ inputs.release_plucky }}
+          TIER_CLI:     ${{ inputs.tier_cli }}
+          TIER_MINIMAL: ${{ inputs.tier_minimal }}
+          TIER_MID:     ${{ inputs.tier_mid }}
+          TIER_FULL:    ${{ inputs.tier_full }}
+          OTA_PLAIN:    ${{ inputs.ota_plain }}
+          OTA_RECOVERY: ${{ inputs.ota_recovery }}
+          OTA_AB:       ${{ inputs.ota_ab }}
+          SECURE_ROOTFS: ${{ inputs.secure_rootfs }}
+          SECURE_BOOT:   ${{ inputs.secure_boot }}
+
+      - name: Print summary
+        run: |
+          echo "Total matrix entries: ${{ steps.gen.outputs.count }}"
+          echo "Boards to release: ${{ steps.gen.outputs.boards }}"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-26.04
+    timeout-minutes: 600
+    strategy:
+      fail-fast: false
+      matrix:
+        # plan emits a dict like {"include": [...entries...]}, so we
+        # pull the .include out — without it the field becomes
+        # include: {"include": [...]}, which silently skips the job.
+        include: ${{ fromJSON(needs.plan.outputs.matrix).include }}
+
+    steps:
+      - name: Checkout extension (this repo)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Switch to extension_ref branch
+        # The workflow file lives on seeed-build, but the actual extension
+        # code to compile may be on a different branch (fix/secure_boot, etc.).
+        # Fetch and checkout the requested ref so the workspace has the
+        # right hooks/scripts for the build.
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.extension_ref }}"
+          echo "Switching extension to: ${REF}"
+          git fetch origin "${REF}" --depth 1
+          git checkout FETCH_HEAD
+          echo "=== Current HEAD ==="
+          git log --oneline -1
+
+      - name: Free up disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                     /usr/local/share/boost /usr/local/share/openssl
+          sudo apt-get purge -y --auto-remove \
+                     'ghc-*' 'dotnet-*' 'llvm-*' 'azure-cli*' \
+                     'firefox*' 'google-chrome*' 'powershell*' 'snapd' || true
+          sudo apt-get autoremove -y --purge
+          sudo apt-get clean
+          docker system prune -af --volumes || true
+          echo "Disk space after cleanup:"
+          df -h /
+
+      - name: Install qemu-user-binfmt for cross-arch rootfs chroot
+        # armbian's prepare_host_binfmt_qemu() runs `update-binfmts
+        # --enable qemu-arm/qemu-aarch64/...` inside the docker
+        # container to chroot into the arm64 rootfs on this x86_64
+        # host. That only works if qemu interpreters are registered
+        # on the host with the fix-binary (F) flag, which propagates
+        # registrations into containers. On Ubuntu 26.04 the real
+        # package is qemu-user-binfmt (qemu-user-static is a virtual
+        # package with no candidate). Installing qemu-user-binfmt +
+        # binfmt-support registers all foreign arches via postinst
+        # with the F flag — no manual update-binfmts call needed.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-binfmt binfmt-support
+          echo "=== binfmt_misc registrations (host) ==="
+          ls /proc/sys/fs/binfmt_misc/ || true
+          echo "=== qemu-aarch64 entry ==="
+          cat /proc/sys/fs/binfmt_misc/qemu-aarch64 2>/dev/null || echo "qemu-aarch64 not registered"
+
+      - name: Resolve matrix labels
+        id: lbl
+        run: |
+          # Short board name for labels/artifacts (recomputer-rk3576-devkit -> rk3576)
+          short=$(echo "${{ matrix.board }}" | sed -E 's/recomputer-//; s/-devkit//')
+          ota="${{ matrix.profile }}"
+          [ -z "$ota" ] && ota="plain"
+          sec="${{ matrix.security }}"
+          [ -z "$sec" ] && sec="nosec"
+          echo "short_board=$short" >> "$GITHUB_OUTPUT"
+          echo "ota_label=$ota" >> "$GITHUB_OUTPUT"
+          echo "sec_label=$sec" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout armbian-build
+        uses: actions/checkout@v4
+        with:
+          repository: Seeed-Studio/armbian-build
+          ref: main
+          path: armbian-build
+          fetch-depth: 1
+
+      - name: Patch board config to skip extension fetch
+        # The board config hardcodes fetch_from_repo ... branch:main,
+        # which overwrites our extension with upstream main during build.
+        # Comment out fetch_from_repo — the extension is already
+        # pre-placed via symlink (this repo, extension_ref branch).
+        run: |
+          cd armbian-build
+          sed -i '/fetch_from_repo.*seeed_armbian_extension/s/^/# /' \
+              config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc
+          echo "=== board config after patch ==="
+          grep -n 'seeed_armbian_extension' \
+              config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc | head -5
+
+      - name: Add trailing blank line to vendor defconfigs
+        run: |
+          cd armbian-build
+          for f in patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk35{76,88}-devkit_defconfig; do
+            [[ -f "$f" ]] || continue
+            echo "" >> "$f"
+            echo "Added trailing blank line to $f"
+          done
+
+      - name: Patch armbian docker.sh to forward CRYPTROOT_PASSPHRASE
+        run: |
+          cd armbian-build
+          sed -i '/"--env" "ARMBIAN_RUNNING_IN_CONTAINER=yes"/a\\t\t"--env" "CRYPTROOT_PASSPHRASE=${CRYPTROOT_PASSPHRASE:-}"' \
+              lib/functions/host/docker.sh
+          echo "=== CRYPTROOT_PASSPHRASE forwarding in docker.sh ==="
+          grep -n 'CRYPTROOT_PASSPHRASE' lib/functions/host/docker.sh
+
+      - name: Pre-fetch Panthor GPU firmware (rk3588 only)
+        if: ${{ contains(matrix.board, 'rk3588') }}
+        run: |
+          set -euo pipefail
+          cd armbian-build
+          mkdir -p cache/sources/linux-kernel-worktree/panthor-fallback/drivers/gpu/arm/bifrost
+          curl -fsSL -o cache/sources/linux-kernel-worktree/panthor-fallback/drivers/gpu/arm/bifrost/mali_csffw.bin \
+            "https://raw.githubusercontent.com/armbian/linux-rockchip/rk-6.1-rkr5.1/drivers/gpu/arm/bifrost/mali_csffw.bin"
+          echo "=== mali_csffw.bin ==="
+          ls -lh cache/sources/linux-kernel-worktree/panthor-fallback/drivers/gpu/arm/bifrost/mali_csffw.bin
+          file cache/sources/linux-kernel-worktree/panthor-fallback/drivers/gpu/arm/bifrost/mali_csffw.bin || true
+
+      - name: Symlink extension into armbian-build
+        # The extension is THIS repo (checked out at extension_ref above).
+        # Symlink it into armbian-build/extensions/ so armbian's
+        # enable_extension finds it. No clone needed.
+        run: |
+          mkdir -p armbian-build/extensions
+          ln -sf "$GITHUB_WORKSPACE" armbian-build/extensions/seeed_armbian_extension
+          echo "=== extension symlink ==="
+          ls -la armbian-build/extensions/seeed_armbian_extension
+          # Verify key files exist via symlink
+          ls -la armbian-build/extensions/seeed_armbian_extension/seeed_armbian_extension.sh
+          ls -la armbian-build/extensions/seeed_armbian_extension/scripts/build.sh
+
+      - name: Patch extension to skip armbian-imager + copy DTBs
+        # These patches apply to THIS repo's files (the extension itself).
+        # No cache/sources/ prefix — we're in the extension root.
+        run: |
+          cat >> seeed_armbian_extension.sh <<'EOF'
+
+          # Patch out armbian-imager from armbian-configng's desktop common
+          # package list. It is not published on apt.armbian.com (only on
+          # GitHub release), so installing it on any release will fail.
+          function post_post_debootstrap_tweaks__seeed_remove_armbian_imager() {
+              local common_yaml="${SRC}/cache/sources/armbian-configng/tools/modules/desktops/yaml/common.yaml"
+              if [[ ! -f "${common_yaml}" ]]; then
+                  display_alert "seeed_armbian_extension" "common.yaml not found, skipping armbian-imager patch" "wrn"
+                  return 0
+              fi
+
+              if grep -qE '^[[:space:]]*- armbian-imager' "${common_yaml}"; then
+                  sed -i '/^[[:space:]]*- armbian-imager/s/^/# /' "${common_yaml}"
+                  display_alert "seeed_armbian_extension" "Patched common.yaml: removed armbian-imager" "info"
+              else
+                  display_alert "seeed_armbian_extension" "armbian-imager already absent from common.yaml" "debug"
+              fi
+          }
+          EOF
+          echo "Patched seeed_armbian_extension.sh with armbian-imager removal hook"
+
+          cat >> seeed_armbian_extension.sh <<'EOF'
+
+          function pre_umount_final_image__000_copy_dtb_to_source() {
+              local kernel_src="${SRC}/cache/sources/${LINUXSOURCEDIR}"
+              local dtb_dir="${kernel_src}/arch/arm64/boot/dts/rockchip"
+              mkdir -p "${dtb_dir}" 2>/dev/null || true
+              local copied=0
+              for rdir in "${MOUNT}/boot/dtb-"*/rockchip; do
+                  [[ -d "${rdir}" ]] || continue
+                  cp -n "${rdir}"/*.dtb "${dtb_dir}/" 2>/dev/null && copied=$((copied+1))
+              done
+              display_alert "seeed_armbian_extension" "Copied ${copied} DTB groups from rootfs to kernel source tree" "info"
+          }
+          EOF
+          echo "Patched seeed_armbian_extension.sh with DTB copy hook"
+
+      - name: Pre-create rkbin symlink for A/B OTA
+        run: |
+          cd armbian-build
+          mkdir -p cache/sources/u-boot-worktree/u-boot-rockchip64
+          ln -sfn ../../rkbin-tools cache/sources/u-boot-worktree/u-boot-rockchip64/rkbin
+          echo "=== rkbin symlink ==="
+          ls -la cache/sources/u-boot-worktree/u-boot-rockchip64/
+
+      - name: Place FIT signing keys for secure profiles
+        if: ${{ matrix.security == 'secure-boot' || matrix.security == 'secure-rootfs' }}
+        run: |
+          set -euo pipefail
+          cd armbian-build
+          mkdir -p cache/sources/fit-keys
+          printf '%s\n' "${PRIVATE_KEY_PEM}" > cache/sources/fit-keys/private_key.pem
+          printf '%s\n' "${DEV_CRT}" > cache/sources/fit-keys/dev.crt
+          chmod 0600 cache/sources/fit-keys/private_key.pem
+          chmod 0644 cache/sources/fit-keys/dev.crt
+          echo "=== FIT keys placed at cache/sources/fit-keys ==="
+          ls -la cache/sources/fit-keys/
+          echo "=== Key sanity check ==="
+          openssl rsa -in cache/sources/fit-keys/private_key.pem -check -noout 2>&1 || true
+          openssl x509 -in cache/sources/fit-keys/dev.crt -noout -subject 2>&1 || true
+        env:
+          PRIVATE_KEY_PEM: ${{ secrets.PRIVATE_KEY_PEM }}
+          DEV_CRT: ${{ secrets.DEV_CRT }}
+
+      - name: Symlink build.sh into armbian-build root
+        run: |
+          ln -sf "$GITHUB_WORKSPACE/scripts/build.sh" armbian-build/seeed-build.sh
+          ls -la armbian-build/seeed-build.sh
+
+      - name: Restore docker image cache
+        uses: actions/cache@v4
+        id: docker_cache
+        with:
+          path: /tmp/armbian-docker-image.tar.zst
+          key: docker-armbian-ubuntu-noble-latest-v1
+        continue-on-error: true
+
+      - name: Load cached docker image
+        if: steps.docker_cache.outputs.cache-hit == 'true'
+        run: |
+          if [ -f /tmp/armbian-docker-image.tar.zst ]; then
+            echo "Loading cached docker image..."
+            zstd -d -T0 /tmp/armbian-docker-image.tar.zst -o /tmp/armbian-docker-image.tar
+            docker load -i /tmp/armbian-docker-image.tar
+            rm -f /tmp/armbian-docker-image.tar
+            docker images | grep armbian
+          fi
+
+      - name: Pull docker image (if not cached)
+        if: steps.docker_cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.DOCKER_IMAGE }}
+          # Save for next run. zstd is faster and smaller than gzip for this workload.
+          docker save ${{ env.DOCKER_IMAGE }} | zstd -19 -T0 -o /tmp/armbian-docker-image.tar.zst
+          ls -lh /tmp/armbian-docker-image.tar.zst
+
+      - name: Restore armbian deb packages cache
+        if: ${{ !inputs.clear_kernel_cache }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            armbian-build/output/debs
+            armbian-build/output/packages-hashed
+          key: debs-arm64-${{ matrix.board }}-vendor-${{ hashFiles('armbian-build/config/sources/families/seeed-rk*.conf', 'armbian-build/config/sources/families/rk35xx.conf', 'armbian-build/config/sources/vendors/seeed-studio/*.inc') }}
+          restore-keys: |
+            debs-arm64-${{ matrix.board }}-vendor-
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: armbian-build/cache/ccache
+          key: ccache-arm64-${{ matrix.board }}-vendor-${{ github.sha }}
+          restore-keys: |
+            ccache-arm64-${{ matrix.board }}-vendor-
+            ccache-arm64-${{ matrix.board }}-
+
+      # rootfs cache intentionally disabled. Each rootfs cache entry is
+      # ~2 GiB; with multiple release+tier combos the total exceeds
+      # GitHub's 10 GiB repo limit, evicting the kernel deb cache and
+      # forcing a 30+ minute kernel rebuild every run. Rootfs from
+      # scratch is only ~10 minutes — sacrificing it frees ~4-6 GiB
+      # for the kernel deb cache (saves ~30 min) and ccache.
+      # To re-enable: uncomment the step below and remove old rootfs
+      # caches from https://github.com/<org>/<repo>/actions/caches
+      #
+      # - name: Restore rootfs cache
+      #   if: ${{ !inputs.clear_rootfs_cache }}
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: cache/rootfs
+      #     key: rootfs-${{ matrix.release }}-${{ matrix.tier }}-${{ inputs.desktop }}-${{ hashFiles('config/sources/**/*.inc') }}
+      #     restore-keys: |
+      #       rootfs-${{ matrix.release }}-${{ matrix.tier }}-${{ inputs.desktop }}-
+      #       rootfs-${{ matrix.release }}-
+
+      - name: Build
+        working-directory: armbian-build
+        run: |
+          set -euo pipefail
+          MODE_ARGS=""
+          case "${{ inputs.build_mode }}" in
+            kernel)  MODE_ARGS="--kernel" ;;
+            uboot)   MODE_ARGS="--uboot" ;;
+            minimal) MODE_ARGS="--minimal" ;;
+            full)    MODE_ARGS="" ;;
+          esac
+
+          TIER_ARGS=""
+          if [[ "${{ matrix.tier }}" == "cli" ]]; then
+              TIER_ARGS="--minimal"
+          else
+              TIER_ARGS="-d ${{ inputs.desktop }} -t ${{ matrix.tier }}"
+          fi
+
+          export CRYPTROOT_PASSPHRASE="${{ secrets.CRYPTROOT_PASSPHRASE || 'armbian-ci-test' }}"
+
+          if [[ -d cache/sources/fit-keys ]]; then
+              export UBOOT_FIT_KEYS_BACKUP_DIR="/armbian/cache/sources/fit-keys"
+          fi
+              export UBOOT_FIT_KEYS_BACKUP_DIR="/armbian/cache/sources/fit-keys"
+          fi
+
+          # shellcheck disable=SC2086
+          ./seeed-build.sh \
+            $MODE_ARGS \
+            ${{ matrix.profile }} \
+            ${{ matrix.security }} \
+            -b "${{ matrix.board }}" \
+            -R "${{ matrix.release }}" \
+            $TIER_ARGS \
+            ${{ inputs.clear_kernel_cache && '-c' || '' }} \
+            ${{ inputs.clear_rootfs_cache && '-r' || '' }}
+
+      - name: Compress .img to .img.xz (GitHub Release caps single asset at 2 GiB)
+        if: always()
+        working-directory: armbian-build
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for img in output/images/*.img; do
+            base="$(basename "$img" .img).img.xz"
+            echo "Compressing $img -> output/images/$base"
+            xz -T0 -6 -v < "$img" > "output/images/$base"
+            # Generate sha256 of the compressed file (matches what
+            # release ships); keep armbian's own .img.sha too so
+            # users can verify after `xz -d` against the unpacked img.
+            ( cd output/images && sha256sum "$base" > "$base.sha256" )
+            echo "Removing uncompressed $img"
+            rm -f "$img"
+          done
+          # Split any .img.xz that still exceeds GitHub Release's 2 GiB
+          # asset cap after compression (big desktop images, recovery
+          # images with bundled payloads). .sha256 was computed on the
+          # WHOLE .xz above, so users verify after reassembling with
+          # `cat *.part-* > image.img.xz`. 1.9 GiB chunks leave headroom.
+          for xz_file in output/images/*.img.xz; do
+            size=$(stat -c%s "$xz_file")
+            if [ "$size" -gt 2040000000 ]; then
+              echo "Splitting $xz_file ($(( size / 1024 / 1024 )) MiB) into 1.9 GiB chunks"
+              # -d = numeric suffixes, -a 3 = 3 digits (.part-000, .part-001, ...)
+              split -b 1900M -d -a 3 "$xz_file" "${xz_file}.part-"
+              rm "$xz_file"
+            fi
+          done
+          echo "=== output/images/ contents ==="
+          ls -lh output/images/
+
+      - name: Add OTA + security suffix to image filenames
+        working-directory: armbian-build
+        run: |
+          suffix=""
+          case "${{ matrix.profile }}" in
+            ab)       suffix="${suffix}_ab" ;;
+            recovery) suffix="${suffix}_rec" ;;
+          esac
+          case "${{ matrix.security }}" in
+            secure-rootfs) suffix="${suffix}_securerootfs" ;;
+            secure-boot)   suffix="${suffix}_secureboot" ;;
+          esac
+          [[ -z "$suffix" ]] && { echo "No suffix needed (plain, no security)"; exit 0; }
+          echo "Suffix: $suffix"
+
+          cd output/images
+          for f in *; do
+            [[ -f "$f" ]] || continue
+            if [[ "$f" == *.img* ]]; then
+              newname="${f/.img/${suffix}.img}"
+            elif [[ "$f" == *_OTA.* ]]; then
+              newname="${f/_OTA./${suffix}_OTA.}"
+            else
+              continue
+            fi
+            [[ "$newname" != "$f" ]] && mv -- "$f" "$newname"
+          done
+
+          for shafile in *${suffix}*.img.xz.sha256; do
+            [[ -f "$shafile" ]] || continue
+            xzfile="${shafile%.sha256}"
+            if [[ -f "$xzfile" ]]; then
+              sha256sum "$xzfile" > "$shafile"
+            else
+              sed -i "s|  .*$|  ${xzfile}|" "$shafile"
+            fi
+          done
+
+          echo "=== renamed files ==="
+          ls -lh
+
+      - name: Upload output/images/ as-is
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Armbian-img-${{ steps.lbl.outputs.short_board }}-${{ matrix.release }}-${{ matrix.tier }}-${{ steps.lbl.outputs.ota_label }}-${{ steps.lbl.outputs.sec_label }}-${{ github.run_id }}
+          path: armbian-build/output/images/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Print ccache stats
+        if: always()
+        run: |
+          command -v ccache >/dev/null 2>&1 || { echo "ccache not installed on host; install with: sudo apt-get install -y ccache"; exit 0; }
+          ccache -s 2>/dev/null || true
+          du -sh armbian-build/cache/ccache 2>/dev/null || true
+
+  release:
+    needs: [plan, build]
+    # Run only when publish_release is checked, the dispatch wasn't
+    # cancelled, and build produced at least some artifacts (result is
+    # 'success' or 'failure' — not 'skipped' or 'cancelled'). With
+    # fail-fast: false, even if half the matrix fails, the surviving
+    # artifacts should still ship.
+    if: ${{ inputs.publish_release && !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.plan.outputs.boards) }}
+
+    steps:
+      - name: Resolve short board name and tag
+        id: tag
+        run: |
+          short=$(echo "${{ matrix.board }}" | sed -E 's/recomputer-//; s/-devkit//')
+          echo "short_board=$short" >> "$GITHUB_OUTPUT"
+          suffix="${{ inputs.release_tag_suffix }}"
+          if [ -n "$suffix" ]; then
+            tag="v${suffix}-${short}"
+          else
+            d=$(date -u +%Y%m%d-%H%M)
+            tag="v${d}-${short}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download all image artifacts for this board
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Armbian-img-${{ steps.tag.outputs.short_board }}-*
+          # merge-multiple=false keeps each matrix entry in its own
+          # subdirectory (named after the artifact). Armbian emits
+          # identical base filenames across OTA modes (e.g. both
+          # recovery and ab produce Armbian_..._trixie_..._gnome_desktop.img),
+          # so flattening would silently overwrite. Each subdir keeps
+          # its files isolated; release uploads them all (basename
+          # uniqueness is enforced by the ota_label in the artifact
+          # name propagating as the subdir name when duplicates appear).
+          merge-multiple: false
+          path: release-assets
+
+      - name: Flatten release assets (preserve duplicates via subdir prefix)
+        run: |
+          set -euo pipefail
+          # Defensive: download-artifact may not create the path dir if
+          # no artifacts matched (e.g. every build for this board failed).
+          mkdir -p release-assets release-flat
+          find release-assets -mindepth 2 -type f | while IFS= read -r f; do
+            base=$(basename "$f")
+            parent=$(basename "$(dirname "$f")")
+            target="release-flat/$base"
+            if [ -e "$target" ]; then
+              target="release-flat/${parent}__${base}"
+            fi
+            mv "$f" "$target"
+          done
+          rm -rf release-assets
+          mv release-flat release-assets
+          echo "=== Final release assets ==="
+          if ! ls -lh release-assets/ | tail -n +2; then
+            echo "No assets — every matrix entry for this board failed; skipping release."
+            exit 1
+          fi
+
+      - name: Restore u-boot deb from cache
+        uses: actions/cache@v4
+        with:
+          path: uboot-debs
+          key: uboot-restore-${{ matrix.board }}-${{ github.run_id }}
+          restore-keys: |
+            debs-arm64-${{ matrix.board }}-vendor-
+
+      - name: Stage u-boot deb into release assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Copy all u-boot debs found (regular + secure variants if both exist)
+          for deb in uboot-debs/linux-u-boot-*.deb; do
+              cp -v "$deb" release-assets/
+          done
+          if ! ls uboot-debs/linux-u-boot-*.deb >/dev/null 2>&1; then
+              echo "No u-boot debs found in cache, continuing without them"
+          fi
+
+      - name: List release assets
+        run: find release-assets/ -type f -printf '%f\n' | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body: |
+            ## Armbian images for ${{ matrix.board }}
+
+            Built from CI run ${{ github.run_id }}.
+
+            ### Assets
+            - `Armbian_*.img.xz[.part-NNN]` — xz-compressed image. If the
+              compressed file exceeded GitHub's 2 GiB asset cap, it is
+              shipped as `.part-000`, `.part-001`, ... chunks.
+            - `*.img.xz.sha256` — sha256 of the WHOLE `.img.xz` (computed
+              before splitting). Verify after reassembling.
+            - `linux-u-boot-*.deb` — U-Boot package for SPI flash
+              key-burning. Stable across builds; only changes when signing
+              keys rotate.
+
+            ### Verify and flash
+
+            ```bash
+            # If chunked, reassemble first:
+            cat Armbian_*.img.xz.part-* > Armbian_image.img.xz
+
+            # Verify (works for both chunked and unchunked):
+            sha256sum -c *.img.xz.sha256
+
+            # Decompress and flash:
+            xz -d Armbian_image.img.xz
+            sudo dd if=Armbian_image.img of=/dev/sdX bs=4M conv=fsync
+            ```
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: false
