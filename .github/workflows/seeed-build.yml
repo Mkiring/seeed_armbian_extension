@@ -380,16 +380,20 @@ jobs:
 
       - name: Symlink extension into armbian-build
         # The extension is THIS repo (checked out at extension_ref above).
-        # Symlink it into armbian-build/extensions/ so armbian's
-        # enable_extension finds it. No clone needed.
+        # Copy it into the path the board config expects:
+        #   cache/sources/seeed_armbian_extension
+        # The board config then symlinks extensions/seeed_armbian_extension
+        # → cache/sources/seeed_armbian_extension and calls enable_extension.
+        # We must COPY (not symlink) because Docker only mounts the
+        # armbian-build/ subdirectory; a symlink to $GITHUB_WORKSPACE
+        # would be broken inside the container.
         run: |
-          mkdir -p armbian-build/extensions
-          ln -sf "$GITHUB_WORKSPACE" armbian-build/extensions/seeed_armbian_extension
-          echo "=== extension symlink ==="
-          ls -la armbian-build/extensions/seeed_armbian_extension
-          # Verify key files exist via symlink
-          ls -la armbian-build/extensions/seeed_armbian_extension/seeed_armbian_extension.sh
-          ls -la armbian-build/extensions/seeed_armbian_extension/scripts/build.sh
+          mkdir -p armbian-build/cache/sources
+          rsync -a --exclude='.git' --exclude='.github' \
+              "$GITHUB_WORKSPACE/" armbian-build/cache/sources/seeed_armbian_extension/
+          echo "=== extension copied ==="
+          ls -la armbian-build/cache/sources/seeed_armbian_extension/seeed_armbian_extension.sh
+          ls -la armbian-build/cache/sources/seeed_armbian_extension/scripts/build.sh
 
       - name: Patch extension to skip armbian-imager + copy DTBs
         # These patches apply to THIS repo's files (the extension itself).
