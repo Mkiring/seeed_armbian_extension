@@ -1,3 +1,77 @@
+SEEED_EXTENSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+function seeed_apply_uboot_patch_bundle() {
+	local patch_dir="${SEEED_EXTENSION_ROOT}/patches/u-boot"
+	local userpatch_root="${USERPATCHES_PATH}/u-boot/legacy/u-boot-radxa-rk35xx"
+	local patch_file source_defconfig target_defconfig
+	local -a patch_files=(
+		"0001-u-boot-add-FIT-environment-partition-fallback.patch"
+		"0002-u-boot-scan-OS-boot-devices-after-SPI-boot.patch"
+		"0003-u-boot-normalize-recomputer-rk35xx-defconfigs.patch"
+	)
+	local -a defconfigs=(
+		"recomputer-rk3576-devkit_defconfig"
+		"recomputer-rk3588-devkit_defconfig"
+	)
+
+	case "${BOARD}" in
+		recomputer-rk3576-devkit|recomputer-rk3588-devkit)
+			;;
+		*)
+			return 0
+			;;
+	esac
+
+	for patch_file in "${patch_files[@]}"; do
+		[[ -f "${patch_dir}/${patch_file}" ]] ||
+			exit_with_error "Seeed U-Boot patch bundle is incomplete" "${patch_dir}/${patch_file}"
+	done
+	mkdir -p "${userpatch_root}/board_recomputer-rk3576-devkit" \
+		"${userpatch_root}/board_recomputer-rk3588-devkit" \
+		"${userpatch_root}/defconfig" ||
+		exit_with_error "Failed to create Seeed U-Boot userpatch directories" "${userpatch_root}"
+
+	# 0003 is a modification patch, so seed the userpatch overlay with the
+	# core defconfigs before applying it. Userpatches then takes precedence over
+	# the core overlay during Armbian's normal U-Boot patching phase.
+	for source_defconfig in "${defconfigs[@]}"; do
+		target_defconfig="${userpatch_root}/defconfig/${source_defconfig}"
+		[[ -e "${target_defconfig}" ]] && continue
+
+		[[ -f "${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/${source_defconfig}" ]] ||
+			exit_with_error "Base U-Boot defconfig is missing" "${source_defconfig}"
+		install -D -m 0644 \
+			"${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/${source_defconfig}" \
+			"${target_defconfig}" ||
+			exit_with_error "Failed to stage Seeed U-Boot defconfig" "${target_defconfig}"
+	done
+
+	for patch_file in "${patch_files[@]}"; do
+		patch_file="${patch_dir}/${patch_file}"
+		if (
+			cd "${USERPATCHES_PATH}" &&
+			git apply -p2 --reverse --check "${patch_file}"
+		) 2>/dev/null; then
+			display_alert "Seeed U-Boot patches" "Already staged: ${patch_file##*/}" "debug"
+		elif (
+			cd "${USERPATCHES_PATH}" &&
+			git apply -p2 --check "${patch_file}"
+		); then
+			(
+				cd "${USERPATCHES_PATH}" &&
+				# The outer MBOX adds inner unified-diff patch files. Their
+				# context marker followed by a tab is valid payload, but appears
+				# as whitespace to the outer git-apply invocation.
+				git apply --whitespace=nowarn -p2 "${patch_file}"
+			) ||
+				exit_with_error "Failed to stage Seeed U-Boot patch" "${patch_file}"
+			display_alert "Seeed U-Boot patches" "Staged: ${patch_file##*/}" "info"
+		else
+			exit_with_error "Seeed U-Boot patch conflicts with userpatches" "${patch_file}"
+		fi
+	done
+}
+
 if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
 	exit_with_error "RK_SECURE_UBOOT_ENABLE and RK_OPTEE_BOOT_ENABLE are mutually exclusive" "use secure-boot or secure-rootfs, not both"
 fi
@@ -27,6 +101,8 @@ if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes"
 fi
 
 if [[ "${OTA_ENABLE}" == "yes" ]]; then
+	seeed_apply_uboot_patch_bundle
+
 	display_alert "OTA_ENABLE" "Enable OTA extension ota-support" "info"
 	enable_extension "seeed_armbian_extension/armbian-ota/ota-support"
 fi
