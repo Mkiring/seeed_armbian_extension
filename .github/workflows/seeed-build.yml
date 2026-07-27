@@ -270,16 +270,19 @@ jobs:
       - name: Switch to extension_ref branch
         # The workflow file lives on seeed-build, but the actual extension
         # code to compile may be on a different branch (fix/secure_boot, etc.).
-        # Fetch and checkout the requested ref so the workspace has the
-        # right hooks/scripts for the build.
+        # Force-clean and force-checkout to avoid conflicts between the
+        # seeed-build orphan branch and the target branch.
         run: |
           set -euo pipefail
           REF="${{ inputs.extension_ref }}"
           echo "Switching extension to: ${REF}"
           git fetch origin "${REF}" --depth 1
-          git checkout FETCH_HEAD
+          git clean -xfd
+          git checkout -f FETCH_HEAD
           echo "=== Current HEAD ==="
           git log --oneline -1
+          echo "=== Verify patch file exists ==="
+          ls -la .github/patches/ 2>/dev/null || echo "No .github/patches/ directory"
 
       - name: Free up disk space
         run: |
