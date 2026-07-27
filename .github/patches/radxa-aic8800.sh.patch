@@ -1,5 +1,5 @@
 diff --git a/extensions/radxa-aic8800.sh b/extensions/radxa-aic8800.sh
-index 324ae87..f6137bc 100644
+index 324ae87..7f58f5f 100644
 --- a/extensions/radxa-aic8800.sh
 +++ b/extensions/radxa-aic8800.sh
 @@ -8,6 +8,31 @@ function extension_finish_config__install_kernel_headers_for_aic8800_dkms() {
@@ -57,7 +57,7 @@ index 324ae87..f6137bc 100644
 +		display_alert "AIC8800 version pinned" "${latest_version}" "info"
 +	else
 +		api_url="https://ghm.078465.xyz/https://api.github.com/repos/radxa-pkg/aic8800/releases/latest"
-+		latest_version=$(curl -s "${api_url}" | jq -r '.tag_name')
++		latest_version=$(curl -sL --max-time 30 "${api_url}" 2>/dev/null | jq -r '.tag_name' 2>/dev/null || true)
 +		if [[ -z "${latest_version}" || "${latest_version}" == "null" ]]; then
 +			if [[ -f "${aic8800_version_cache_file}" ]]; then
 +				latest_version=$(grep -E '^VERSION=' "${aic8800_version_cache_file}" | cut -d= -f2- | tail -1)
