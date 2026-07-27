@@ -336,6 +336,17 @@ jobs:
           path: armbian-build
           fetch-depth: 1
 
+      - name: Patch aic8800 extension for cache + offline fallback
+        # Seeed-Studio/armbian-build has the original radxa-aic8800.sh
+        # which calls the GitHub API directly and has no cache fallback.
+        # Apply our patch that adds version caching, deb caching, mirror
+        # support, and graceful degradation when the API is unreachable.
+        run: |
+          cd armbian-build
+          git apply "$GITHUB_WORKSPACE/.github/patches/radxa-aic8800.sh.patch"
+          echo "=== aic8800 patch applied ==="
+          grep -c 'aic8800_download_file_with_cache' extensions/radxa-aic8800.sh
+
       - name: Patch board config to skip extension fetch
         # The board config hardcodes fetch_from_repo ... branch:main,
         # which overwrites our extension with upstream main during build.
@@ -511,6 +522,12 @@ jobs:
           restore-keys: |
             ccache-arm64-${{ matrix.board }}-vendor-
             ccache-arm64-${{ matrix.board }}-
+
+      - name: Cache AIC8800 WiFi driver packages
+        uses: actions/cache@v4
+        with:
+          path: armbian-build/cache/radxa-aic8800-debs
+          key: aic8800-debs-${{ matrix.board }}
 
       # rootfs cache intentionally disabled. Each rootfs cache entry is
       # ~2 GiB; with multiple release+tier combos the total exceeds
