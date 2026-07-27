@@ -28,6 +28,17 @@ log() {
     echo "OTA_DEBG $*" > /dev/kmsg 2>/dev/null || true
 }
 
+log_tail() {
+    prefix="$1"
+    file="$2"
+    lines="${3:-40}"
+
+    [ -s "${file}" ] || return 0
+    tail -n "${lines}" "${file}" 2>/dev/null | while IFS= read -r l; do
+        log "${prefix}: ${l}"
+    done
+}
+
 # ===== heartbeat for long-running operations =====
 HEARTBEAT_PID=""
 
@@ -64,39 +75,41 @@ extract_tar_with_fallback() {
     log "${label}: run tar --xattrs --acls --numeric-owner -xpf ${archive} -C ${target}"
     if tar --xattrs --acls --numeric-owner -xpf "${archive}" -C "${target}" 2>"${err_file}"; then
         log "${label}: metadata extract succeeded"
-        if [ -s "${err_file}" ]; then
-            log "${label}: tar metadata mode produced stderr, showing last lines"
-            tail -n 20 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "${label}: ${l}"; done
-        fi
+        log_tail "${label}" "${err_file}" 20
         rm -f "${err_file}" 2>/dev/null || true
         return 0
     fi
     rc=$?
 
     log "WARN: ${label} metadata extract failed (rc=${rc}), retrying with plain tar -xzf"
-    if [ -s "${err_file}" ]; then
-        tail -n 40 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "${label} metadata stderr: ${l}"; done
-    fi
+    log_tail "${label} metadata stderr" "${err_file}" 40
 
     rm -f "${err_file}" 2>/dev/null || true
     log "${label}: run tar -xzf ${archive} -C ${target}"
     if tar -xzf "${archive}" -C "${target}" 2>"${err_file}"; then
         log "${label}: plain extract succeeded"
-        if [ -s "${err_file}" ]; then
-            log "${label}: plain tar mode produced stderr, showing last lines"
-            tail -n 20 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "${label}: ${l}"; done
-        fi
+        log_tail "${label}" "${err_file}" 20
         rm -f "${err_file}" 2>/dev/null || true
         return 0
     fi
     rc=$?
 
     log "ERROR: ${label} extract failed in both metadata and plain modes (plain rc=${rc})"
-    if [ -s "${err_file}" ]; then
-        tail -n 80 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "${label} stderr: ${l}"; done
-    fi
+    log_tail "${label} stderr" "${err_file}" 80
     rm -f "${err_file}" 2>/dev/null || true
     return 1
+}
+
+set_env_key() {
+    file="$1"
+    key="$2"
+    value="$3"
+
+    if grep -q "^${key}=" "${file}"; then
+        sed -i "s|^${key}=.*$|${key}=${value}|" "${file}"
+    else
+        printf '\n%s=%s\n' "${key}" "${value}" >> "${file}"
+    fi
 }
 
 # enable shell trace (goes into log/kmsg)
@@ -193,9 +206,7 @@ backup_preserved_files() {
     fi
     rc=$?
     log "preserve: metadata backup failed rc=${rc}, retry plain tar mode"
-    if [ -s "${err_file}" ]; then
-        tail -n 40 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "preserve backup stderr: ${l}"; done
-    fi
+    log_tail "preserve backup stderr" "${err_file}" 40
 
     rm -f "${err_file}" 2>/dev/null || true
     if tar -cpf "${PRESERVE_TAR}" -C "${ROOT_MNT}" -T "${PRESERVE_TMP_LIST}" 2>"${err_file}"; then
@@ -206,9 +217,7 @@ backup_preserved_files() {
 
     rc=$?
     log "WARN: preserve backup failed rc=${rc}, continue without preserve"
-    if [ -s "${err_file}" ]; then
-        tail -n 60 "${err_file}" 2>/dev/null | while IFS= read -r l; do log "preserve backup stderr: ${l}"; done
-    fi
+    log_tail "preserve backup stderr" "${err_file}" 60
     rm -f "${PRESERVE_TAR}" "${PRESERVE_TMP_LIST}" "${err_file}" 2>/dev/null || true
     return 0
 }
@@ -233,54 +242,20 @@ restore_preserved_files() {
     return 0
 }
 
-# ===== helper: get UUID by LABEL using blkid =====
-get_uuid_by_label() {
-    label="$1"
-    blkid 2>/dev/null | awk -v lbl="$label" '
-        /LABEL="/ {
-            l = ""; u = ""
-            for (i = 1; i <= NF; i++) {
-                if ($i ~ /^LABEL="/) {
-                    x = $i
-                    gsub(/LABEL="/, "", x)
-                    gsub(/"$/, "", x)
-                    l = x
-                }
-                if ($i ~ /^UUID="/) {
-                    y = $i
-                    gsub(/UUID="/, "", y)
-                    gsub(/"$/, "", y)
-                    u = y
-                }
-            }
-            if (l == lbl && u != "") {
-                print u
-                exit
-            }
-        }'
-}
-
 # ===== helper: get DEV + UUID by LABEL (e.g. /dev/mmcblk0p5 + UUID) =====
 get_dev_and_uuid_by_label() {
     label="$1"
-    blkid 2>/dev/null | awk -v lbl="$label" '
-        $0 ~ ("LABEL=\"" lbl "\"") {
-            dev = $1
-            sub(":", "", dev)  # strip trailing colon
-            uuid = ""
-            for (i = 1; i <= NF; i++) {
-                if ($i ~ /^UUID="/) {
-                    uuid = $i
-                    gsub(/UUID="/, "", uuid)
-                    gsub(/"$/, "", uuid)
-                    break
-                }
-            }
-            if (uuid != "") {
-                print dev, uuid
-                exit
-            }
-        }'
+    dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | head -n1)"
+    [ -n "${dev}" ] || return 1
+    uuid="$(blkid -s UUID -o value "${dev}" 2>/dev/null | head -n1)"
+    [ -n "${uuid}" ] || return 1
+    printf '%s %s\n' "${dev}" "${uuid}"
+}
+
+get_uuid_by_label() {
+    set -- $(get_dev_and_uuid_by_label "$1" 2>/dev/null) || return 1
+    [ -n "$2" ] || return 1
+    printf '%s\n' "$2"
 }
 
 # ===== helper: get LUKS UUID for encrypted root backing device =====
@@ -293,28 +268,27 @@ ROOT_UUID=""
 BOOT_UUID=""
 HAS_BOOT_PART=0
 AUTO_DECRYPT_MODE=0
-SECURITY_PART=""
-
-SECURITY_PART="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1 || true)"
-if [ -n "${SECURITY_PART}" ]; then
-    log "security partition found at ${SECURITY_PART}, checking mapper /dev/mapper/armbian-root"
+# Detect auto-decrypt by LUKS container + mapper presence (NOT by security partition).
+# Covers secure-boot (OP-TEE unlock, no security part) and AB+non-secure-boot
+# (security-part raw key) alike. Plaintext root has no LUKS container -> standard mode, no wait.
+if blkid -t TYPE=crypto_LUKS >/dev/null 2>&1; then
+    log "crypto_LUKS container detected, waiting for /dev/mapper/armbian-root"
     timeout=30
     elapsed=0
     while [ ! -e /dev/mapper/armbian-root ] && [ "${elapsed}" -lt "${timeout}" ]; do
         sleep 1
         elapsed=$((elapsed + 1))
     done
-
     if [ -e /dev/mapper/armbian-root ]; then
         AUTO_DECRYPT_MODE=1
         ROOT_DEV="/dev/mapper/armbian-root"
         ROOT_UUID="$(get_luks_uuid_for_root || true)"
-        log "auto-decrypt mode detected: ROOT_DEV=${ROOT_DEV}, LUKS_UUID=${ROOT_UUID:-<empty>}"
+        log "auto-decrypt mode: ROOT_DEV=${ROOT_DEV}, LUKS_UUID=${ROOT_UUID:-<empty>}"
     else
-        log "security partition exists but mapper /dev/mapper/armbian-root is not ready, fallback to standard mode"
+        log "WARN: LUKS container present but mapper not ready after ${timeout}s, fallback to standard mode"
     fi
 else
-    log "security partition not found, using standard recovery OTA mode"
+    log "no crypto_LUKS container, using standard recovery OTA mode"
 fi
 
 boot_info="$(get_dev_and_uuid_by_label "armbi_boot" || true)"
@@ -376,7 +350,7 @@ fi
 backup_preserved_files
 
 # ===== 2) clean rootfs (except ota_work and boot) =====
-log "cleaning ${ROOT_MNT} (except ota_work ota_work and boot)..."
+log "cleaning ${ROOT_MNT} (except ota_work and boot)..."
 start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
 (
     cd "${ROOT_MNT}" || exit 1
@@ -437,9 +411,7 @@ done
 
 # ===== 4) if we have separate boot partition + boot.tar.gz, handle boot OTA =====
 DO_BOOT_OTA=0
-if [ "$HAS_BOOT_PART" -eq 1 ] && [ "$HAS_BOOT_TAR" -eq 1 ]; then
-    DO_BOOT_OTA=1
-fi
+[ "$HAS_BOOT_PART" -eq 1 ] && [ "$HAS_BOOT_TAR" -eq 1 ] && DO_BOOT_OTA=1
 
 if [ "$DO_BOOT_OTA" -eq 1 ]; then
     log "boot OTA enabled (separate boot partition + boot.tar.gz present)"
@@ -456,26 +428,7 @@ else
 fi
 
 if [ "$DO_BOOT_OTA" -eq 1 ]; then
-    # ===== 5) clean boot partition =====
-    # log "cleaning ${BOOT_MNT} ..."
-    # start_heartbeat "cleaning boot at ${BOOT_MNT}"
-    # (
-    #     cd "${BOOT_MNT}" || exit 1
-    #     for f in * .[!.]* ..?*; do
-    #         case "$f" in
-    #             "."|"..")
-    #                 continue
-    #                 ;;
-    #         esac
-    #         rm -rf "$f"
-    #     done
-    # ) || {
-    #     stop_heartbeat
-    #     log "WARN: failed to clean ${BOOT_MNT}, continue anyway"
-    # }
-    # stop_heartbeat
-
-    # ===== 6) extract boot.tar.gz =====
+    # ===== 5) extract boot.tar.gz =====
     log "extracting ${BOOT_TAR} -> ${BOOT_MNT} ..."
     start_heartbeat "extracting boot.tar.gz to ${BOOT_MNT}"
     if ! extract_tar_with_fallback "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
@@ -514,19 +467,11 @@ if [ -f "${ARM_ENV}" ]; then
 
     if [ "${AUTO_DECRYPT_MODE}" -eq 1 ]; then
         log "  - set rootdev=/dev/mapper/armbian-root"
-        if grep -q '^rootdev=' "${ARM_ENV}"; then
-            sed -i "s|^rootdev=.*$|rootdev=/dev/mapper/armbian-root|" "${ARM_ENV}"
-        else
-            printf '\nrootdev=/dev/mapper/armbian-root\n' >> "${ARM_ENV}"
-        fi
+        set_env_key "${ARM_ENV}" rootdev /dev/mapper/armbian-root
     else
         if [ -n "${ROOT_UUID}" ]; then
             log "  - set rootdev=UUID=${ROOT_UUID}"
-            if grep -q '^rootdev=' "${ARM_ENV}"; then
-                sed -i "s|^rootdev=.*$|rootdev=UUID=${ROOT_UUID}|" "${ARM_ENV}"
-            else
-                printf '\nrootdev=UUID=%s\n' "${ROOT_UUID}" >> "${ARM_ENV}"
-            fi
+            set_env_key "${ARM_ENV}" rootdev "UUID=${ROOT_UUID}"
         else
             log "  - WARN: ROOT_UUID empty, skip rootdev change"
         fi
@@ -541,11 +486,7 @@ if [ -f "${ARM_ENV}" ]; then
     fi
 
     log "  - set verbosity=6"
-    if grep -q '^verbosity=' "${ARM_ENV}"; then
-        sed -i 's/^verbosity=.*/verbosity=6/' "${ARM_ENV}"
-    else
-        printf '\nverbosity=6\n' >> "${ARM_ENV}"
-    fi
+    set_env_key "${ARM_ENV}" verbosity 6
 else
     log "WARN: ${ARM_ENV} not found, cannot patch rootdev/verbosity"
 fi
