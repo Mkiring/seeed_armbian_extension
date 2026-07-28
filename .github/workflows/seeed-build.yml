@@ -624,16 +624,27 @@ jobs:
           retention-days: 14
           compression-level: 0
 
-      - name: Fix permissions for cache (Docker creates root-owned files)
-        # Docker runs as root; output/debs/ files are root-owned.
-        # actions/cache POST step runs as runner user and silently
-        # fails to read root-owned files → empty cache → u-boot
-        # missing from release.
+      - name: Debug deb cache state
         if: always()
         run: |
-          sudo chown -R "$(id -u):$(id -g)" armbian-build/output/ 2>/dev/null || true
-          echo "=== Fixed ownership of output/ ==="
-          ls -la armbian-build/output/debs/*.deb 2>/dev/null || echo "No debs found"
+          echo "=== Branch / ref ==="
+          echo "github.ref = ${{ github.ref }}"
+          echo "=== Docker check ==="
+          ls -la /.dockerenv 2>/dev/null && echo "INSIDE DOCKER" || echo "OUTSIDE DOCKER (host)"
+          echo "=== armbian-build/output/debs/ contents ==="
+          ls -laR armbian-build/output/debs/ 2>/dev/null || echo "Directory not found"
+          echo "=== Deb file details ==="
+          find armbian-build/output/debs/ -name '*.deb' -exec ls -la {} \; 2>/dev/null || echo "No .deb files"
+          echo "=== Deb file ownership ==="
+          find armbian-build/output/debs/ -name '*.deb' -exec stat --format='%U:%G %a %n' {} \; 2>/dev/null || true
+          echo "=== Cache key components ==="
+          echo "board = ${{ matrix.board }}"
+          echo "hashFiles = ${{ hashFiles('armbian-build/config/sources/families/seeed-rk*.conf', 'armbian-build/config/sources/families/rk35xx.conf', 'armbian-build/config/sources/vendors/seeed-studio/*.inc') }}"
+          echo "full key = debs-arm64-${{ matrix.board }}-vendor-${{ hashFiles('armbian-build/config/sources/families/seeed-rk*.conf', 'armbian-build/config/sources/families/rk35xx.conf', 'armbian-build/config/sources/vendors/seeed-studio/*.inc') }}"
+          echo "=== Fix ownership ==="
+          sudo chown -R "$(id -u):$(id -g)" armbian-build/output/ 2>/dev/null || echo "chown failed or nothing to fix"
+          echo "=== After chown ==="
+          find armbian-build/output/debs/ -name '*.deb' -exec stat --format='%U:%G %a %n' {} \; 2>/dev/null || true
 
       - name: Print ccache stats
         if: always()
