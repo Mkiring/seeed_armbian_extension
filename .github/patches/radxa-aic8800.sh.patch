@@ -1,5 +1,5 @@
 diff --git a/extensions/radxa-aic8800.sh b/extensions/radxa-aic8800.sh
-index 324ae8720..e5898b597 100644
+index 324ae87..7f58f5f 100644
 --- a/extensions/radxa-aic8800.sh
 +++ b/extensions/radxa-aic8800.sh
 @@ -8,6 +8,31 @@ function extension_finish_config__install_kernel_headers_for_aic8800_dkms() {
@@ -34,7 +34,7 @@ index 324ae8720..e5898b597 100644
  function post_install_kernel_debs__install_aic8800_dkms_package() {
  
  	if linux-version compare "${KERNEL_MAJOR_MINOR}" ge 7.2; then
-@@ -16,8 +41,51 @@ function post_install_kernel_debs__install_aic8800_dkms_package() {
+@@ -16,8 +41,63 @@ function post_install_kernel_debs__install_aic8800_dkms_package() {
  	fi
  	[[ "${INSTALL_HEADERS}" != "yes" ]] || [[ "${KERNEL_HAS_WORKING_HEADERS}" != "yes" ]] && return 0
  	[[ -z $AIC8800_TYPE ]] && return 0
@@ -46,6 +46,9 @@ index 324ae8720..e5898b597 100644
 +	declare aic8800_version_cache_file="${AIC8800_CACHE_DIR}/version.cache"
 +	mkdir -p "${AIC8800_CACHE_DIR}"
 +
++	# Fallback version when the GitHub API is unreachable and no cache exists.
++	declare AIC8800_FALLBACK_VERSION="${AIC8800_FALLBACK_VERSION:-5.0+git20260123.5f7be68d-7}"
++
 +	# Allow pinning the AIC8800 release version. This avoids the GitHub API
 +	# entirely and lets you mirror the .deb files on your own server.
 +	# Example: AIC8800_VERSION="v1.0.7" AIC8800_BASE_URL="https://your-mirror.example/aic8800"
@@ -53,8 +56,8 @@ index 324ae8720..e5898b597 100644
 +		latest_version="${AIC8800_VERSION}"
 +		display_alert "AIC8800 version pinned" "${latest_version}" "info"
 +	else
-+		api_url="https://ghm.078465.xyz/https://api.github.com/repos/radxa-pkg/aic8800/releases/latest"
-+		latest_version=$(curl -s "${api_url}" | jq -r '.tag_name')
++		api_url="https://api.github.com/repos/radxa-pkg/aic8800/releases/latest"
++		latest_version=$(curl -sL --max-time 30 "${api_url}" 2>/dev/null | jq -r '.tag_name' 2>/dev/null || true)
 +		if [[ -z "${latest_version}" || "${latest_version}" == "null" ]]; then
 +			if [[ -f "${aic8800_version_cache_file}" ]]; then
 +				latest_version=$(grep -E '^VERSION=' "${aic8800_version_cache_file}" | cut -d= -f2- | tail -1)
@@ -65,7 +68,8 @@ index 324ae8720..e5898b597 100644
 +				fi
 +				display_alert "GitHub API failed, using cached AIC8800 version" "${latest_version} (cached at ${cached_at:-unknown})" "warn"
 +			else
-+				exit_with_error "Failed to determine AIC8800 latest version from GitHub API and no cache exists. Pin it with AIC8800_VERSION or check network/proxy."
++				latest_version="${AIC8800_FALLBACK_VERSION}"
++				display_alert "GitHub API failed, no cache exists, using fallback AIC8800 version" "${latest_version}" "warn"
 +			fi
 +		else
 +			# Update cache with latest version and timestamp
@@ -83,12 +87,20 @@ index 324ae8720..e5898b597 100644
 +		ghproxy_header="https://ghfast.top/"
 +	fi
 +
++	# URL-encode the version for use in the default GitHub download URL.
++	declare aic8800_version_encoded
++	if [[ -n "${AIC8800_BASE_URL:-}" ]]; then
++		aic8800_version_encoded="${latest_version}"
++	else
++		aic8800_version_encoded=$(printf '%s' "${latest_version}" | jq -sRr @uri)
++	fi
++
 +	# Base URL for the release assets. Override to use a local mirror.
-+	declare base_url="${AIC8800_BASE_URL:-https://ghm.078465.xyz/https://github.com/radxa-pkg/aic8800/releases/download/${latest_version}}"
++	declare base_url="${AIC8800_BASE_URL:-https://github.com/radxa-pkg/aic8800/releases/download/${aic8800_version_encoded}}"
  
  	# Determine the DKMS package name based on the requested AIC8800_TYPE.
  	declare aic8800_dkms_file_name
-@@ -29,29 +97,10 @@ function post_install_kernel_debs__install_aic8800_dkms_package() {
+@@ -29,29 +109,10 @@ function post_install_kernel_debs__install_aic8800_dkms_package() {
  	esac
  	declare aic8800_firmware_file_name="aic8800-firmware_${latest_version}_all.deb"
  
