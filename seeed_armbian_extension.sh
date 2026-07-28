@@ -1,31 +1,37 @@
 SEEED_EXTENSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 function seeed_apply_armbian_build_patch_bundle() {
-	local patch_file="${SEEED_EXTENSION_ROOT}/patches/armbian-build/0001-rk3588-enable-panthor-gpu-stack.patch"
+	local patch_file
+	local -a patch_files=(
+		"0001-rk3588-enable-panthor-gpu-stack.patch"
+		"0002-rk35xx-install-fcs960k-bluez-with-common-packages.patch"
+	)
 
-	[[ -f "${patch_file}" ]] ||
-		exit_with_error "Seeed Armbian build patch is missing" "${patch_file}"
+	# Apply extensions before later build phases consume board, kernel, and
+	# common-source files. Reverse checking makes this safe when sourced again.
+	for patch_file in "${patch_files[@]}"; do
+		patch_file="${SEEED_EXTENSION_ROOT}/patches/armbian-build/${patch_file}"
+		[[ -f "${patch_file}" ]] ||
+			exit_with_error "Seeed Armbian build patch is missing" "${patch_file}"
 
-	# Stage the PR #14 source changes before later build phases consume the
-	# board, kernel, and common-source files. Reverse checking makes this safe
-	# when the extension is sourced more than once.
-	if (
-		cd "${SRC}" &&
-		git apply --reverse --check "${patch_file}"
-	) 2>/dev/null; then
-		display_alert "Seeed Armbian build patch" "Already applied: ${patch_file##*/}" "debug"
-	elif (
-		cd "${SRC}" &&
-		git apply --check "${patch_file}"
-	); then
-		(
+		if (
 			cd "${SRC}" &&
-			git apply "${patch_file}"
-		) || exit_with_error "Failed to apply Seeed Armbian build patch" "${patch_file}"
-		display_alert "Seeed Armbian build patch" "Applied: ${patch_file##*/}" "info"
-	else
-		exit_with_error "Seeed Armbian build patch conflicts with build sources" "${patch_file}"
-	fi
+			git apply --reverse --check "${patch_file}"
+		) 2>/dev/null; then
+			display_alert "Seeed Armbian build patch" "Already applied: ${patch_file##*/}" "debug"
+		elif (
+			cd "${SRC}" &&
+			git apply --check "${patch_file}"
+		); then
+			(
+				cd "${SRC}" &&
+				git apply "${patch_file}"
+			) || exit_with_error "Failed to apply Seeed Armbian build patch" "${patch_file}"
+			display_alert "Seeed Armbian build patch" "Applied: ${patch_file##*/}" "info"
+		else
+			exit_with_error "Seeed Armbian build patch conflicts with build sources" "${patch_file}"
+		fi
+	done
 }
 
 seeed_apply_armbian_build_patch_bundle
