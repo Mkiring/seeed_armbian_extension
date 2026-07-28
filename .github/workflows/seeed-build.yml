@@ -624,6 +624,17 @@ jobs:
           retention-days: 14
           compression-level: 0
 
+      - name: Fix permissions for cache (Docker creates root-owned files)
+        # Docker runs as root; output/debs/ files are root-owned.
+        # actions/cache POST step runs as runner user and silently
+        # fails to read root-owned files → empty cache → u-boot
+        # missing from release.
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" armbian-build/output/ 2>/dev/null || true
+          echo "=== Fixed ownership of output/ ==="
+          ls -la armbian-build/output/debs/*.deb 2>/dev/null || echo "No debs found"
+
       - name: Print ccache stats
         if: always()
         run: |
