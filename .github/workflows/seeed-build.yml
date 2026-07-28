@@ -641,9 +641,8 @@ jobs:
     if: ${{ inputs.publish_release && !cancelled() && needs.build.result != 'skipped' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 90
-    # No permissions: block — release targets Seeed-Studio/armbian-build,
-    # which the default GITHUB_TOKEN cannot write to. The PAT in
-    # ARMBIAN_BUILD_RELEASE_TOKEN is the real authorization.
+    # Temporarily target the current repo (e.g. your fork of
+    # seeed_armbian_extension) using the default GITHUB_TOKEN.
     strategy:
       fail-fast: false
       matrix:
@@ -732,9 +731,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          repository: Seeed-Studio/armbian-build
+          repository: ${{ github.repository }}
           target_commitish: main
-          token: ${{ secrets.ARMBIAN_BUILD_RELEASE_TOKEN }}
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
           body: |
