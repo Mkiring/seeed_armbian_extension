@@ -769,13 +769,17 @@ jobs:
       - name: Stage u-boot deb into release assets
         run: |
           set -euo pipefail
+          # actions/cache restores files at their ORIGINAL save path
+          # (armbian-build/output/debs/), not at the restore path (uboot-debs/).
+          # Use find to locate the debs wherever they actually landed.
           shopt -s nullglob
-          # Copy all u-boot debs found (regular + secure variants if both exist)
-          for deb in uboot-debs/linux-u-boot-*.deb; do
+          found=0
+          while IFS= read -r deb; do
               cp -v "$deb" release-assets/
-          done
-          if ! ls uboot-debs/linux-u-boot-*.deb >/dev/null 2>&1; then
-              echo "No u-boot debs found in cache, continuing without them"
+              found=1
+          done < <(find . -name 'linux-u-boot-*.deb' -type f 2>/dev/null)
+          if [[ "$found" -eq 0 ]]; then
+              echo "No u-boot debs found in restored cache, continuing without them"
           fi
 
       - name: List release assets
