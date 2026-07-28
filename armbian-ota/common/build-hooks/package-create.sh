@@ -1,5 +1,17 @@
 # OTA Package Creation Helpers
 
+# Encrypted-payload artifact names (present only when ota_payload_encryption_enabled).
+# These mirror the on-device names in common/rootfs/usr/share/armbian-ota/common.sh.
+OTA_PAYLOAD_ROOTFS_ENC="rootfs.tar.gz.enc"
+OTA_PAYLOAD_MANIFEST="payload.manifest"
+OTA_PAYLOAD_MANIFEST_SIG="payload.manifest.sig"
+# HKDF info string binding the derived key to the OTA payload use case. Must be
+# identical on build host and device (ota_derive_payload_key_hex on both sides).
+OTA_PAYLOAD_KDF_INFO="armbian-ota-payload-v1"
+# Random AES-CBC IV produced by ota_encrypt_rootfs_payload, consumed later by
+# ota_write_signed_manifest. Global so the two steps can run in separate hooks.
+OTA_PAYLOAD_ENC_IV=""
+
 function ota_require_host_tools() {
     local tool
 
@@ -38,21 +50,33 @@ function ota_verify_extracted_archives() {
     local ota_temp_dir="$1"
     local ota_security_mode="$2"
     local rootfs_tar="${ota_temp_dir}/rootfs.tar.gz"
+    local enc_tar="${ota_temp_dir}/${OTA_PAYLOAD_ROOTFS_ENC}"
     local rootfs_sha_file="${ota_temp_dir}/rootfs.sha256"
     local boot_tar="${ota_temp_dir}/boot.tar.gz"
     local boot_sha_file="${ota_temp_dir}/boot.sha256"
 
-    if [[ ! -f "${rootfs_tar}" ]]; then
-        display_alert "Error: rootfs.tar.gz not found" "" "err"
-        return 1
-    fi
+    if ota_payload_encryption_enabled; then
+        # rootfs.tar.gz has been replaced by the encrypted blob; its integrity
+        # was already confirmed by the encryption round-trip, and the plaintext
+        # sha256 is re-checked on the device after decryption.
+        [[ -f "${enc_tar}" ]] || {
+            display_alert "Error: encrypted payload missing" "${OTA_PAYLOAD_ROOTFS_ENC}" "err"
+            return 1
+        }
+        display_alert "Archive verification completed" "Encrypted rootfs payload present (plaintext intentionally omitted)" "info"
+    else
+        if [[ ! -f "${rootfs_tar}" ]]; then
+            display_alert "Error: rootfs.tar.gz not found" "" "err"
+            return 1
+        fi
 
-    if ! tar -tzf "${rootfs_tar}" >/dev/null 2>&1; then
-        display_alert "Error: rootfs.tar.gz is corrupted or invalid" "" "err"
-        return 1
-    fi
+        if ! tar -tzf "${rootfs_tar}" >/dev/null 2>&1; then
+            display_alert "Error: rootfs.tar.gz is corrupted or invalid" "" "err"
+            return 1
+        fi
 
-    ota_verify_sha256_file "${ota_temp_dir}" "${rootfs_sha_file}" "rootfs.tar.gz" || return 1
+        ota_verify_sha256_file "${ota_temp_dir}" "${rootfs_sha_file}" "rootfs.tar.gz" || return 1
+    fi
 
     if [[ "${ota_security_mode}" == "secure-boot-encrypted-rootfs" ]]; then
         if [[ ! -f "${ota_temp_dir}/boot.itb" ]]; then
@@ -345,6 +369,118 @@ function ota_copy_secure_boot_itb() {
     ota_write_sha256_file "${ota_temp_dir}" "boot.itb" "${ota_temp_dir}/boot.sha256"
 }
 
+# Derive a 32-byte AES-256 payload key (lowercase hex, 64 chars) from the LUKS
+# passphrase via HKDF-SHA256. The same inputs yield the same key on build host
+# and device (OpenSSL >= 3.0), so each side derives it independently from the
+# passphrase retrieved from the security partition / OP-TEE keybox.
+function ota_derive_payload_key_hex() {
+    local passphrase="$1"
+    local ikm_hex info_hex
+
+    [[ -n "${passphrase}" ]] || return 1
+    ikm_hex="$(printf '%s' "${passphrase}" | od -An -v -tx1 | tr -d ' \n')"
+    info_hex="$(printf '%s' "${OTA_PAYLOAD_KDF_INFO}" | od -An -v -tx1 | tr -d ' \n')"
+    openssl kdf -keylen 32 -binary \
+        -kdfopt digest:SHA256 -kdfopt key:"${ikm_hex}" -kdfopt info:"${info_hex}" \
+        HKDF | od -An -v -tx1 | tr -d ' \n'
+}
+
+# Encrypt rootfs.tar.gz into rootfs.tar.gz.enc, verify the round-trip against
+# the plaintext sha256 captured at archive time, then delete the plaintext so
+# only the encrypted blob ships. Sets OTA_PAYLOAD_ENC_IV for the manifest step.
+function ota_encrypt_rootfs_payload() {
+    local ota_temp_dir="$1"
+    local plaintext_tar="${ota_temp_dir}/rootfs.tar.gz"
+    local encrypted_tar="${ota_temp_dir}/${OTA_PAYLOAD_ROOTFS_ENC}"
+    local sha_file="${ota_temp_dir}/rootfs.sha256"
+    local expected_sha key_hex iv_hex roundtrip_sha
+
+    [[ -f "${plaintext_tar}" ]] || {
+        display_alert "OTA payload security" "rootfs.tar.gz missing, cannot encrypt" "err"
+        return 1
+    }
+    [[ -n "${CRYPTROOT_PASSPHRASE}" ]] || {
+        display_alert "OTA payload security" "CRYPTROOT_PASSPHRASE is required to encrypt the payload" "err"
+        return 1
+    }
+
+    key_hex="$(ota_derive_payload_key_hex "${CRYPTROOT_PASSPHRASE}")" || {
+        display_alert "OTA payload security" "Failed to derive payload key (HKDF)" "err"
+        return 1
+    }
+    iv_hex="$(openssl rand -hex 16)" || {
+        display_alert "OTA payload security" "Failed to generate AES-CBC IV" "err"
+        return 1
+    }
+
+    display_alert "OTA payload security" "Encrypting rootfs.tar.gz -> ${OTA_PAYLOAD_ROOTFS_ENC} (aes-256-cbc)" "info"
+    openssl enc -aes-256-cbc -K "${key_hex}" -iv "${iv_hex}" \
+        -in "${plaintext_tar}" -out "${encrypted_tar}" || {
+        display_alert "OTA payload security" "Payload encryption failed" "err"
+        return 1
+    }
+
+    expected_sha="$(awk '{print $1}' "${sha_file}" 2>/dev/null || true)"
+    roundtrip_sha="$(openssl enc -d -aes-256-cbc -K "${key_hex}" -iv "${iv_hex}" \
+        -in "${encrypted_tar}" | sha256sum | awk '{print $1}')"
+    [[ -n "${expected_sha}" && "${expected_sha}" = "${roundtrip_sha}" ]] || {
+        display_alert "OTA payload security" "Encryption round-trip SHA256 mismatch (${expected_sha} != ${roundtrip_sha})" "err"
+        return 1
+    }
+
+    rm -f "${plaintext_tar}"
+    OTA_PAYLOAD_ENC_IV="${iv_hex}"
+    display_alert "OTA payload security" "Encrypted payload verified (round-trip SHA256 OK), plaintext removed" "info"
+}
+
+# Write payload.manifest (encryption params + plaintext sha256) and sign it
+# with the secure-boot RSA key (RSA-PSS/SHA256, matching the FIT policy). If no
+# signing key is reachable the manifest is still written but left unsigned, so
+# the device can decrypt without authentication (the build logs a warning).
+function ota_write_signed_manifest() {
+    local ota_temp_dir="$1"
+    local iv_hex="$2"
+    local manifest_mode="$3"
+    local manifest="${ota_temp_dir}/${OTA_PAYLOAD_MANIFEST}"
+    local sig="${ota_temp_dir}/${OTA_PAYLOAD_MANIFEST_SIG}"
+    local rootfs_sha boot_sha privkey
+
+    rootfs_sha="$(awk '{print $1}' "${ota_temp_dir}/rootfs.sha256" 2>/dev/null || true)"
+    if [[ -f "${ota_temp_dir}/boot.sha256" ]]; then
+        boot_sha="$(awk '{print $1}' "${ota_temp_dir}/boot.sha256")"
+    else
+        boot_sha="none"
+    fi
+
+    cat > "${manifest}" <<EOF
+OTA_PAYLOAD_CIPHER=aes-256-cbc
+OTA_PAYLOAD_KDF=HKDF-SHA256
+OTA_PAYLOAD_KDF_INFO=${OTA_PAYLOAD_KDF_INFO}
+OTA_PAYLOAD_IV=${iv_hex}
+OTA_PAYLOAD_ROOTFS=${OTA_PAYLOAD_ROOTFS_ENC}
+OTA_PAYLOAD_ROOTFS_SHA256=${rootfs_sha}
+OTA_PAYLOAD_BOOT_SHA256=${boot_sha}
+OTA_MODE=${manifest_mode}
+BOARD=${BOARD}
+RELEASE=${RELEASE}
+VERSION=${IMAGE_VERSION:-${REVISION}}
+KERNEL=${KERNEL_VERSION:-${IMAGE_INSTALLED_KERNEL_VERSION}}
+EOF
+
+    privkey="$(ota_resolve_signing_privkey 2>/dev/null)" || {
+        display_alert "OTA payload security" "No signing key reachable; shipping encrypted payload WITHOUT signature" "warn"
+        return 0
+    }
+
+    display_alert "OTA payload security" "Signing payload manifest with secure-boot RSA key (PSS/SHA256)" "info"
+    openssl dgst -sha256 \
+        -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+        -sign "${privkey}" -out "${sig}" "${manifest}" || {
+        display_alert "OTA payload security" "Manifest signing failed" "err"
+        return 1
+    }
+}
+
 function ota_create_payload_archives() {
     local ota_temp_dir="$1"
     local ota_security_mode="$2"
@@ -393,6 +529,13 @@ function ota_finalize_payload_package() {
 
     ota_write_package_env "${ota_temp_dir}" "${manifest_mode}"
     ota_write_version_file "${ota_temp_dir}" "${base_image_name}"
+
+    if ota_payload_encryption_enabled; then
+        ota_write_signed_manifest "${ota_temp_dir}" "${OTA_PAYLOAD_ENC_IV}" "${manifest_mode}" || {
+            display_alert "Error: Failed to write signed OTA payload manifest" "" "err"
+            return 1
+        }
+    fi
 
     display_alert "Creating final OTA package" "${ota_package_name}" "info"
     ota_create_final_tarball "${ota_temp_dir}" "${ota_output_path}" || {
@@ -457,6 +600,17 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
         ota_cleanup_payload_temp_dir "${ota_temp_dir}" || return 1
         return 1
     }
+
+    if ota_payload_encryption_enabled; then
+        ota_require_host_tools openssl od || {
+            ota_cleanup_payload_temp_dir "${ota_temp_dir}" || return 1
+            return 1
+        }
+        ota_encrypt_rootfs_payload "${ota_temp_dir}" || {
+            ota_cleanup_payload_temp_dir "${ota_temp_dir}" || return 1
+            return 1
+        }
+    fi
 
     ota_finalize_payload_package "${ota_temp_dir}" "${ota_security_mode}" || {
         ota_cleanup_payload_temp_dir "${ota_temp_dir}" || return 1

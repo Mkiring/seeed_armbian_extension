@@ -106,6 +106,21 @@ ota_validate_recovery_state() {
         return 1
     fi
 
+    # If a payload manifest shipped (encrypted payload was decrypted in phase 1),
+    # re-check the plaintext rootfs tar sha256 against it before applying, so a
+    # tamper of the transaction store between phase 1 and phase 2 is caught.
+    if [ -f "${OTA_DIR}/payload.manifest" ]; then
+        expected_root_sha="$(sed -n 's/^OTA_PAYLOAD_ROOTFS_SHA256=//p' "${OTA_DIR}/payload.manifest" | head -n1)"
+        if [ -n "${expected_root_sha}" ]; then
+            actual_root_sha="$(sha256sum "${ROOTFS_TAR}" | awk '{print $1}')"
+            if [ "${actual_root_sha}" != "${expected_root_sha}" ]; then
+                log "ERROR: plaintext rootfs sha256 (${actual_root_sha}) != manifest (${expected_root_sha}); possible tamper, abort"
+                return 1
+            fi
+            log "recovery: plaintext rootfs sha256 matches payload manifest"
+        fi
+    fi
+
     HAS_BOOT_TAR=0
     [ -f "${BOOT_TAR}" ] && HAS_BOOT_TAR=1
     HAS_BOOT_ITB=0

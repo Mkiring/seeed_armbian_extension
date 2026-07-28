@@ -15,6 +15,15 @@ OTA_PAYLOAD_ROOTFS_SHA="rootfs.sha256"
 OTA_PAYLOAD_BOOT_TAR="boot.tar.gz"
 OTA_PAYLOAD_BOOT_ITB="boot.itb"
 OTA_PAYLOAD_BOOT_SHA="boot.sha256"
+# Encrypted-payload artifacts (present when the package was built with
+# CRYPTROOT_ENABLE=yes). Mirrors package-create.sh on the build side.
+OTA_PAYLOAD_ROOTFS_ENC="rootfs.tar.gz.enc"
+OTA_PAYLOAD_MANIFEST="payload.manifest"
+OTA_PAYLOAD_MANIFEST_SIG="payload.manifest.sig"
+OTA_PAYLOAD_KDF_INFO="armbian-ota-payload-v1"
+OTA_PAYLOAD_PUBKEY="/usr/share/armbian-ota/keys/ota-payload.pub.pem"
+# OP-TEE keybox_app writes the retrieved passphrase here (fixed path).
+OTA_SYSPW_FILE="/tmp/syspw"
 
 COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${COMMON_LIB_DIR}/state.sh"
@@ -241,6 +250,152 @@ ota_is_fit_image() {
     [ "${magic}" = "d00dfeed" ]
 }
 
+# ===== Encrypted payload: signature verification + decryption =====
+
+# Read a key=value field from the payload manifest.
+ota_manifest_get() {
+    local key="$1" file="$2"
+    awk -F= -v k="${key}" '$1==k {sub(/^[^=]*=/,""); print; exit}' "${file}" 2>/dev/null
+}
+
+# Locate the security partition holding the LUKS passphrase / SSKR marker.
+ota_get_security_part() {
+    local dev
+    dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1)"
+    [ -z "${dev}" ] && dev="$(blkid -t LABEL=security -o device 2>/dev/null | head -n1)"
+    echo "${dev}"
+}
+
+# Retrieve the LUKS passphrase into out_file (mode 600). Read-only (no keybox
+# migration): OTA only needs the current passphrase to derive the payload key.
+# Mirrors the initramfs decryption-disk.sh raw / SSKR behavior.
+ota_get_security_passphrase_file() {
+    local out_file="$1"
+    local security_dev marker tee_log keybox_log tee_pid
+
+    [ -n "${out_file}" ] || return 1
+    : > "${out_file}" || return 1
+    chmod 600 "${out_file}" 2>/dev/null || true
+
+    # Prefer the passphrase the initramfs stashed in /run. On NVMe (no RPMB),
+    # keybox_app can't read rk_secure_storage in userspace; this reuses the
+    # passphrase the initramfs already used to unlock root at boot.
+    if [ -s /run/armbian-luks-passphrase ] && cp /run/armbian-luks-passphrase "${out_file}" 2>/dev/null; then
+        chmod 600 "${out_file}" 2>/dev/null || true
+        log_info "Using LUKS passphrase stashed by initramfs (/run/armbian-luks-passphrase)"
+        return 0
+    fi
+
+    security_dev="$(ota_get_security_part)"
+    [ -n "${security_dev}" ] || { log_error "Security partition not found"; return 1; }
+
+    marker="$(head -c 4 "${security_dev}" 2>/dev/null || true)"
+    log_info "Security partition marker: ${marker:-<empty>}"
+
+    if [ "${marker}" = "SSKR" ]; then
+        [ -x /usr/bin/keybox_app ] || { log_error "SSKR marker but /usr/bin/keybox_app missing"; return 1; }
+        tee_log="$(make_ota_temp_file tee-supplicant)"
+        keybox_log="$(make_ota_temp_file keybox)"
+        if [ -x /usr/bin/tee-supplicant ]; then
+            pkill -9 -x tee-supplicant >/dev/null 2>&1 || true
+            sleep 1
+            /usr/bin/tee-supplicant >"${tee_log}" 2>&1 &
+            tee_pid="$!"
+            sleep 1
+        fi
+        rm -f "${OTA_SYSPW_FILE}" 2>/dev/null || true
+        if ! /usr/bin/keybox_app >"${keybox_log}" 2>&1; then
+            [ -n "${tee_pid}" ] && kill "${tee_pid}" 2>/dev/null || true
+            log_error "keybox_app read failed: $(tail -n1 "${keybox_log}" 2>/dev/null)"
+            rm -f "${tee_log}" "${keybox_log}"
+            return 1
+        fi
+        [ -n "${tee_pid}" ] && { kill "${tee_pid}" 2>/dev/null || true; wait "${tee_pid}" 2>/dev/null || true; }
+        [ -s "${OTA_SYSPW_FILE}" ] || { log_error "keybox_app produced no passphrase"; rm -f "${tee_log}" "${keybox_log}"; return 1; }
+        cp "${OTA_SYSPW_FILE}" "${out_file}" || { rm -f "${OTA_SYSPW_FILE}" "${tee_log}" "${keybox_log}"; return 1; }
+        rm -f "${OTA_SYSPW_FILE}" "${tee_log}" "${keybox_log}"
+        return 0
+    fi
+
+    # raw passphrase: first 64 bytes (the passphrase is a 64-char string).
+    head -c 64 "${security_dev}" > "${out_file}" 2>/dev/null \
+        || { log_error "Failed to read raw passphrase from ${security_dev}"; return 1; }
+    return 0
+}
+
+# Derive the 32-byte AES-256 payload key (lowercase hex) from the LUKS
+# passphrase via HKDF-SHA256. Identical derivation to the build-side
+# ota_derive_payload_key_hex, so both sides agree from the same passphrase.
+ota_hkdf_payload_key_hex() {
+    local pass_file="$1"
+    local ikm_hex info_hex
+    [ -s "${pass_file}" ] || return 1
+    ikm_hex="$(od -An -v -tx1 < "${pass_file}" | tr -d ' \n')"
+    info_hex="$(printf '%s' "${OTA_PAYLOAD_KDF_INFO}" | od -An -v -tx1 | tr -d ' \n')"
+    openssl kdf -keylen 32 -binary \
+        -kdfopt digest:SHA256 -kdfopt key:"${ikm_hex}" -kdfopt info:"${info_hex}" \
+        HKDF | od -An -v -tx1 | tr -d ' \n'
+}
+
+# Verify the manifest signature (if a signature + public key are present), then
+# decrypt rootfs.tar.gz.enc into the plaintext tar name the rest of the pipeline
+# expects, authenticating the result against the signed plaintext sha256.
+ota_process_encrypted_payload() {
+    local work_dir="$1"
+    local rootfs_tar="$2"
+    local enc_tar="${work_dir}/${OTA_PAYLOAD_ROOTFS_ENC}"
+    local manifest="${work_dir}/${OTA_PAYLOAD_MANIFEST}"
+    local sig="${work_dir}/${OTA_PAYLOAD_MANIFEST_SIG}"
+    local plain_path="${work_dir}/${rootfs_tar}"
+    local manifest_iv manifest_sha key_hex pass_file dec_sha
+
+    ensure_command openssl
+    [ -f "${manifest}" ] || error_exit "Encrypted payload missing ${OTA_PAYLOAD_MANIFEST}"
+
+    if [ -f "${sig}" ]; then
+        [ -f "${OTA_PAYLOAD_PUBKEY}" ] || error_exit "Signed OTA payload present but verification key missing: ${OTA_PAYLOAD_PUBKEY}"
+        log_info "Verifying OTA payload manifest signature"
+        openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+            -verify "${OTA_PAYLOAD_PUBKEY}" -signature "${sig}" "${manifest}" >/dev/null 2>&1 \
+            || error_exit "OTA payload manifest signature verification failed"
+        log_info "OTA payload manifest signature verified"
+    else
+        log_warn "Encrypted OTA payload has no signature; proceeding without authentication"
+    fi
+
+    manifest_iv="$(ota_manifest_get OTA_PAYLOAD_IV "${manifest}")"
+    manifest_sha="$(ota_manifest_get OTA_PAYLOAD_ROOTFS_SHA256 "${manifest}")"
+    [ -n "${manifest_iv}" ] || error_exit "Payload manifest missing OTA_PAYLOAD_IV"
+    [ -n "${manifest_sha}" ] || error_exit "Payload manifest missing OTA_PAYLOAD_ROOTFS_SHA256"
+
+    pass_file="$(make_ota_temp_file ota-pass)"
+    chmod 600 "${pass_file}" 2>/dev/null || true
+    if ! ota_get_security_passphrase_file "${pass_file}"; then
+        rm -f "${pass_file}"
+        error_exit "Failed to retrieve LUKS passphrase for payload decryption"
+    fi
+    if ! key_hex="$(ota_hkdf_payload_key_hex "${pass_file}")"; then
+        rm -f "${pass_file}"
+        error_exit "Failed to derive payload decryption key (HKDF)"
+    fi
+    rm -f "${pass_file}"
+
+    log_info "Decrypting ${OTA_PAYLOAD_ROOTFS_ENC} -> ${rootfs_tar}"
+    local oss_err="" rc=0
+    oss_err="$(openssl enc -d -aes-256-cbc -K "${key_hex}" -iv "${manifest_iv}" \
+        -in "${enc_tar}" -out "${plain_path}" 2>&1 >/dev/null)" || rc=$?
+    if [ "${rc}" -ne 0 ]; then
+        [ -n "${oss_err}" ] && oss_err=": ${oss_err%%$'\n'*}"
+        error_exit "Failed to decrypt OTA payload${oss_err} (wrong passphrase / corrupted blob / out of space)"
+    fi
+
+    dec_sha="$(sha256sum "${plain_path}" | awk '{print $1}')"
+    [ "${dec_sha}" = "${manifest_sha}" ] \
+        || error_exit "Decrypted payload SHA256 (${dec_sha}) does not match signed manifest (${manifest_sha})"
+
+    log_info "OTA payload decrypted and authenticated (SHA256 matches signed manifest)"
+}
+
 ota_verify_payload() {
     local work_dir="$1"
     local rootfs_tar="$2"
@@ -251,6 +406,12 @@ ota_verify_payload() {
 
     [ -f "${work_dir}/${boot_itb}" ] && [ -f "${work_dir}/${boot_tar}" ] &&
         error_exit "OTA package contains both ${boot_itb} and ${boot_tar}; refusing ambiguous boot payload"
+
+    # Encrypted payload: authenticate + decrypt into the plaintext tar name
+    # before normal archive verification proceeds.
+    if [ -f "${work_dir}/${OTA_PAYLOAD_ROOTFS_ENC}" ]; then
+        ota_process_encrypted_payload "${work_dir}" "${rootfs_tar}"
+    fi
 
     verify_payload_archives "${work_dir}" "${rootfs_tar}" "${rootfs_sha}" "${boot_tar}" "${boot_sha}"
 

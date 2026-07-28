@@ -153,6 +153,17 @@ if [ ! -s "$SYSPW_FILE" ]; then
 fi
 log_step "[Decryption-disk] Password successfully retrieved from security partition"
 
+# Hand the passphrase to userspace: OTA needs it to derive the payload key, but
+# keybox_app cannot read rk_secure_storage after switch_root on NVMe (no RPMB).
+# /run is a tmpfs mounted in the initramfs and moved across switch_root, so this
+# file survives into the booted system; it is ram-only and cleared on shutdown.
+mkdir -p /run
+if cp "$SYSPW_FILE" /run/armbian-luks-passphrase 2>/dev/null; then
+    chmod 600 /run/armbian-luks-passphrase 2>/dev/null
+else
+    log_step "[Decryption-disk] WARN: failed to stash passphrase for OTA at /run"
+fi
+
 ROOT_DEVICE=""
 TARGET_LUKS_UUID="$(get_cmdline_crypt_uuid || true)"
 if [ -n "$TARGET_LUKS_UUID" ]; then
