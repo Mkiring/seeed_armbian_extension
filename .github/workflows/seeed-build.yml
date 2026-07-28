@@ -68,10 +68,6 @@ on:
         default: false
 
       # ── Security profiles (each becomes a separate matrix dimension) ──
-      secure_rootfs:
-        description: "Security: secure-rootfs (LUKS root + OP-TEE/SSKR auto-unlock)"
-        type: boolean
-        default: false
       secure_boot:
         description: "Security: secure-boot (Secure U-Boot + secure-rootfs; requires DEV_CRT + PRIVATE_KEY_PEM secrets)"
         type: boolean
@@ -191,8 +187,7 @@ jobs:
           # matrix dimension. If none selected, entries have no security
           # profile (empty string).
           securities = []
-          if flag("SECURE_ROOTFS"): securities.append("secure-rootfs")
-          if flag("SECURE_BOOT"):   securities.append("secure-boot")
+          if flag("SECURE_BOOT"): securities.append("secure-boot")
           if not securities:
               securities = [""]  # no security profile
 
@@ -241,7 +236,6 @@ jobs:
           OTA_PLAIN:    ${{ inputs.ota_plain }}
           OTA_RECOVERY: ${{ inputs.ota_recovery }}
           OTA_AB:       ${{ inputs.ota_ab }}
-          SECURE_ROOTFS: ${{ inputs.secure_rootfs }}
           SECURE_BOOT:   ${{ inputs.secure_boot }}
 
       - name: Print summary
@@ -462,7 +456,7 @@ jobs:
           ls -la cache/sources/u-boot-worktree/u-boot-rockchip64/
 
       - name: Place FIT signing keys for secure profiles
-        if: ${{ matrix.security == 'secure-boot' || matrix.security == 'secure-rootfs' }}
+        if: ${{ matrix.security == 'secure-boot' }}
         run: |
           set -euo pipefail
           cd armbian-build
@@ -628,47 +622,6 @@ jobs:
           done
           echo "=== output/images/ contents ==="
           ls -lh output/images/
-
-      - name: Add OTA + security suffix to image filenames
-        working-directory: armbian-build
-        run: |
-          suffix=""
-          case "${{ matrix.profile }}" in
-            ab)       suffix="${suffix}_ab" ;;
-            recovery) suffix="${suffix}_rec" ;;
-          esac
-          case "${{ matrix.security }}" in
-            secure-rootfs) suffix="${suffix}_securerootfs" ;;
-            secure-boot)   suffix="${suffix}_secureboot" ;;
-          esac
-          [[ -z "$suffix" ]] && { echo "No suffix needed (plain, no security)"; exit 0; }
-          echo "Suffix: $suffix"
-
-          cd output/images
-          for f in *; do
-            [[ -f "$f" ]] || continue
-            if [[ "$f" == *.img* ]]; then
-              newname="${f/.img/${suffix}.img}"
-            elif [[ "$f" == *_OTA.* ]]; then
-              newname="${f/_OTA./${suffix}_OTA.}"
-            else
-              continue
-            fi
-            [[ "$newname" != "$f" ]] && mv -- "$f" "$newname"
-          done
-
-          for shafile in *${suffix}*.img.xz.sha256; do
-            [[ -f "$shafile" ]] || continue
-            xzfile="${shafile%.sha256}"
-            if [[ -f "$xzfile" ]]; then
-              sha256sum "$xzfile" > "$shafile"
-            else
-              sed -i "s|  .*$|  ${xzfile}|" "$shafile"
-            fi
-          done
-
-          echo "=== renamed files ==="
-          ls -lh
 
       - name: Upload output/images/ as-is
         if: always()

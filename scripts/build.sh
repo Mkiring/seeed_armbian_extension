@@ -49,6 +49,9 @@ Profiles (feature switches, can be combined; default: plain desktop build):
   secure-boot   Secure U-Boot + encryption + auto-decrypt
   optee         OP-TEE boot + encryption + auto-decrypt
 
+Note: 'recovery' and 'ab' can be combined. apply_profile runs in
+argument order, so the last one wins on the A/B-partition flag.
+
 Options:
   Build mode:
   --kernel                    Build kernel only (skip u-boot, rootfs, image)
@@ -81,6 +84,7 @@ Examples:
   $(basename "$0") recovery                     # Recovery OTA only
   $(basename "$0") recovery secure-boot         # Recovery OTA + secure boot
   $(basename "$0") ab secure-boot -d xfce       # A/B OTA + secure boot with XFCE
+  $(basename "$0") recovery ab                 # Recovery OTA + A/B (ab wins on A/B flag)
   $(basename "$0") ab -b recomputer-rk3588-devkit
 EOF
     exit 0
@@ -284,9 +288,10 @@ fi
 for profile in "${PROFILES[@]}"; do
     [[ "$(profile_count "$profile")" -gt 1 ]] && die "Profile '$profile' was specified more than once."
 done
-if profile_is_selected "recovery" && profile_is_selected "ab"; then
-    die "Profiles 'recovery' and 'ab' are mutually exclusive."
-fi
+# 'recovery' and 'ab' are no longer mutually exclusive — apply_profile
+# runs in argument order, so `recovery ab` ends with OTA_ENABLE=yes and
+# AB_PART_OTA=yes (ab wins on the A/B flag). If you need the inverse
+# ordering, pass `ab recovery` instead.
 if profile_is_selected "secure-boot" && profile_is_selected "optee"; then
     die "Profiles 'secure-boot' and 'optee' overlap; use 'secure-boot' for full secure boot or 'optee' for OP-TEE without full secure boot."
 fi
@@ -411,6 +416,70 @@ else
     append_security_args yes
     [[ "$RK_COMPILE_USBPLUG" == "yes" ]] && BUILD_CMD+=(RK_COMPILE_USBPLUG=yes)
 fi
+
+# ── Forward AIC8800 mirror / version overrides into the docker container ───
+# The Armbian framework only forwards explicit KEY=VALUE parameters into the
+# container (via ARMBIAN_CLI_RELAUNCH_PARAMS → --env), not arbitrary host env.
+# Forward AIC8800_* overrides so the radxa-aic8800 extension can use them.
+[[ -n "${AIC8800_VERSION:-}" ]] && BUILD_CMD+=(AIC8800_VERSION="$AIC8800_VERSION")
+[[ -n "${AIC8800_BASE_URL:-}" ]] && BUILD_CMD+=(AIC8800_BASE_URL="$AIC8800_BASE_URL")
+[[ -n "${AIC8800_API_URL:-}" ]] && BUILD_CMD+=(AIC8800_API_URL="$AIC8800_API_URL")
+
+# ── Forward size/vendor env vars into the docker container ─────────────────
+# armbian only forwards KEY=VALUE compile.sh parameters into the docker
+# container (via ARMBIAN_CLI_RELAUNCH_PARAMS → --env), not arbitrary host
+# env. So VENDOR, EXTRA_ROOTFS_MIB_SIZE, AB_ROOTFS_SIZE, FIXED_IMAGE_SIZE
+# set in the surrounding environment (e.g. CI workflow env) won't reach
+# the in-container build unless we pass them as explicit compile.sh args
+# here. Only forward when set; empty means "use armbian's default".
+[[ -n "${VENDOR:-}" ]] && BUILD_CMD+=(VENDOR="$VENDOR")
+[[ -n "${EXTRA_ROOTFS_MIB_SIZE:-}" ]] && BUILD_CMD+=(EXTRA_ROOTFS_MIB_SIZE="$EXTRA_ROOTFS_MIB_SIZE")
+[[ -n "${AB_ROOTFS_SIZE:-}" ]] && BUILD_CMD+=(AB_ROOTFS_SIZE="$AB_ROOTFS_SIZE")
+[[ -n "${FIXED_IMAGE_SIZE:-}" ]] && BUILD_CMD+=(FIXED_IMAGE_SIZE="$FIXED_IMAGE_SIZE")
+
+# ── Forward global GitHub accelerator into the docker container ─────────────
+# GITHUB_ACCELERATOR=https://ghfast.top (or any ghproxy-compatible mirror)
+# activates three layers of GitHub URL rewriting inside the container:
+#
+#   1. GITHUB_MIRROR=ghproxy + GHPROXY_ADDRESS=<host>
+#      → Armbian's built-in mirror mechanism. fetch_from_repo() rewrites
+#        https://github.com/<repo> → https://<host>/https://github.com/<repo>
+#      → Extensions that special-case GITHUB_MIRROR==ghproxy (radxa-aic8800,
+#        bcmdhd, brostrend, photonicat-pm, yt6801, apt-utils, git-ref2info,
+#        bat-cat, oci-oras, shellcheck, shellfmt) auto-prefix curl/wget
+#        URLs with https://<host>/
+#
+#   2. GIT_CONFIG_KEY_* (git url.<base>.insteadOf)
+#      → Catches direct `git clone/fetch/ls-remote https://github.com/...`
+#        calls that bypass fetch_from_repo (e.g. gateway-dk-ask.sh).
+#
+#   3. GIT_CONFIG_VALUE_* also covers git@github.com: SSH URLs.
+#
+# GITHUB_MIRROR=ghproxy's default GHPROXY_ADDRESS is ghfast.top; if the user
+# sets GITHUB_ACCELERATOR to a different host, extract and override it.
+if [[ -n "${GITHUB_ACCELERATOR:-}" ]]; then
+	# Strip scheme + trailing slash → host name (e.g. https://ghfast.top → ghfast.top)
+	_acc_host="${GITHUB_ACCELERATOR#https://}"
+	_acc_host="${_acc_host#http://}"
+	_acc_host="${_acc_host%/}"
+
+	BUILD_CMD+=(GITHUB_MIRROR=ghproxy)
+	BUILD_CMD+=(GHPROXY_ADDRESS="$_acc_host")
+	BUILD_CMD+=(GIT_CONFIG_COUNT=2)
+	BUILD_CMD+=(GIT_CONFIG_KEY_0="url.${GITHUB_ACCELERATOR%/}/https://github.com/.insteadOf")
+	BUILD_CMD+=(GIT_CONFIG_VALUE_0="https://github.com/")
+	BUILD_CMD+=(GIT_CONFIG_KEY_1="url.${GITHUB_ACCELERATOR%/}/git@github.com:.insteadOf")
+	BUILD_CMD+=(GIT_CONFIG_VALUE_1="git@github.com:")
+	unset _acc_host
+fi
+
+# ── Forward GHCR mirror selection into the docker container ──────────────────
+# Armbian supports GHCR_MIRROR={nju,dockerproxy} and GHCR_MIRROR_ADDRESS
+# for redirecting ghcr.io artifact downloads. Forward them explicitly so
+# they survive the compile.sh → docker relaunch boundary.
+[[ -n "${GHCR_MIRROR:-}" ]] && BUILD_CMD+=(GHCR_MIRROR="$GHCR_MIRROR")
+[[ -n "${GHCR_MIRROR_ADDRESS:-}" ]] && BUILD_CMD+=(GHCR_MIRROR_ADDRESS="$GHCR_MIRROR_ADDRESS")
+[[ -n "${OCI_TARGET_BASE:-}" ]] && BUILD_CMD+=(OCI_TARGET_BASE="$OCI_TARGET_BASE")
 
 # ── Execute or dry-run ──────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "yes" ]]; then

@@ -669,11 +669,44 @@ function pre_package_uboot_image__build_fw_env_tool(){
         }
     fi
 
+    # u-boot make.sh checks ../rkbin/tools (RKBIN_TOOLS=../rkbin/tools at the
+    # top of make.sh). The rkbin tree we just copied from rockchip_sdk_tools
+    # only has SoC-specific subdirs (rk3576_rkbin/, rk3588_rkbin/), no tools/.
+    # When that's the case, repoint rkbin to armbian's standard rkbin-tools
+    # repo (enable_extension "rkbin-tools" fetches it to cache/sources/rkbin-tools
+    # via rockchip64_common.inc) — that one ships tools/ with boot_merger,
+    # loaderimage, etc. which make.sh env needs.
+    if [[ ! -d "${rkbin_dest}/tools" ]]; then
+        local armbian_rkbin="${SRC}/cache/sources/rkbin-tools"
+        if [[ -d "${armbian_rkbin}/tools" ]]; then
+            rm -rf "${rkbin_dest}"
+            ln -sf ../../rkbin-tools "${rkbin_dest}"
+            display_alert "A/B partition OTA" "rkbin repointed to armbian rkbin-tools (tools/ was missing)" "info"
+        else
+            display_alert "A/B partition OTA" "rkbin/tools missing and armbian rkbin-tools not available; make.sh env will likely fail" "wrn"
+        fi
+    fi
+
+    # make.sh defaults CROSS_COMPILE_ARM64 to ../prebuilts/gcc/linux-x86/...,
+    # which is an x86_64 binary. On an arm64 host (e.g. GH Actions arm
+    # runner) that binary won't run — the shell errors out with
+    # "ELF: not found" / "Exec format error" before make can start.
+    # Pass CROSS_COMPILE=aarch64-linux-gnu- so make.sh's select_toolchain
+    # uses the container's apt-installed aarch64-linux-gnu-gcc instead.
+    # That gcc is a native arm64 binary, so it runs fine on arm64 hosts
+    # and still targets arm64 (which is what fw_printenv needs — it runs
+    # on the board).
+    local make_sh_args=(env)
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        make_sh_args=(CROSS_COMPILE=aarch64-linux-gnu- env)
+        display_alert "A/B partition OTA" "arm64 host: overriding Rockchip x86_64 prebuilt with aarch64-linux-gnu-gcc" "info"
+    fi
+
     (
         cd "${uboot_src}" || exit 1
-        bash ./make.sh env
+        bash ./make.sh "${make_sh_args[@]}"
     ) || {
-        display_alert "A/B partition OTA" "Failed to run 'bash ./make.sh env'; AB_PART_OTA requires fw_env build" "err"
+        display_alert "A/B partition OTA" "Failed to run 'bash ./make.sh ${make_sh_args[*]}'; AB_PART_OTA requires fw_env build" "err"
         return 1
     }
 
