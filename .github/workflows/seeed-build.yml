@@ -624,6 +624,22 @@ jobs:
           retention-days: 14
           compression-level: 0
 
+      - name: Upload u-boot deb
+        # Each matrix entry uploads its own u-boot deb(s) under a
+        # unique artifact name (per OTA/security combination), so
+        # actions/upload-artifact@v4 doesn't see a name collision.
+        # The release job downloads all of them and dedups by md5.
+        # linux-u-boot-{board}-vendor[_-secure]_*.deb — both the
+        # plain and secure variants are shipped when both are built.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Armbian-uboot-${{ steps.lbl.outputs.short_board }}-${{ steps.lbl.outputs.ota_label }}-${{ steps.lbl.outputs.sec_label }}-${{ github.run_id }}
+          path: armbian-build/output/debs/linux-u-boot-*.deb
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+
       - name: Debug deb cache state
         if: always()
         run: |
@@ -723,28 +739,41 @@ jobs:
             exit 1
           fi
 
-      - name: Restore u-boot deb from cache
-        uses: actions/cache@v4
+      - name: Download u-boot deb artifacts
+        # Each matrix build entry uploaded its own u-boot deb(s).
+        # merge-multiple=false keeps them in per-entry subdirs so we
+        # can dedup in the next step (same BOARD across entries will
+        # produce identical debs).
+        uses: actions/download-artifact@v4
         with:
+          pattern: Armbian-uboot-${{ steps.tag.outputs.short_board }}-*
+          merge-multiple: false
           path: uboot-debs
-          key: uboot-restore-${{ matrix.board }}-${{ github.run_id }}
-          restore-keys: |
-            debs-arm64-${{ matrix.board }}-vendor-
 
-      - name: Stage u-boot deb into release assets
+      - name: Stage u-boot debs into release assets (md5 dedup)
+        # Multiple matrix entries with the same BOARD produce the
+        # same u-boot deb file. Walk every subdir, compute md5, and
+        # keep only the first copy of each unique content. Plain and
+        # secure variants have distinct filenames and distinct md5s,
+        # so both ship when both are built.
         run: |
           set -euo pipefail
-          # actions/cache restores files at their ORIGINAL save path
-          # (armbian-build/output/debs/), not at the restore path (uboot-debs/).
-          # Use find to locate the debs wherever they actually landed.
           shopt -s nullglob
+          declare -A seen=()
           found=0
           while IFS= read -r deb; do
-              cp -v "$deb" release-assets/
+              base=$(basename "$deb")
+              sum=$(md5sum "$deb" | awk '{print $1}')
+              if [[ -n "${seen[$sum]:-}" ]]; then
+                  echo "Skip duplicate (md5=$sum, kept=${seen[$sum]}): $base"
+                  continue
+              fi
+              seen[$sum]="$base"
+              cp -v "$deb" "release-assets/$base"
               found=1
-          done < <(find . -name 'linux-u-boot-*.deb' -type f 2>/dev/null)
+          done < <(find uboot-debs -name 'linux-u-boot-*.deb' -type f 2>/dev/null | sort)
           if [[ "$found" -eq 0 ]]; then
-              echo "No u-boot debs found in restored cache, continuing without them"
+              echo "No u-boot debs found in uploaded artifacts"
           fi
 
       - name: List release assets
