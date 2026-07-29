@@ -1,0 +1,69 @@
+From 43ea313f34f62dc4f399987a5863962924500c4a Mon Sep 17 00:00:00 2001
+From: mingzq <north_sea@qq.com>
+Date: Wed, 29 Jul 2026 08:36:01 +0000
+Subject: [PATCH] u-boot: fix NULL bootdev deref in rk3576
+ rk_board_dm_fdt_fixup
+
+Stage a board patch that gives rk_board_dm_fdt_fixup() the same
+android_get_bootdev() -> rockchip_get_bootdev() fallback already present
+in fit.c (via 0002) and vendor.c, plus a final NULL guard. Without it,
+Armbian boot from NVMe crashes with a Synchronous Abort in the final
+fdt fixup because android_get_bootdev() always returns NULL on
+non-Android boots.
+---
+ ...06-rk3576-fdt-fixup-fallback-bootdev.patch | 43 +++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+ create mode 100644 patch/u-boot/legacy/u-boot-radxa-rk35xx/board_recomputer-rk3576-devkit/0006-rk3576-fdt-fixup-fallback-bootdev.patch
+
+diff --git a/patch/u-boot/legacy/u-boot-radxa-rk35xx/board_recomputer-rk3576-devkit/0006-rk3576-fdt-fixup-fallback-bootdev.patch b/patch/u-boot/legacy/u-boot-radxa-rk35xx/board_recomputer-rk3576-devkit/0006-rk3576-fdt-fixup-fallback-bootdev.patch
+new file mode 100644
+index 0000000..cfa5d04
+--- /dev/null
++++ b/patch/u-boot/legacy/u-boot-radxa-rk35xx/board_recomputer-rk3576-devkit/0006-rk3576-fdt-fixup-fallback-bootdev.patch
+@@ -0,0 +1,43 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: Ming Zhangqun <north_sea@qq.com>
++Date: Tue, 29 Jul 2026 00:00:00 +0800
++Subject: [PATCH] rk3576: fix NULL bootdev deref in rk_board_dm_fdt_fixup
++
++rk_board_dm_fdt_fixup() obtains the bootdev through android_get_bootdev()
++when CONFIG_ANDROID_BOOTLOADER is enabled, but unlike fit.c and vendor.c
++it lacks a fallback to rockchip_get_bootdev(). On non-Android boots (e.g.
++Armbian booted from NVMe), android_get_bootdev() always returns NULL, so
++the following "desc->if_type" dereference raises a Synchronous Abort
++(data translation fault) right before jumping to the kernel.
++
++Add the same android -> rockchip_get_bootdev() fallback used by fit.c and
++vendor.c, plus a final NULL guard that simply skips the UFS fixup (harmless
++on NVMe boot, where no UFS device is present). Fixes the boot crash seen
++on reComputer RK3576 DevKit with secure-boot + A/B OTA.
++
++Signed-off-by: Ming Zhangqun <north_sea@qq.com>
++---
++ arch/arm/mach-rockchip/rk3576/rk3576.c | 5 +++++
++ 1 file changed, 5 insertions(+)
++
++diff --git a/arch/arm/mach-rockchip/rk3576/rk3576.c b/arch/arm/mach-rockchip/rk3576/rk3576.c
++--- a/arch/arm/mach-rockchip/rk3576/rk3576.c
+++++ b/arch/arm/mach-rockchip/rk3576/rk3576.c
++@@ -426,5 +426,7 @@ int rk_board_dm_fdt_fixup(const void *blob)
++ #ifdef CONFIG_ANDROID_BOOTLOADER
++ 	struct blk_desc *desc = android_get_bootdev();
+++	if (!desc)
+++		desc = rockchip_get_bootdev();
++ #else
++ 	struct blk_desc *desc = rockchip_get_bootdev();
++ #endif
++@@ -431,6 +433,9 @@ int rk_board_dm_fdt_fixup(const void *blob)
++ 	const char *status = NULL;
++ 	int node = -1;
++
+++	if (!desc)
+++		return 0;
+++
++ 	/*
++ 	 * 1. Kernel DTS will enable UFS by default.
++ 	 *
+-- 
+2.54.0
+
