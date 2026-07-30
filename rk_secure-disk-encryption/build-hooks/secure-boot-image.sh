@@ -35,6 +35,52 @@ function rk_secure_boot_patch_dtb_bootargs() {
     display_alert "fit-post-initrd" "Injected DTB bootargs: ${bootargs}" "info"
 }
 
+# Bake DEFAULT_OVERLAYS into a DTB copy before FIT/resource.img packaging.
+#
+# RAW FIT boot has no /boot filesystem, so U-Boot cannot load .dtbo files at
+# boot time. Merging overlays into the base DTB on the build host — before
+# the FIT is signed — keeps the signature covering the final DTB and makes
+# the overlay's effect deterministic across boot modes.
+#
+# Operates on a copy (board.dtb or the resource.img staging file), not the
+# kernel build artifact, so callers must pass the path they intend to embed.
+# overlay_dir is the kernel's arch/arm64/boot/dts/rockchip/overlay directory.
+function rk_secure_boot_apply_default_overlays() {
+    local dtb_file="$1"
+    local overlay_dir="$2"
+
+    [[ -n "${DEFAULT_OVERLAYS:-}" ]] || return 0
+
+    [[ -f "${dtb_file}" ]] ||
+        exit_with_error "FIT packaging failed: DTB copy missing for overlay merge" "${dtb_file}"
+    [[ -d "${overlay_dir}" ]] ||
+        exit_with_error "FIT packaging failed: overlay directory missing" "${overlay_dir}"
+    command -v fdtoverlay >/dev/null 2>&1 ||
+        exit_with_error "FIT packaging failed: fdtoverlay missing" "device-tree-compiler"
+
+    local -a overlay_args=()
+    local ov src
+    for ov in ${DEFAULT_OVERLAYS}; do
+        src="${overlay_dir}/${ov}.dtbo"
+        [[ -f "${src}" ]] ||
+            exit_with_error "FIT packaging failed: overlay missing" "${src}"
+        overlay_args+=("${src}")
+    done
+
+    display_alert "fit-post-initrd" "Baking overlays into DTB: ${DEFAULT_OVERLAYS}" "info"
+
+    local tmp_out err_log
+    tmp_out="$(mktemp)"
+    err_log="$(mktemp)"
+    if ! fdtoverlay -i "${dtb_file}" -o "${tmp_out}" "${overlay_args[@]}" 2>"${err_log}"; then
+        local err_msg; err_msg="$(< "${err_log}")"
+        rm -f "${tmp_out}" "${err_log}"
+        exit_with_error "FIT packaging failed: fdtoverlay rejected overlay" "${DEFAULT_OVERLAYS}: ${err_msg}"
+    fi
+    rm -f "${err_log}"
+    mv -f "${tmp_out}" "${dtb_file}"
+}
+
 function rk_secure_boot_find_ramdisk() {
     local boot_dir="$1"
 
@@ -109,6 +155,7 @@ function rk_secure_boot_prepare_fit_workdir() {
         : > "${fit_work}/resource.img"
     fi
     cp -f "${ramdisk_path}" "${fit_work}/initrd.img"
+    rk_secure_boot_apply_default_overlays "${fit_work}/board.dtb" "$(dirname "${dtb_path}")/overlay"
     rk_secure_boot_patch_dtb_bootargs "${fit_work}/board.dtb" "$(rk_secure_boot_kernel_bootargs)"
 }
 
@@ -357,6 +404,7 @@ function rk_secure_boot_create_resource_img() {
     dtb_filename="$(basename "${dtb_path}")"
     cp "${dtb_path}" "${temp_work_dir}/${dtb_filename}" ||
         exit_with_error "Failed to copy DTB for resource.img" "${dtb_path}"
+    rk_secure_boot_apply_default_overlays "${temp_work_dir}/${dtb_filename}" "$(dirname "${dtb_path}")/overlay"
     rk_secure_boot_patch_dtb_bootargs "${temp_work_dir}/${dtb_filename}" "$(rk_secure_boot_kernel_bootargs)"
 
     # Ensure output directory exists and is writable
