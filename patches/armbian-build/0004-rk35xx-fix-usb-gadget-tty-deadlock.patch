@@ -1,0 +1,14 @@
+diff --git a/config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc b/config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc
+index 953ddaabc..7214c987d 100644
+--- a/config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc
++++ b/config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc
+@@ -233,6 +233,9 @@ function post_family_tweaks__recomputer_enable_usb_gadget_defaults() {
+ 
+ 		[Service]
+ 		RestartSec=3
++		PrivateDevices=yes
++		DeviceAllow=/dev/ttyGS0 rw
++		DeviceAllow=char-tty rw
+ 	EOF
+ 
+ 	chroot_sdcard systemctl --no-reload enable usbdevice.service
