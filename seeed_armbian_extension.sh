@@ -1,6 +1,21 @@
 SEEED_EXTENSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 function seeed_apply_armbian_build_patch_bundle() {
+	# TEMPORARILY DISABLED: patches must be applied manually before build.
+	# Reason: patch_files array is applied during inc source (enable_extension
+	# at inc:479), but bash has already cached earlier function definitions
+	# in memory — patched versions on disk never reach bash memory, so hooks
+	# like recomputer_enable_usb_gadget_defaults run with their pre-patch body.
+	# Manual workflow:
+	#   1. git apply patches/armbian-build/0001-*.patch
+	#   2. git apply patches/armbian-build/0002-*.patch
+	#   3. git apply patches/armbian-build/0003-*.patch
+	#   4. git apply patches/armbian-build/0004-*.patch
+	#   5. run build
+	# TODO: move enable_extension seeed_armbian_extension into board conf,
+	# before `source inc`, so patches apply before inc is sourced.
+	return 0
+
 	local patch_file
 	local -a patch_files=(
 		"0001-rk3588-enable-panthor-gpu-stack.patch"
