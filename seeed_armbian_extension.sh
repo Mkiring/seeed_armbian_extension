@@ -5,6 +5,8 @@ function seeed_apply_armbian_build_patch_bundle() {
 	local -a patch_files=(
 		"0001-rk3588-enable-panthor-gpu-stack.patch"
 		"0002-rk35xx-install-fcs960k-bluez-with-common-packages.patch"
+		"0003-rk3576-enable-panfrost-gpu-stack.patch"
+		"0004-rk35xx-fix-usb-gadget-tty-deadlock.patch"
 	)
 
 	# Apply extensions before later build phases consume board, kernel, and
