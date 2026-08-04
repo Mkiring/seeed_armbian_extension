@@ -10,6 +10,24 @@ function pre_prepare_partitions__recovery_ota() {
     USE_HOOK_FOR_PARTITION="yes"
     ROOTFS_TYPE="ext4"
     ROOT_FS_LABEL="armbi_root"
+
+    # Recovery images always carry a dedicated /boot partition so that U-Boot
+    # reads boot files (armbianEnv.txt, Image, uInitrd, dtb) directly from a
+    # plain ext4 partition instead of the overlayfs-backed rootfs lower layer.
+    # At runtime the boot partition is mounted on top of overlayfs via fstab,
+    # which makes runtime /boot writes (apt kernel upgrades, manual tweaks,
+    # armbian-ota tooling) visible to U-Boot on the next boot.
+    #
+    # Raw boot mode (secure boot, BOOT_RAW_MODE=yes) keeps using a raw FIT
+    # partition; rk-secure-boot.sh clears `bootpart` after partition creation
+    # so Armbian's standard mkfs/mount path is skipped for it.
+    if ! ota_raw_boot_enabled; then
+        BOOTPART_REQUIRED="yes"
+        BOOTFS_TYPE="ext4"
+        BOOT_FS_LABEL="armbi_boot"
+        BOOTSIZE="${BOOTSIZE:-${OTA_BOOT_SIZE}}"
+    fi
+
     if ota_encrypted_rootfs_enabled; then
         display_alert "Recovery OTA" "Creating security, encrypted rootfs and userdata partitions" "info"
     else
@@ -23,12 +41,12 @@ function prepare_image_size__recovery_ota() {
 
     ota_get_default_partition_sizes
     ota_encrypted_rootfs_enabled && security_size=${OTA_SECURITY_SIZE}
-    if ota_raw_boot_enabled; then
-        boot_size=${BOOTSIZE:-${OTA_BOOT_SIZE}}
-    fi
+    # Recovery always reserves space for a boot partition (ext4 for plain /
+    # auto-decrypt modes, raw FIT for secure boot).
+    boot_size=${BOOTSIZE:-${OTA_BOOT_SIZE}}
 
     FIXED_IMAGE_SIZE=$((OFFSET + boot_size + security_size + OTA_ROOTFS_SIZE + OTA_USERDATA_SIZE))
-    display_alert "Recovery OTA" "Setting FIXED_IMAGE_SIZE=${FIXED_IMAGE_SIZE} MiB (rootfs=${OTA_ROOTFS_SIZE} MiB, userdata=${OTA_USERDATA_SIZE} MiB)" "info"
+    display_alert "Recovery OTA" "Setting FIXED_IMAGE_SIZE=${FIXED_IMAGE_SIZE} MiB (boot=${boot_size} MiB, rootfs=${OTA_ROOTFS_SIZE} MiB, userdata=${OTA_USERDATA_SIZE} MiB)" "info"
 }
 
 function create_partition_table__recovery_ota() {
@@ -39,10 +57,12 @@ function create_partition_table__recovery_ota() {
     local data_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
     script+="table-length: ${RECOVERY_GPT_TABLE_LENGTH:-64}\n"
 
-    if ota_raw_boot_enabled; then
-        ota_partition_append boot_index "boot" "${BOOTSIZE:-${OTA_BOOT_SIZE}}" "${data_type}"
-        bootpart=${boot_index}
-    fi
+    # Boot partition always leads the table. For BOOT_RAW_MODE=yes (secure
+    # boot) it carries the raw FIT image; otherwise Armbian's standard boot
+    # partition handling (partitioning.sh) formats it as ext4 with label
+    # armbi_boot and mounts it at $MOUNT/boot.
+    ota_partition_append boot_index "boot" "${BOOTSIZE:-${OTA_BOOT_SIZE}}" "${data_type}"
+    bootpart=${boot_index}
 
     if ota_encrypted_rootfs_enabled; then
         ota_partition_append security_index "security" "${OTA_SECURITY_SIZE}" "${data_type}"

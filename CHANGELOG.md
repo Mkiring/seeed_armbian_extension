@@ -12,6 +12,17 @@ Covers the work on `fix/secure_boot` against `main`
 
 ### Added
 
+#### Recovery OTA
+
+- **Dedicated `/boot` partition for all Recovery images.** Plain and
+  auto-decrypt Recovery builds now reserve a separate ext4 boot partition
+  (label `armbi_boot`) and mount it via fstab on top of overlayfs. This
+  fixes runtime writes to `/boot` (apt kernel upgrades, `armbianEnv.txt`
+  edits, OTA tooling) being swallowed by the overlayfs upper layer on
+  userdata and silently ignored by U-Boot on next boot. Secure-boot
+  Recovery continues to use a raw FIT boot partition (`BOOT_RAW_MODE=yes`),
+  unchanged. The partition order is now `[boot][security?][rootfs][userdata]`.
+
 #### Secure boot & secure rootfs
 
 - **Rockchip secure U-Boot bootchain.** New `RK_SECURE_UBOOT_ENABLE=yes`

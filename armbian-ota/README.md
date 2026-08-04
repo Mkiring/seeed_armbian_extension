@@ -59,6 +59,39 @@ OTA_ENABLE=yes
 # Do not set AB_PART_OTA
 ```
 
+### Partition Layout
+
+| Partition | Label | Purpose |
+|-----------|-------|---------|
+| nvme0n1p1 | armbi_boot | `/boot` files (ext4, plain mode) |
+| nvme0n1p2 | (security) | crypto key material (encrypted modes only) |
+| nvme0n1p2 or p3 | armbi_root | rootfs (LUKS+ext4 in auto-decrypt mode) |
+| last | armbi_usrdata | overlayfs upper layer + OTA transaction store |
+
+Plain recovery:
+```
+[ boot ext4 ][ rootfs ext4 ][ userdata ext4 ]
+```
+
+Auto-decrypt recovery (RK_OPTEE_BOOT_ENABLE=yes):
+```
+[ boot ext4 ][ security ][ rootfs LUKS+ext4 ][ userdata LUKS+ext4 ]
+```
+
+Secure boot recovery (RK_SECURE_UBOOT_ENABLE=yes, BOOT_RAW_MODE=yes):
+```
+[ boot raw FIT ][ security ][ rootfs LUKS+ext4 ][ userdata LUKS+ext4 ]
+```
+
+The `/boot` partition is **never** overlayed. The runtime fstab mounts it on
+top of overlayfs, so any process writing to `/boot` (apt kernel upgrades,
+manual `armbianEnv.txt` edits, OTA tooling) hits the real boot partition —
+U-Boot reads the same bytes on next boot. This avoids the prior failure
+mode where `/boot` writes were captured by the overlayfs upper layer on
+userdata and were invisible to U-Boot.
+
+The boot partition size can be tuned with `OTA_BOOT_SIZE` (default 256 MiB).
+
 ### How It Works
 
 1. OTA package is extracted to `userdata/ota-recovery/ota_work/`
@@ -115,6 +148,13 @@ writes—including `/home` and `/var/lib`—persist on `armbi_usrdata` without
 changing the OTA rootfs. Encrypted A/B and Recovery images use the
 initramfs-unlocked `/dev/mapper/armbian-userdata` mapper as the overlayroot
 backing device.
+
+In Recovery mode the dedicated `/boot` partition is the **one exception**
+to overlayfs: it is mounted by fstab on top of the overlay root, so writes
+to `/boot` reach the real boot partition and stay visible to U-Boot across
+reboots. This matters for apt kernel upgrades and `armbianEnv.txt` edits,
+which would otherwise be captured by the overlay upper layer and silently
+ignored on next boot.
 
 Recovery OTA stores its pending payload and state in `userdata/ota-recovery/`
 rather than the overlay rootfs. The initramfs mounts this transaction store,
@@ -179,7 +219,7 @@ OTA_SECURITY_SIZE=4     # Security partition size in MiB (encrypted images)
 # For Recovery OTA
 OTA_ENABLE=yes
 # leave AB_PART_OTA unset
-OTA_BOOT_SIZE=256       # Used when a separate boot partition is required
+OTA_BOOT_SIZE=256       # /boot partition size in MiB (ext4 except secure boot)
 # OTA_ROOTFS_SIZE=4096  # Optional rootfs partition size override
 OTA_USERDATA_SIZE=1024  # Userdata partition size in MiB
 OTA_SECURITY_SIZE=4     # Security partition size in MiB (encrypted images)
