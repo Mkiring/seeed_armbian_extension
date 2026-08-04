@@ -22,6 +22,14 @@ Covers the work on `fix/secure_boot` against `main`
   userdata and silently ignored by U-Boot on next boot. Secure-boot
   Recovery continues to use a raw FIT boot partition (`BOOT_RAW_MODE=yes`),
   unchanged. The partition order is now `[boot][security?][rootfs][userdata]`.
+- **`recurse=0` on overlayroot.** The overlayroot package's init-bottom
+  hook defaults to `recurse=1`, which wraps every fstab mount point in a
+  per-directory overlay — so even with a dedicated boot partition, `/boot`
+  was still being overlayed and writes were captured by userdata. Setting
+  `recurse=0` keeps the overlay on `/` only and leaves `/boot` (and any
+  other non-root fstab mount) as a direct mount. Verified on a
+  `recomputer-rk3588-devkit` image: `/boot` is now mounted directly from
+  `armbi_boot` and writes reach the raw partition.
 
 #### Secure boot & secure rootfs
 

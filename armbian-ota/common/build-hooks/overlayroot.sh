@@ -13,10 +13,16 @@ function ota_set_config_option() {
 }
 
 function ota_overlayroot_device_options() {
+    # recurse=0 keeps overlayfs on / only; other fstab mounts (notably the
+    # dedicated /boot partition) stay as direct mounts instead of being
+    # wrapped in a per-directory overlay whose upper layer lives on userdata.
+    # Without this, runtime /boot writes (apt kernel upgrades, armbianEnv.txt
+    # edits, OTA tooling) are captured by the overlay upper and stay invisible
+    # to U-Boot on next boot, even with a separate boot partition in place.
     if ota_encrypted_rootfs_enabled; then
-        printf '%s\n' 'dev=/dev/mapper/armbian-userdata,timeout=30'
+        printf '%s\n' 'dev=/dev/mapper/armbian-userdata,timeout=30,recurse=0'
     else
-        printf '%s\n' 'dev=LABEL=armbi_usrdata'
+        printf '%s\n' 'dev=LABEL=armbi_usrdata,recurse=0'
     fi
 }
 
