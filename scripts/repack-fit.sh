@@ -58,6 +58,7 @@ KEEP_WORKDIR=0
 BOOTARGS_OVERRIDE=""
 ITS_TEMPLATE_OVERRIDE=""
 WORKDIR_OVERRIDE=""
+DOCKER_IMAGE=""
 
 # ===== state (populated by parse_args) =====
 SOURCE_BOOT_ITB=""
@@ -93,6 +94,11 @@ Optional:
   --no-cache                  Force dtbo recompilation
   --bootargs ARGS             Override /chosen/bootargs (default: extracted from source boot.itb)
   --workdir PATH              Use this workdir instead of mktemp -d
+  --docker-image IMAGE        Sign + verify inside this docker container
+                              (e.g. armbian.local.only/armbian-build:<tag>).
+                              Required unless running as root: the U-Boot
+                              worktree is root-owned AND the host OpenSSL
+                              signs PSS with the wrong salt length.
   --keep-workdir              Don't delete workdir on exit (debug)
   -h, --help                  Show this help
 EOF
@@ -114,6 +120,7 @@ parse_args() {
             --no-cache)           NO_CACHE=1; shift ;;
             --bootargs)           BOOTARGS_OVERRIDE="$2"; shift 2 ;;
             --workdir)            WORKDIR_OVERRIDE="$2"; shift 2 ;;
+            --docker-image)       DOCKER_IMAGE="$2"; shift 2 ;;
             --keep-workdir)       KEEP_WORKDIR=1; shift ;;
             -h|--help)            usage; exit 0 ;;
             *)                    echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -148,11 +155,39 @@ parse_args() {
     else
         ITS_TEMPLATE="${DEFAULT_ITS_DIR}/${BOOT_SOC}_fit_kernel.its"
     fi
+
+    # Normalize to absolute paths: later stages cd into a temp workdir, and any
+    # user-supplied ../path would silently resolve against the wrong directory.
+    local p
+    for p in SOURCE_BOOT_ITB LINUX_SOURCE UBOOT_DIR KEYS_SOURCE_DIR ITS_TEMPLATE; do
+        declare -g "${p}=$(readlink -m "${!p}")"
+    done
+    OUTPUT_PATH="$(readlink -m "${OUTPUT_PATH}")"
 }
 
 check_required_tools() {
     local -a missing=()
     local tool
+
+    # The signing step writes ${UBOOT_DIR}/fit/boot.itb — the armbian-build
+    # cache is root-owned, so an unprivileged run fails halfway through.
+    # Fail early with a clear hint instead. Docker mode bypasses this: the
+    # write happens inside the container (docker daemon is root).
+    if [[ -z "${DOCKER_IMAGE}" && ! -w "${UBOOT_DIR}" ]]; then
+        cat >&2 <<EOF
+!! [ERR] No write permission in --u-boot-dir: ${UBOOT_DIR}
+
+The signing step must write ${UBOOT_DIR}/fit/boot.itb and may need to
+rebuild tools/mkimage. The armbian-build cache is typically root-owned.
+
+Either rerun with sudo, or use --docker-image to sign inside the armbian
+build container (recommended — the container OpenSSL signs PSS with the
+salt length this U-Boot's fit_check_sign expects; the host OpenSSL 3.x
+default does not, and signatures made on the host fail verification).
+EOF
+        exit 1
+    fi
+
     for tool in fdtoverlay fdtput fdtget openssl make install; do
         command -v "${tool}" >/dev/null 2>&1 || missing+=("${tool}")
     done
@@ -212,15 +247,24 @@ extract_source_artifacts() {
         exit_with_error "Source boot.itb is not a valid FIT image" "${SOURCE_BOOT_ITB}"
 
     # ITS node order: fdt, kernel, ramdisk, resource (matches rkXXXX_fit_kernel.its).
-    # dumpimage -p is zero-based.
-    "${dumpimage}" -i "${SOURCE_BOOT_ITB}" -T flat_dt -p 0 -o "${work}/base.dtb" "${SOURCE_BOOT_ITB}" ||
-        exit_with_error "Failed to extract base DTB" "fdt node"
-    "${dumpimage}" -i "${SOURCE_BOOT_ITB}" -T kernel  -p 1 -o "${work}/Image"    "${SOURCE_BOOT_ITB}" ||
-        exit_with_error "Failed to extract kernel image" "kernel node"
-    "${dumpimage}" -i "${SOURCE_BOOT_ITB}" -T ramdisk -p 2 -o "${work}/uInitrd"  "${SOURCE_BOOT_ITB}" ||
-        exit_with_error "Failed to extract ramdisk" "ramdisk node"
-    "${dumpimage}" -i "${SOURCE_BOOT_ITB}" -T multi   -p 3 -o "${work}/resource.img" "${SOURCE_BOOT_ITB}" ||
-        exit_with_error "Failed to extract resource.img" "resource node"
+    # dumpimage -p is zero-based. Always pass -T flat_dt: this dumpimage build only
+    # registers an extraction handler for flat_dt (-T kernel/ramdisk/multi exit 255),
+    # while -p alone selects which image node is actually extracted.
+    local node
+    local -a nodes=(
+        "0:base.dtb:fdt"
+        "1:Image:kernel"
+        "2:uInitrd:ramdisk"
+        "3:resource.img:resource"
+    )
+    for node in "${nodes[@]}"; do
+        local pos="${node%%:*}"
+        local rest="${node#*:}"
+        local fname="${rest%%:*}"
+        local label="${rest##*:}"
+        "${dumpimage}" -i "${SOURCE_BOOT_ITB}" -T flat_dt -p "${pos}" -o "${work}/${fname}" "${SOURCE_BOOT_ITB}" >/dev/null ||
+            exit_with_error "Failed to extract ${label} image" "-p ${pos}"
+    done
 
     [[ -s "${work}/base.dtb" && -s "${work}/Image" && -s "${work}/uInitrd" ]] ||
         exit_with_error "Extraction produced empty files" "${work}"
@@ -269,25 +313,23 @@ prepare_keys_workdir() {
     printf '%s' "${keys_work}"
 }
 
-# Cache layout: <cache-dir>/<dtbo-name>.<mtime-hash>.<toolchain-hash>.dtbo
-# Hash combines source .dts mtime and toolchain version so toolchain upgrades
-# invalidate the cache automatically.
+# Cache layout: <cache-dir>/<dtbo-name>.<mtime-hash>.dtbo
+# Hash combines the .dts (or prebuilt .dtbo) mtime so source edits invalidate
+# the cache automatically.
 compute_cache_key() {
     local dtbo_name="$1"
-    local dts_src="${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay/${dtbo_name}.dts"
+    local overlay_dir="${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay"
+    local dts_src="${overlay_dir}/${dtbo_name}.dts"
+    local dtbo_prebuilt="${overlay_dir}/${dtbo_name}.dtbo"
+    local src="${dts_src}"
 
-    [[ -f "${dts_src}" ]] ||
-        exit_with_error "dtbo source not found" "${dts_src}"
+    [[ -f "${src}" ]] || src="${dtbo_prebuilt}"
+    [[ -f "${src}" ]] ||
+        exit_with_error "dtbo not found" "${dts_src} / ${dtbo_prebuilt}"
 
-    local mtime hash tc_hash cache_key
-    mtime=$(stat -c '%Y %s' "${dts_src}")
-    # Use the compiler binary itself for toolchain identity (more reliable than --version).
-    if [[ -x "$(command -v "${CROSS_COMPILE}gcc" 2>/dev/null || echo "${CROSS_COMPILE}gcc")" ]]; then
-        tc_hash=$("${CROSS_COMPILE}gcc" -dumpfullversion -dumpversion 2>/dev/null | head -c1 || echo "x")
-    else
-        tc_hash="no-tc"
-    fi
-    hash=$(printf '%s|%s|%s' "${dtbo_name}" "${mtime}" "${tc_hash}" | sha256sum | cut -c1-16)
+    local mtime hash cache_key
+    mtime=$(stat -c '%Y %s' "${src}")
+    hash=$(printf '%s|%s' "${dtbo_name}" "${mtime}" | sha256sum | cut -c1-16)
     cache_key="${dtbo_name}.${hash}"
     printf '%s' "${cache_key}"
 }
@@ -300,47 +342,55 @@ compile_dtbo_list() {
         mkdir -p "${CACHE_DIR}"
     fi
 
-    local dtbo_name dts_src cache_key cached_path out_path
+    local dtbo_name dts_src dtbo_prebuilt cache_key cached_path out_path
+    local overlay_dir="${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay"
     for dtbo_name in ${DTBO_LIST}; do
-        dts_src="${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay/${dtbo_name}.dts"
-        if [[ ! -f "${dts_src}" ]]; then
+        dts_src="${overlay_dir}/${dtbo_name}.dts"
+        dtbo_prebuilt="${overlay_dir}/${dtbo_name}.dtbo"
+        if [[ ! -f "${dts_src}" && ! -f "${dtbo_prebuilt}" ]]; then
             local available
-            available=$(ls "${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay/" 2>/dev/null \
-                        | grep -E "^recomputer-${BOOT_SOC}-devkit-.*\.dts\$" \
-                        | sed 's/\.dts$//' \
+            available=$(ls "${overlay_dir}/" 2>/dev/null \
+                        | grep -E "^recomputer-${BOOT_SOC}-devkit-.*\.dtbo\$" \
+                        | sed 's/\.dtbo$//' \
                         | tr '\n' ' ')
-            exit_with_error "dtbo source not found: ${dtbo_name}" \
+            exit_with_error "dtbo not found: ${dtbo_name}" \
                 "available recomputer-${BOOT_SOC}-devkit-* overlays: ${available:-<none>}"
         fi
 
         out_path="${overlay_out_dir}/${dtbo_name}.dtbo"
+        cache_key="$(compute_cache_key "${dtbo_name}")"
+        cached_path="${CACHE_DIR}/${cache_key}.dtbo"
 
-        if [[ "${NO_CACHE}" -eq 0 ]]; then
-            cache_key="$(compute_cache_key "${dtbo_name}")"
-            cached_path="${CACHE_DIR}/${cache_key}.dtbo"
-            if [[ -f "${cached_path}" ]]; then
-                display_alert "repack-fit" "cache hit: ${dtbo_name}" "info"
-                cp "${cached_path}" "${out_path}"
-                continue
+        if [[ "${NO_CACHE}" -eq 0 && -f "${cached_path}" ]]; then
+            display_alert "repack-fit" "cache hit: ${dtbo_name}" "info"
+            cp "${cached_path}" "${out_path}"
+            continue
+        fi
+
+        # The kernel worktree usually already carries the built .dtbo from a
+        # prior armbian-build run. Reuse it when it is not older than its .dts.
+        if [[ -f "${dtbo_prebuilt}" && ( ! -f "${dts_src}" || "${dtbo_prebuilt}" -nt "${dts_src}" ) ]]; then
+            display_alert "repack-fit" "using prebuilt dtbo: ${dtbo_name}" "info"
+            cp "${dtbo_prebuilt}" "${out_path}"
+        else
+            display_alert "repack-fit" "compiling dtbo: ${dtbo_name}" "info"
+
+            # Target is relative to arch/arm64/boot/dts/ — the kbuild dts
+            # rule prepends that prefix itself; passing the full path makes
+            # it doubled and the rule misses.
+            local make_err
+            if ! make_err=$(cd "${LINUX_SOURCE}" && \
+                    make ARCH=arm64 CROSS_COMPILE="${CROSS_COMPILE}" \
+                    "rockchip/overlay/${dtbo_name}.dtbo" 2>&1); then
+                printf '%s\n' "${make_err}" >&2
+                exit_with_error "dtbo compilation failed" "${dtbo_name}"
             fi
+
+            [[ -f "${dtbo_prebuilt}" ]] ||
+                exit_with_error "dtbo build produced no output" "${dtbo_name}.dtbo"
+
+            cp "${dtbo_prebuilt}" "${out_path}"
         fi
-
-        display_alert "repack-fit" "compiling dtbo: ${dtbo_name}" "info"
-
-        # Single-target make invocation. Runs in the linux source tree so the
-        # overlay Makefile's includes resolve correctly.
-        local make_err
-        if ! make_err=$(cd "${LINUX_SOURCE}" && \
-                make ARCH=arm64 CROSS_COMPILE="${CROSS_COMPILE}" \
-                "arch/arm64/boot/dts/rockchip/overlay/${dtbo_name}.dtbo" 2>&1); then
-            printf '%s\n' "${make_err}" >&2
-            exit_with_error "dtbo compilation failed" "${dtbo_name}"
-        fi
-
-        [[ -f "${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay/${dtbo_name}.dtbo" ]] ||
-            exit_with_error "dtbo build produced no output" "${dtbo_name}.dtbo"
-
-        cp "${LINUX_SOURCE}/arch/arm64/boot/dts/rockchip/overlay/${dtbo_name}.dtbo" "${out_path}"
 
         if [[ "${NO_CACHE}" -eq 0 ]]; then
             # Clean stale cache entries for this dtbo name before writing the new one.
@@ -414,17 +464,76 @@ initial_mkimage() {
 
 secondary_signing() {
     local work="$1"
+    local fit_padding="0x1000"
+
+    if grep -q '^CONFIG_FIT_ENABLE_RSA4096_SUPPORT=y' "${UBOOT_DIR}/.config" 2>/dev/null; then
+        fit_padding="0x1200"
+    fi
+
+    if [[ -n "${DOCKER_IMAGE}" ]]; then
+        # Sign inside the armbian build container. Reason: this U-Boot fork's
+        # rsa-sign.c never sets a PSS salt length, so mkimage follows the
+        # OpenSSL default. The container's OpenSSL signs with salt = max
+        # (222 for RSA2048+sha256), matching the hardcoded expectation in
+        # rsa-verify.c padding_pss_verify. Host OpenSSL 3.x defaults to
+        # salt = hash length (32) — such signatures always fail verification.
+        display_alert "repack-fit" "Signing FIT in docker: ${DOCKER_IMAGE}" "info"
+        if ! docker run --rm \
+                -v "${work}:${work}" \
+                -v "${UBOOT_DIR}:${UBOOT_DIR}" \
+                "${DOCKER_IMAGE}" bash -c "
+                    set -e
+                    cd '${UBOOT_DIR}'
+                    mkdir -p fit
+                    ./tools/mkimage -f '${work}/boot-final.its' -k keys/ -E -p ${fit_padding} -r fit/boot.itb
+                "; then
+            exit_with_error "docker signing failed" "${DOCKER_IMAGE}"
+        fi
+        return 0
+    fi
 
     # rk_secure_boot_run_secondary_fit_signing expects to be called from the
     # u-boot tree (uses ${uboot_dir}/tools/mkimage and ${uboot_dir}/u-boot.dtb).
     # It writes the signed FIT to ${uboot_dir}/fit/boot.itb.
-    display_alert "repack-fit" "Signing FIT (RSA, key-name-hint=dev)" "info"
+    #
+    # This u-boot's mkimage exits 1 on `-h` (unknown option, usage still
+    # printed). Under `set -o pipefail` the `mkimage -h | grep` guards inside
+    # the sourced function inherit that rc and falsely report "lacks FIT
+    # signature support". Disable pipefail for the duration of the call.
+    display_alert "repack-fit" "Signing FIT on host (RSA, key-name-hint=dev)" "info"
+    set +o pipefail
     rk_secure_boot_run_secondary_fit_signing "${work}" "${UBOOT_DIR}"
+    local rc=$?
+    set -o pipefail
+    return "${rc}"
 }
 
 fit_check_sign() {
     local check_tool
     check_tool="$(resolve_tool fit_check_sign)"
+
+    if [[ -n "${DOCKER_IMAGE}" ]]; then
+        display_alert "repack-fit" "Verifying signature in docker" "info"
+        if ! docker run --rm \
+                -v "${UBOOT_DIR}:${UBOOT_DIR}" \
+                "${DOCKER_IMAGE}" bash -c "
+                    set -e
+                    cd '${UBOOT_DIR}'
+                    ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb
+                " >/dev/null; then
+            cat >&2 <<'EOF'
+
+Signature verification failed. Likely causes:
+  1. The keys in --u-boot-dir/keys or --keys-source-dir do not match the
+     public key embedded in u-boot.dtb (this U-Boot was built with a
+     different key).
+  2. The docker image's OpenSSL signs with an unexpected PSS salt length.
+EOF
+            exit 1
+        fi
+        display_alert "repack-fit" "Signature check OK (in container)" "info"
+        return 0
+    fi
 
     if [[ ! -x "${check_tool}" ]]; then
         display_alert "repack-fit" "fit_check_sign not available, skipping verification" "warn"
