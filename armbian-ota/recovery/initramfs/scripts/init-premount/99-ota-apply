@@ -1,0 +1,168 @@
+#!/bin/sh
+#
+# Recovery initramfs init-premount hook: OTA update orchestrator.
+#
+# Recovery OTA is applied in a single linear transaction. All helpers live in
+# the initramfs-specific POSIX sh libraries under /usr/share/armbian-ota/:
+# recovery/log.sh, recovery/device.sh, recovery/payload.sh, plus state.sh.
+# This script only sources them and drives the ordered steps.
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /usr/share/armbian-ota/state.sh
+. /usr/share/armbian-ota/recovery/log.sh
+. /usr/share/armbian-ota/recovery/device.sh
+. /usr/share/armbian-ota/recovery/payload.sh
+
+# Enable verbose shell tracing only when explicitly requested.
+if [ "${OTA_DEBUG:-no}" = "yes" ]; then
+    set -x
+fi
+
+# transaction layout
+ROOT_MNT="/mnt/root"
+BOOT_MNT="/mnt/boot"
+USERDATA_MNT="/mnt/userdata"
+RECOVERY_TRANSACTION_DIR="${USERDATA_MNT}/ota-recovery"
+STATE_DIR=""
+STATE_FILE=""
+OTA_DIR=""
+ROOTFS_TAR=""
+BOOT_TAR=""
+BOOT_ITB=""
+
+find_userdata_device() {
+    local dev
+
+    if [ -b /dev/mapper/armbian-userdata ]; then
+        printf '%s\n' /dev/mapper/armbian-userdata
+        return 0
+    fi
+
+    dev="$(blkid -t PARTLABEL=userdata -o device 2>/dev/null | head -n1 || true)"
+    if [ -n "${dev}" ] && [ "$(blkid -s TYPE -o value "${dev}" 2>/dev/null || true)" = "ext4" ]; then
+        printf '%s\n' "${dev}"
+        return 0
+    fi
+
+    dev="$(blkid -t LABEL=armbi_usrdata -o device 2>/dev/null | head -n1 || true)"
+    if [ -n "${dev}" ] && [ "$(blkid -s TYPE -o value "${dev}" 2>/dev/null || true)" = "ext4" ]; then
+        printf '%s\n' "${dev}"
+    fi
+}
+
+mount_recovery_transaction_store() {
+    local userdata_dev
+
+    userdata_dev="$(find_userdata_device)"
+    [ -n "${userdata_dev}" ] || {
+        log "userdata partition is unavailable"
+        return 1
+    }
+
+    mkdir -p "${USERDATA_MNT}"
+    mount -t ext4 -o rw "${userdata_dev}" "${USERDATA_MNT}" || {
+        log "failed to mount userdata ${userdata_dev}"
+        return 1
+    }
+
+    STATE_DIR="${RECOVERY_TRANSACTION_DIR}/state"
+    STATE_FILE="${STATE_DIR}/ota-state.env"
+    OTA_DIR="${RECOVERY_TRANSACTION_DIR}/ota_work"
+    ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
+    BOOT_TAR="${OTA_DIR}/boot.tar.gz"
+    BOOT_ITB="${OTA_DIR}/boot.itb"
+}
+
+unmount_recovery_transaction_store() {
+    if mountpoint -q "${USERDATA_MNT}"; then
+        umount "${USERDATA_MNT}" 2>/dev/null || log "WARN: failed to unmount ${USERDATA_MNT}"
+    fi
+}
+
+mkdir -p "$LOGDIR"
+log "init-premount ota hook start"
+log "LOGFILE=${LOGFILE}"
+touch "${LOGDIR}/ota_ran.init-premount"
+
+# 1) probe devices (sets ROOT_DEV, ROOT_UUID, BOOT_DEV, BOOT_UUID,
+#    HAS_BOOT_PART, AUTO_DECRYPT_MODE)
+ota_detect_devices
+
+# 2) mount root + validate state
+if [ -z "${ROOT_DEV}" ]; then
+    log "ROOT_DEV is empty, skip OTA"
+    exit 0
+fi
+
+if ! mount_recovery_transaction_store; then
+    exit 0
+fi
+
+mkdir -p "${ROOT_MNT}"
+log "mounting ${ROOT_DEV} -> ${ROOT_MNT} ..."
+if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
+    log "cannot mount ${ROOT_DEV}, skip OTA"
+    unmount_recovery_transaction_store
+    exit 0
+fi
+
+ota_validate_recovery_state || {
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
+    exit 0
+}
+
+# Raise printk only now that an OTA is confirmed to be pending. On a normal
+# boot the early-exit paths above leave console_loglevel untouched so the
+# real rootfs stays quiet; the OTA-apply path gets full console visibility
+# for the extract/patch work below.
+ota_log_init
+log "OTA confirmed, applying..."
+
+# 3) apply rootfs (clean + extract + first-login markers)
+ota_apply_rootfs || {
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
+    exit 0
+}
+
+# 4-6) apply boot (mount + extract boot.tar.gz, write boot.itb)
+ota_apply_boot || {
+    if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
+        umount "${BOOT_MNT}" 2>/dev/null || true
+    fi
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
+    exit 0
+}
+
+# 7) fix UUIDs in armbianEnv.txt / fstab / crypttab
+ota_patch_config
+
+# 8) cleanup payload
+log "  delete OTA payload directory ${OTA_DIR} ..."
+rm -rf "${OTA_DIR}" || true
+
+# 9) commit success state
+ota_commit_success_state
+
+# 10) unmount partitions
+ota_unmount_all
+unmount_recovery_transaction_store
+
+sync
+
+# 11) reboot
+ota_reboot

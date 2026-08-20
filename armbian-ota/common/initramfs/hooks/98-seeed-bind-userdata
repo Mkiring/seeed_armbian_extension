@@ -1,0 +1,35 @@
+#!/bin/sh
+# initramfs-tools hook: copy Seeed OTA common helpers used by
+# scripts/init-bottom/00-seeed-bind-userdata. Installed for both recovery
+# and A/B OTA images via the Seeed extension's runtime install hooks.
+
+set -e
+
+. /usr/share/initramfs-tools/hook-functions
+
+echo "[98-seeed-bind-userdata] adding Seeed userdata resolver tools into initramfs..." >&2
+
+# Source the shared helper into the initramfs at the same path it will live
+# at runtime so the init-bottom script can `.` it from a stable location.
+src="/usr/share/armbian-ota/find-userdata.sh"
+dest="${DESTDIR}/usr/share/armbian-ota/find-userdata.sh"
+if [ -f "${src}" ]; then
+    mkdir -p "$(dirname "${dest}")"
+    cp -p "${src}" "${dest}"
+else
+    echo "[98-seeed-bind-userdata] missing ${src}" >&2
+    exit 1
+fi
+
+# readlink and blkid are needed by find-userdata.sh. busybox (always
+# present in initramfs) provides readlink -f; util-linux blkid is copied by
+# the overlayroot hook already. Copy them defensively in case overlayroot
+# is ever removed.
+if command -v copy_exec >/dev/null 2>&1; then
+    for rl in /usr/bin/readlink /bin/readlink; do
+        [ -x "${rl}" ] && { copy_exec "${rl}" "$(dirname "${rl}")"; break; }
+    done
+    for bl in /usr/sbin/blkid /sbin/blkid; do
+        [ -x "${bl}" ] && { copy_exec "${bl}" "$(dirname "${bl}")"; break; }
+    done
+fi

@@ -1,0 +1,24 @@
+# Default values for first-time A/B U-Boot environment initialization.
+# This is a libubootenv key=value file; each environment value must remain on
+# one physical line.
+
+# Slot state
+boot_slot=a
+boot_success=a
+ota_in_progress=0
+slot_retry_max=3
+slot_retry_left=3
+
+# Normalize the retry counter, then roll back after retry exhaustion.
+ab_preboot=if test "${ota_in_progress}" = "1"; then if test "${slot_retry_left}" -gt "${slot_retry_max}"; then setenv slot_retry_left ${slot_retry_max}; fi; if test "${slot_retry_left}" -le 0; then setenv boot_slot ${boot_success}; setenv ota_in_progress 0; setenv slot_retry_left ${slot_retry_max}; saveenv; reset; fi; setexpr slot_retry_left ${slot_retry_left} - 1; saveenv; fi
+
+# Select only the active A/B boot partition on the configured boot device.
+ab_select_boot_part=if test "${devtype}" = "${ab_boot_devtype}" && test "${devnum}" = "${ab_boot_devnum}"; then if test "${boot_slot}" = "b"; then setenv devplist ${distro_bootpart_b}; else setenv devplist ${distro_bootpart_a}; fi; else part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi
+
+scan_dev_for_boot_part=run ab_select_boot_part; boot_android ${devtype} ${devnum}; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done
+
+# Raw FIT boot path
+ab_select_fit_slot=if test "${boot_slot}" = "b"; then setenv boot_fit_part boot_b; else setenv boot_fit_part boot_a; fi
+
+# Dispatch to the path detected by armbian-ota-init-uboot.
+bootcmd=run ab_preboot; if test "${ab_boot_mode}" = "raw-fit"; then run ab_select_fit_slot; setenv bootargs "${bootargs} armbian.slot=${boot_slot}"; boot_fit; else run distro_bootcmd; boot_fit; bootrkp; fi

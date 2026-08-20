@@ -1,0 +1,419 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SERVICE_NAME="armbian-resize-userdata.service"
+USERDATA_PARTLABEL="userdata"
+USERDATA_FSLABEL="armbi_usrdata"
+ALIGN_BYTES=$((16 * 1024 * 1024))
+RETRY_EXIT_STATUS=75
+
+log() {
+    echo "[resize-userdata] $*"
+}
+
+warn() {
+    echo "[resize-userdata] WARN: $*" >&2
+}
+
+fail() {
+    echo "[resize-userdata] ERROR: $*" >&2
+    exit 1
+}
+
+require_commands() {
+    local command
+
+    for command in blkid lsblk parted partprobe partx resize2fs script udevadm; do
+        command -v "${command}" >/dev/null 2>&1 ||
+            fail "required command not found: ${command}"
+    done
+}
+
+get_parent_disk_dev() {
+    local partdev="$1" pkname base
+
+    pkname="$(lsblk -dno PKNAME "${partdev}" 2>/dev/null || true)"
+    if [ -n "${pkname}" ]; then
+        echo "/dev/${pkname}"
+        return 0
+    fi
+
+    base="$(basename "${partdev}")"
+    case "${base}" in
+        nvme*n*p[0-9]*|mmcblk*p[0-9]*) echo "/dev/${base%p[0-9]*}" ;;
+        sd*[0-9]*) echo "/dev/${base%%[0-9]*}" ;;
+        *) return 1 ;;
+    esac
+}
+
+get_partition_number() {
+    local partdev="$1" base
+
+    base="$(basename "${partdev}")"
+    case "${base}" in
+        nvme*n*p[0-9]*|mmcblk*p[0-9]*) echo "${base##*p}" ;;
+        sd*[0-9]*) echo "${base##*[!0-9]}" ;;
+        *) return 1 ;;
+    esac
+}
+
+parted_field() {
+    local diskdev="$1" partnum="$2" field="$3"
+
+    # -f repairs the backup GPT header after a small image has been written
+    # to a larger disk. Without it, parted refuses every later resize action.
+    parted -s -f -m "${diskdev}" unit s print |
+        awk -F: -v part="${partnum}" -v field="${field}" \
+            'NR >= 3 && $1 == part { gsub(/s$/, "", $field); print $field; exit }'
+}
+
+partition_after_start() {
+    local diskdev="$1" partstart="$2"
+
+    parted -s -f -m "${diskdev}" unit s print |
+        awk -F: -v start="${partstart}" \
+            'NR >= 3 { gsub(/s$/, "", $2); if (($2 + 0) > start) print $1 }'
+}
+
+resize_partition_to_end() {
+    local partdev="$1" diskdev partnum partstart partend capacity sector_size lastsector trailing expected_size actual_size
+
+    [ "$(lsblk -dno TYPE "${partdev}" 2>/dev/null)" = "part" ] ||
+        fail "${partdev} is not a partition"
+
+    diskdev="$(get_parent_disk_dev "${partdev}")" ||
+        fail "failed to detect parent disk for ${partdev}"
+    partnum="$(get_partition_number "${partdev}")" ||
+        fail "failed to detect partition number for ${partdev}"
+
+    partstart="$(parted_field "${diskdev}" "${partnum}" 2)"
+    partend="$(parted_field "${diskdev}" "${partnum}" 3)"
+    [ -n "${partstart}" ] && [ -n "${partend}" ] ||
+        fail "failed to read ${partdev} boundaries"
+
+    trailing="$(partition_after_start "${diskdev}" "${partstart}")"
+    [ -z "${trailing}" ] ||
+        fail "${partdev} is not the last partition; partition(s) after it: ${trailing}"
+
+    capacity="$(parted -s -f -m "${diskdev}" unit s print | awk -F: 'NR == 2 { gsub(/s$/, "", $2); print $2 }')"
+    sector_size="$(parted -s -f -m "${diskdev}" unit s print | awk -F: 'NR == 2 { print $4 }')"
+    [ -n "${capacity}" ] && [ -n "${sector_size}" ] ||
+        fail "failed to read ${diskdev} geometry"
+
+    # Keep the end below the disk's final alignment block.  This safely leaves
+    # room for GPT backup metadata even when the disk capacity is aligned.
+    lastsector=$((capacity - 1))
+    lastsector=$((lastsector - (lastsector % (ALIGN_BYTES / sector_size)) - 1))
+
+    log "partition=${partdev} disk=${diskdev} number=${partnum} start=${partstart}s end=${partend}s target_end=${lastsector}s"
+
+    if [ "${lastsector}" -lt "${partend}" ]; then
+        fail "target end ${lastsector}s is smaller than current end ${partend}s; refusing to shrink"
+    fi
+    if [ "${lastsector}" -eq "${partend}" ]; then
+        log "partition already uses available space"
+        return 2
+    fi
+
+    # userdata is the verified final partition.  parted reads the mounted
+    # partition confirmation from a TTY, so use script(1) to provide a small
+    # pseudo-terminal and feed exactly one affirmative response.
+    printf 'Yes\n' | script -q -e -c "parted -f ${diskdev} unit s resizepart ${partnum} ${lastsector}s" /dev/null ||
+        fail "failed to resize ${partdev}"
+    partprobe "${diskdev}" || warn "partprobe could not reload ${diskdev}"
+    partx --update --nr "${partnum}" "${diskdev}" ||
+        warn "partx could not reload ${partdev}"
+    udevadm settle || true
+
+    expected_size=$((sector_size * (lastsector - partstart + 1)))
+    actual_size="$(lsblk -bdno SIZE "${partdev}" 2>/dev/null || true)"
+    if [ "${actual_size}" != "${expected_size}" ]; then
+        warn "kernel has not reloaded ${partdev} size yet; retrying shortly (reboot if retries do not succeed)"
+        return "${RETRY_EXIT_STATUS}"
+    fi
+
+    log "partition resized"
+    return 0
+}
+
+resize_ext4_filesystem() {
+    local partdev="$1" fstype
+
+    fstype="$(blkid -s TYPE -o value "${partdev}" 2>/dev/null || true)"
+    [ "${fstype}" = "ext4" ] ||
+        fail "unsupported userdata filesystem: ${fstype:-unknown}"
+
+    log "resizing ext4 filesystem on ${partdev}"
+    resize2fs "${partdev}"
+}
+
+resize_luks_mapping() {
+    local userdata_part="$1" mapper_name="$2"
+    local table table_size target_type data_offset userdata_size target_size new_table
+
+    command -v blockdev >/dev/null 2>&1 ||
+        fail "blockdev is required to resize encrypted userdata"
+    command -v dmsetup >/dev/null 2>&1 ||
+        fail "dmsetup is required to resize encrypted userdata"
+
+    table="$(dmsetup table "${mapper_name}" 2>/dev/null)" ||
+        fail "failed to read LUKS mapping ${mapper_name}"
+    [ "$(printf '%s\n' "${table}" | wc -l)" -eq 1 ] ||
+        fail "unsupported multi-target LUKS mapping: ${mapper_name}"
+
+    table_size="$(printf '%s\n' "${table}" | awk 'NR == 1 { print $2 }')"
+    target_type="$(printf '%s\n' "${table}" | awk 'NR == 1 { print $3 }')"
+    data_offset="$(printf '%s\n' "${table}" | awk 'NR == 1 { print $8 }')"
+    case "${table_size}:${data_offset}" in
+        *[!0-9:]*|:*) fail "failed to parse LUKS mapping ${mapper_name}" ;;
+    esac
+    [ "${target_type}" = "crypt" ] ||
+        fail "unsupported LUKS mapping target: ${target_type}"
+
+    userdata_size="$(blockdev --getsz "${userdata_part}")" ||
+        fail "failed to read ${userdata_part} size"
+    target_size=$((userdata_size - data_offset))
+    [ "${target_size}" -ge "${table_size}" ] ||
+        fail "refusing to shrink LUKS mapping ${mapper_name}"
+    if [ "${target_size}" -eq "${table_size}" ]; then
+        log "LUKS mapping already uses available space"
+        return 0
+    fi
+
+    new_table="$(printf '%s\n' "${table}" | awk -v size="${target_size}" 'NR == 1 { $2 = size } { print }')"
+    log "resizing LUKS mapping ${mapper_name} to ${target_size} sectors"
+    dmsetup suspend "${mapper_name}" ||
+        fail "failed to suspend LUKS mapping ${mapper_name}"
+    if ! printf '%s\n' "${new_table}" | dmsetup load "${mapper_name}"; then
+        dmsetup resume "${mapper_name}" || warn "failed to resume ${mapper_name} after loading error"
+        fail "failed to load resized LUKS mapping ${mapper_name}"
+    fi
+    dmsetup resume "${mapper_name}" ||
+        fail "failed to resume resized LUKS mapping ${mapper_name}"
+}
+
+find_userdata_partition() {
+    local dev dev_raw root_part anchor_disk dev_disk
+
+    # Compute the boot-disk anchor once -- everything else cross-checks
+    # against it. This is the partition backing / (or the overlay lower
+    # layer when / is overlayfs), resolved through LUKS mappers to the raw
+    # partition so the parent-disk walk works for encrypted images too.
+    root_part="$(_resize_userdata__find_root_lower_dev)"
+    if [ -n "${root_part}" ]; then
+        anchor_disk="$(_resize_userdata__parent_disk "${root_part}" 2>/dev/null || true)"
+    fi
+
+    # 1) Whatever overlayroot already mounted at /media/root-rw. On encrypted
+    #    images the mount source is the LUKS mapper (/dev/mapper/armbian-
+    #    userdata -> /dev/dm-N); resolve it back to the raw partition because
+    #    the resize steps below need the partition node, not the mapper.
+    #    Cross-check against the boot-disk anchor when it is known -- if the
+    #    mount source is a by-label symlink that udev has flipped to an
+    #    external drive, the check fails and we fall through.
+    if [ -e /media/root-rw ]; then
+        dev="$(findmnt -n -o SOURCE /media/root-rw 2>/dev/null | sed 's~\[.*\]~~' || true)"
+        if [ -n "${dev}" ]; then
+            dev_raw="$(_resize_userdata__raw_partition_of "${dev}" 2>/dev/null || true)"
+            if [ -n "${dev_raw}" ] && [ -b "${dev_raw}" ]; then
+                dev_disk="$(_resize_userdata__parent_disk "${dev_raw}" 2>/dev/null || true)"
+                if [ -z "${anchor_disk}" ] || [ "${dev_disk}" = "${anchor_disk}" ]; then
+                    echo "${dev_raw}"
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
+    # 2) The stable symlink created by init-bottom/00-seeed-bind-userdata.
+    #    For encrypted images it points at the mapper; convert to the raw
+    #    partition for the same reason as #1.
+    if [ -L /dev/armbian-userdata ]; then
+        dev="$(readlink -f /dev/armbian-userdata 2>/dev/null || true)"
+        if [ -n "${dev}" ]; then
+            dev_raw="$(_resize_userdata__raw_partition_of "${dev}" 2>/dev/null || true)"
+            if [ -n "${dev_raw}" ] && [ -b "${dev_raw}" ]; then
+                echo "${dev_raw}"
+                return 0
+            fi
+        fi
+    fi
+
+    # 3) Scan PARTLABEL=userdata and pick the one on the same disk as the
+    #    root partition. This is the deterministic fall-through; blkid only
+    #    reports raw partitions, so it naturally returns the LUKS partition
+    #    on encrypted images.
+    if [ -n "${anchor_disk}" ]; then
+        for cand in $(blkid -t PARTLABEL="${USERDATA_PARTLABEL}" -o device 2>/dev/null); do
+            dev_disk="$(_resize_userdata__parent_disk "${cand}" 2>/dev/null)" || continue
+            if [ "${dev_disk}" = "${anchor_disk}" ]; then
+                echo "${cand}"
+                return 0
+            fi
+        done
+    fi
+
+    # 4) Single-disk legacy fallback. Only deterministic when one disk is
+    #    present; preserves prior behaviour on truly degenerate systems.
+    dev="$(blkid -t PARTLABEL="${USERDATA_PARTLABEL}" -o device 2>/dev/null | head -n1 || true)"
+    if [ -n "${dev}" ]; then
+        echo "${dev}"
+        return 0
+    fi
+
+    blkid -t LABEL="${USERDATA_FSLABEL}" -o device 2>/dev/null | head -n1 || true
+}
+
+# Resolve any block device (raw partition, LUKS mapper, /dev/dm-N) to the
+# underlying raw partition. Raw partitions pass through unchanged; device-
+# mapper devices are walked via sysfs slaves/ to their backing partition.
+# Returns 1 for whole disks or anything without a partition backing it.
+_resize_userdata__raw_partition_of() {
+    local dev="$1" base resolved first_slave
+    case "${dev}" in
+        /dev/*) ;;
+        *) dev="/dev/${dev}" ;;
+    esac
+    resolved="$(readlink -f "${dev}" 2>/dev/null || true)"
+    [ -n "${resolved}" ] && dev="${resolved}"
+    [ -e "${dev}" ] || return 1
+
+    base="$(basename "${dev}")"
+
+    # Already a real partition (sysfs partition attribute exists).
+    if [ -f "/sys/class/block/${base}/partition" ]; then
+        printf '%s\n' "${dev}"
+        return 0
+    fi
+
+    # Device-mapper: first slave is the backing partition (one level is
+    # enough for plain LUKS; nested stacks are not a supported layout).
+    if [ -d "/sys/class/block/${base}/slaves" ]; then
+        first_slave="$(ls "/sys/class/block/${base}/slaves" 2>/dev/null | head -n1)"
+        if [ -n "${first_slave}" ] && [ -e "/sys/class/block/${first_slave}/partition" ]; then
+            printf '/dev/%s\n' "${first_slave}"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Echo the parent disk of a partition using sysfs (no lsblk dep, so this
+# also works in restricted environments).
+_resize_userdata__parent_disk() {
+    local partdev="$1" resolved base parent_sys parent_name
+    case "${partdev}" in
+        /dev/*) ;;
+        *) partdev="/dev/${partdev}" ;;
+    esac
+    # Resolve symlinks (e.g. /dev/disk/by-label/... -> /dev/mmcblk1p1) so
+    # the sysfs lookup below uses the real node name.
+    resolved="$(readlink -f "${partdev}" 2>/dev/null || true)"
+    [ -n "${resolved}" ] && partdev="${resolved}"
+    [ -e "${partdev}" ] || return 1
+    base="$(basename "${partdev}")"
+    [ -L "/sys/class/block/${base}" ] || return 1
+    parent_sys="$(dirname "$(readlink -f "/sys/class/block/${base}")")"
+    parent_name="$(basename "${parent_sys}")"
+    [ -n "${parent_name}" ] || return 1
+    [ -e "/sys/class/block/${parent_name}/dev" ] || return 1
+    printf '/dev/%s\n' "${parent_name}"
+}
+
+# Walk through overlayfs to find the underlying rootfs partition device
+# (the LOWER layer). Used to anchor userdata lookup to the boot disk. On
+# encrypted images the mount source is a LUKS mapper; pass it through
+# _raw_partition_of so the caller gets a real partition node.
+_resize_userdata__find_root_lower_dev() {
+    local lower_dir first_lower opts src
+    # Non-overlay root: SOURCE is the real partition (or mapper).
+    if [ "$(awk '$2=="/" {print $3}' /proc/mounts 2>/dev/null | head -n1)" != "overlay" ]; then
+        src="$(findmnt -n -o SOURCE / 2>/dev/null | sed 's~\[.*\]~~')"
+        _resize_userdata__raw_partition_of "${src}" 2>/dev/null ||
+            printf '%s\n' "${src}"
+        return 0
+    fi
+
+    # /proc/mounts has the mount options as a single comma-separated field at
+    # $4. Pull lowerdir= out of it; take the first lowerdir if multiple are
+    # colon-separated.
+    opts="$(awk '$2=="/" && $3=="overlay" {print $4}' /proc/mounts | head -n1)"
+    lower_dir="${opts#*,lowerdir=}"
+    [ "${lower_dir}" = "${opts}" ] && lower_dir=""   # no lowerdir found
+    [ -z "${lower_dir}" ] && lower_dir="${opts#lowerdir=}"
+    lower_dir="${lower_dir%%,*}"
+    [ -n "${lower_dir}" ] || return 1
+    first_lower="${lower_dir%%:*}"
+    [ -n "${first_lower}" ] || return 1
+    src="$(findmnt -n -T "${first_lower}" -o SOURCE 2>/dev/null | sed 's~\[.*\]~~')"
+    _resize_userdata__raw_partition_of "${src}" 2>/dev/null ||
+        printf '%s\n' "${src}"
+}
+
+resize_luks_userdata() {
+    local userdata_part="$1"
+    local mapper_name="armbian-userdata"
+    local mapper_dev="/dev/mapper/${mapper_name}"
+
+    command -v cryptsetup >/dev/null 2>&1 ||
+        fail "cryptsetup is required to resize encrypted userdata"
+    cryptsetup isLuks "${userdata_part}" >/dev/null 2>&1 ||
+        fail "${userdata_part} is not a LUKS partition"
+    [ -b "${mapper_dev}" ] ||
+        fail "encrypted userdata mapper is unavailable: ${mapper_dev}"
+
+    resize_luks_mapping "${userdata_part}" "${mapper_name}"
+    resize_ext4_filesystem "${mapper_dev}"
+}
+
+main() {
+    local userdata_part userdata_type resize_status
+
+    require_commands
+
+    userdata_part="$(find_userdata_partition)"
+    if [ -z "${userdata_part}" ]; then
+        warn "userdata partition not found; will retry on next boot"
+        # Intentionally do NOT disable: a transient blkid failure or a
+        # not-yet-settled /dev/armbian-userdata symlink should not strand
+        # the system with userdata unresized forever.
+        return 0
+    fi
+
+    log "resizing userdata partition: ${userdata_part}"
+    resize_status=0
+    resize_partition_to_end "${userdata_part}" || resize_status=$?
+    if [ "${resize_status}" -eq "${RETRY_EXIT_STATUS}" ]; then
+        exit "${RETRY_EXIT_STATUS}"
+    fi
+    if [ "${resize_status}" -ne 0 ] && [ "${resize_status}" -ne 2 ]; then
+        exit "${resize_status}"
+    fi
+
+    userdata_type="$(blkid -s TYPE -o value "${userdata_part}" 2>/dev/null || true)"
+    case "${userdata_type}" in
+        ext4)
+            resize_ext4_filesystem "${userdata_part}"
+            ;;
+        crypto_LUKS)
+            if [ "${resize_status}" -eq 0 ]; then
+                warn "encrypted userdata partition resized; reboot is required to reopen the LUKS mapper before resizing its ext4 filesystem"
+                return 0
+            fi
+            resize_luks_userdata "${userdata_part}"
+            ;;
+        *)
+            fail "unsupported userdata filesystem: ${userdata_type:-unknown}"
+            ;;
+    esac
+
+    # Intentionally do NOT disable the service. Booting from a different
+    # disk later (e.g. switching between NVMe and SD) brings up a new
+    # userdata that still needs expansion. The "already at target size"
+    # path returns 2 and lets resize2fs exit 0 quickly, so the per-boot
+    # cost is negligible.
+}
+
+main "$@"

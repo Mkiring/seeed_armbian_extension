@@ -1,0 +1,73 @@
+# Common overlayroot configuration helpers
+
+function ota_set_config_option() {
+    local config_file="$1"
+    local key="$2"
+    local assignment="$3"
+
+    if grep -q "^${key}=" "${config_file}"; then
+        sed -i "s|^${key}=.*|${assignment}|" "${config_file}"
+    else
+        printf '%s\n' "${assignment}" >> "${config_file}"
+    fi
+}
+
+function ota_overlayroot_device_options() {
+    # recurse=0 keeps overlayfs on / only; other fstab mounts (notably the
+    # dedicated /boot partition) stay as direct mounts instead of being
+    # wrapped in a per-directory overlay whose upper layer lives on userdata.
+    # Without this, runtime /boot writes (apt kernel upgrades, armbianEnv.txt
+    # edits, OTA tooling) are captured by the overlay upper and stay invisible
+    # to U-Boot on next boot, even with a separate boot partition in place.
+    #
+    # Both modes reference /dev/armbian-userdata. The initramfs hook
+    # 00-seeed-bind-userdata creates that symlink at boot, pointing at the
+    # userdata partition on the same physical disk as the rootfs. This avoids
+    # the multi-disk race where udev's /dev/disk/by-label/armbi_usrdata flips
+    # between disks when an external drive with the same image is plugged in.
+    if ota_encrypted_rootfs_enabled; then
+        printf '%s\n' 'dev=/dev/mapper/armbian-userdata,timeout=30,recurse=0'
+    else
+        printf '%s\n' 'dev=/dev/armbian-userdata,timeout=30,recurse=0'
+    fi
+}
+
+function ota_configure_overlayroot() {
+    local root_dir="$1"
+    local title="$2"
+    local device_options="$3"
+
+    display_alert "${title}" "Configuring overlayroot" "info"
+
+    if [[ -f "${root_dir}/etc/initramfs-tools/initramfs.conf" ]]; then
+        if ota_set_config_option "${root_dir}/etc/initramfs-tools/initramfs.conf" "BUSYBOX" "BUSYBOX=y"; then
+            display_alert "${title}" "Set BUSYBOX=y in initramfs.conf" "info"
+        else
+            display_alert "${title}" "Failed to set BUSYBOX=y in initramfs.conf" "warn"
+        fi
+    else
+        display_alert "${title}" "initramfs.conf not found" "warn"
+    fi
+
+    if [[ -f "${root_dir}/etc/overlayroot.conf" ]]; then
+        if ota_set_config_option "${root_dir}/etc/overlayroot.conf" "overlayroot" \
+            "overlayroot=\"device:${device_options}\""; then
+            display_alert "${title}" "Configured overlayroot backing store" "info"
+        else
+            display_alert "${title}" "Failed to configure overlayroot backing store" "warn"
+        fi
+    else
+        display_alert "${title}" "overlayroot.conf not found" "warn"
+    fi
+
+    if [[ -e "${root_dir}/etc/update-motd.d/97-overlayroot" ]]; then
+        rm -f "${root_dir}/etc/update-motd.d/97-overlayroot"
+        display_alert "${title}" "Removed overlayroot MOTD mount dump" "info"
+    fi
+}
+
+# Configure overlayroot before Armbian rebuilds the final initramfs.
+function pre_update_initramfs__892_config_overlayroot() {
+    ota_configure_overlayroot "${MOUNT}" "OTA" \
+        "$(ota_overlayroot_device_options)"
+}

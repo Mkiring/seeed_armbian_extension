@@ -1,0 +1,35 @@
+From bbbd5c2437190156950ad45eb2bb7808d34ef22f Mon Sep 17 00:00:00 2001
+From: mingzq <north_sea@qq.com>
+Date: Mon, 27 Jul 2026 02:52:11 +0000
+Subject: [PATCH 3/3] u-boot: normalize recomputer rk35xx defconfigs
+
+---
+ .../defconfig/recomputer-rk3576-devkit_defconfig                | 2 +-
+ .../defconfig/recomputer-rk3588-devkit_defconfig                | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3576-devkit_defconfig b/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3576-devkit_defconfig
+index 3a1a583c4..a2f0110b4 100644
+--- a/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3576-devkit_defconfig
++++ b/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3576-devkit_defconfig
+@@ -248,4 +248,4 @@ CONFIG_RK_AVB_LIBAVB_USER=y
+ CONFIG_ID_EEPROM=y
+ CONFIG_ENV_IS_IN_BLK_DEV=y
+ CONFIG_SPI_FLASH_PUYA=y
+-CONFIG_CMD_I2C=y
+\ No newline at end of file
++CONFIG_CMD_I2C=y
+diff --git a/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3588-devkit_defconfig b/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3588-devkit_defconfig
+index 385f694c2..efab8b7a4 100644
+--- a/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3588-devkit_defconfig
++++ b/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk3588-devkit_defconfig
+@@ -265,4 +265,4 @@ CONFIG_SCSI_AHCI=y
+ CONFIG_SCSI=y
+ CONFIG_MTD_BLK_U_BOOT_OFFS=0x400
+ CONFIG_ENV_IS_IN_BLK_DEV=y
+-CONFIG_CMD_I2C=y
+\ No newline at end of file
++CONFIG_CMD_I2C=y
+-- 
+2.54.0
+

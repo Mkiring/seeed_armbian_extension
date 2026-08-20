@@ -1,0 +1,88 @@
+#!/bin/bash
+
+set -euo pipefail
+
+OTA_RUNTIME_DIR="/usr/share/armbian-ota"
+[ -f "${OTA_RUNTIME_DIR}/common.sh" ] || {
+    echo "ERROR: OTA runtime libraries not found at ${OTA_RUNTIME_DIR}" >&2
+    exit 1
+}
+. "${OTA_RUNTIME_DIR}/common.sh"
+
+ota_source_library "${OTA_RUNTIME_DIR}/ab/env.sh" "A/B U-Boot environment helper" || exit 1
+
+require_basic_system_health() {
+    local root_opts
+
+    [ -r /proc/version ] || {
+        log_error "/proc/version is not readable"
+        return 1
+    }
+
+    mountpoint -q /proc && mountpoint -q /sys && mountpoint -q /dev || {
+        log_error "required pseudo filesystems are not mounted"
+        return 1
+    }
+
+    root_opts="$(findmnt -n -o OPTIONS / 2>/dev/null || true)"
+    case ",${root_opts}," in
+        *,rw,*) ;;
+        *)
+            log_error "root filesystem is not writable"
+            return 1
+            ;;
+    esac
+
+    log_info "Kernel version: $(uname -r)"
+}
+
+main() {
+    local expected_slot current_slot
+
+    init_logging
+    state_init
+
+    if [ "$(state_get OTA_MODE)" != "ab" ]; then
+        log_info "Current OTA mode is not ab, skipping health check"
+        exit 0
+    fi
+
+    case "$(state_get STATUS)" in
+        ready_to_boot|boot_verifying) ;;
+        *)
+            log_info "A/B OTA state is not pending verification, skipping health check"
+            exit 0
+            ;;
+    esac
+
+    if ! command -v fw_printenv >/dev/null 2>&1; then
+        log_error "fw_printenv not found"
+        exit 1
+    fi
+
+    if [ "$(fw_printenv -n ota_in_progress 2>/dev/null || echo 0)" != "1" ]; then
+        log_info "ota_in_progress is not set, skipping health check"
+        exit 0
+    fi
+
+    state_mark_status "boot_verifying"
+    log_info "Running A/B OTA health check"
+
+    expected_slot="$(state_get TARGET_SLOT)"
+    current_slot="$(ab_get_current_root_slot || true)"
+
+    if [ -z "${current_slot}" ]; then
+        log_error "Cannot determine current AB slot"
+        exit 1
+    fi
+    if [ -n "${expected_slot}" ] && [ "${expected_slot}" != "${current_slot}" ]; then
+        log_error "Slot verification failed: expected target slot=${expected_slot}, current slot=${current_slot}"
+        exit 1
+    fi
+
+    require_basic_system_health || exit 1
+
+    log_info "A/B OTA health check passed"
+}
+
+main "$@"

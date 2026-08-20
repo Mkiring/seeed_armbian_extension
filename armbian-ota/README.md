@@ -8,52 +8,45 @@ This extension provides two different OTA (Over-The-Air) update mechanisms for A
 Note: When `OTA_ENABLE=yes`, OTA runtime is installed into the firmware by mode:
 - `AB_PART_OTA=yes`: install AB OTA runtime/tools.
 - without `AB_PART_OTA`: install Recovery OTA runtime/tools.
-Payload still includes `ota_tools/` as a fallback/offline bundle.
 
 ## Directory Structure
 
 ```
 extensions/armbian-ota/
-├── ota-support.sh                          # Main entry point
+├── ota-support.sh                          # Main build hook entry point
+├── common/                                 # Shared OTA functionality
+│   ├── build-hooks/
+│   │   ├── image-naming.sh                 # Image/package naming helpers
+│   │   ├── package-create.sh               # OTA package creation hook
+│   │   ├── partitions.sh                   # Common partition primitives
+│   │   ├── rootfs-install.sh               # Rootfs rsync helper
+│   │   └── userdata-resize.sh              # Shared userdata resize hook
+│   └── rootfs/                             # Shared CLI, runtime and userdata resize service
 │
-├── recovery_ota/                           # Recovery OTA mode
-│   ├── initramfs_hooks/
-│   │   ├── 99-copy-tools                   # Initramfs hook for recovery OTA
-│   │   └── 99-ota-apply                    # Recovery OTA apply script
-│   ├── fit/
-│   │   └── fit-ota                         # FIT image OTA support
-│   └── start_prepare_ota.sh                # Compatibility wrapper
+├── recovery/                               # Recovery OTA mode
+│   ├── build-hooks/
+│   │   ├── overlayroot.sh                  # Recovery full-root overlayroot setup
+│   │   ├── partitions.sh                   # Recovery rootfs + userdata layout
+│   │   └── runtime-install.sh              # Recovery rootfs and initramfs setup
+│   ├── initramfs/                           # Initramfs hooks, scripts and libraries
+│   └── rootfs/usr/share/armbian-ota/recovery/
+│                                               # Recovery backend
 │
-├── runtime/                                # Unified OTA runtime
-│   ├── armbian-ota                         # Unified CLI entrypoint
-│   ├── backend-ab.sh                       # AB OTA backend
-│   ├── backend-recovery.sh                 # Recovery OTA backend
-│   └── common.sh                           # Shared runtime helpers
-│
-├── ab_ota/                                 # AB Partition OTA mode
-│   ├── initramfs_hooks/
-│   │   ├── 99-copy-ab-ota-tools            # Initramfs hook for AB OTA
-│   │   └── ab-ota-apply                    # AB OTA apply script
-│   ├── userspace/
-│   │   ├── armbian-ota-manager             # Compatibility wrapper
-│   │   ├── armbian-ota-health-check        # First boot health check
-│   │   └── lib/common.sh                   # Common functions
-│   ├── systemd/
-│   │   ├── armbian-ota-firstboot.service   # Health check service
-│   │   ├── armbian-ota-mark-success.service # Mark success service
-│   │   └── armbian-ota-rollback.service    # Rollback service
-│   └── configs/                            # Configuration templates
-│
-├── common/                                 # Shared utilities
-│   └── lib/
-│       ├── logger.sh                       # Logging functions
-│       ├── partition.sh                    # Partition operations
-│       └── verify.sh                       # SHA256 verification
-│
-└── systemd/                                # Shared systemd services
-    ├── armbian-resize-userdata
-    └── armbian-resize-userdata.service
+└── ab/                                     # A/B partition OTA mode
+    ├── build-hooks/
+    │   ├── partitions.sh                   # A/B partition hooks
+    │   ├── overlayroot.sh                  # A/B overlayroot setup
+    │   └── runtime-install.sh              # A/B rootfs and services setup
+    └── rootfs/
+        ├── etc/systemd/system/             # A/B systemd units
+        └── usr/
+            ├── lib/armbian/                # A/B runtime executables
+            └── share/armbian-ota/ab/       # A/B backend and libraries
 ```
+
+The build hooks install `common/rootfs` first, then install the selected mode
+overlay with `rsync`.  Files under each `rootfs/` directory therefore mirror
+their final paths in the image.
 
 ## Recovery OTA Mode
 
@@ -66,18 +59,53 @@ OTA_ENABLE=yes
 # Do not set AB_PART_OTA
 ```
 
+### Partition Layout
+
+| Partition | Label | Purpose |
+|-----------|-------|---------|
+| nvme0n1p1 | armbi_boot | `/boot` files (ext4, plain mode) |
+| nvme0n1p2 | (security) | crypto key material (encrypted modes only) |
+| nvme0n1p2 or p3 | armbi_root | rootfs (LUKS+ext4 in auto-decrypt mode) |
+| last | armbi_usrdata | overlayfs upper layer + OTA transaction store |
+
+Plain recovery:
+```
+[ boot ext4 ][ rootfs ext4 ][ userdata ext4 ]
+```
+
+Auto-decrypt recovery (RK_OPTEE_BOOT_ENABLE=yes):
+```
+[ boot ext4 ][ security ][ rootfs LUKS+ext4 ][ userdata LUKS+ext4 ]
+```
+
+Secure boot recovery (RK_SECURE_UBOOT_ENABLE=yes, BOOT_RAW_MODE=yes):
+```
+[ boot raw FIT ][ security ][ rootfs LUKS+ext4 ][ userdata LUKS+ext4 ]
+```
+
+The `/boot` partition is **never** overlayed. The runtime fstab mounts it on
+top of overlayfs, so any process writing to `/boot` (apt kernel upgrades,
+manual `armbianEnv.txt` edits, OTA tooling) hits the real boot partition —
+U-Boot reads the same bytes on next boot. This avoids the prior failure
+mode where `/boot` writes were captured by the overlayfs upper layer on
+userdata and were invisible to U-Boot.
+
+The boot partition size can be tuned with `OTA_BOOT_SIZE` (default 256 MiB).
+
 ### How It Works
 
-1. OTA package is extracted to `/ota_work/`
+1. OTA package is extracted to `userdata/ota-recovery/ota_work/`
 2. Initramfs hooks are installed and `update-initramfs` is executed
 3. On reboot, initramfs applies OTA payload to current rootfs
-4. System reboots into updated firmware
+4. A separate userdata partition supplies persistent overlays for `/etc`,
+   `/home`, and `/var/lib`
+5. System reboots into updated firmware
 
 ### Usage
 
 ```bash
 # On target system
-armbian-ota start --mode=recovery <path-to-ota-package.tar.gz>
+armbian-ota start <path-to-ota-package.tar.gz>
 reboot
 ```
 
@@ -104,6 +132,43 @@ AB_PART_OTA=yes
 | nvme0n1p4 | armbi_rootb | Root slot B |
 | nvme0n1p5 | armbi_usrdata | User data (shared) |
 
+### Persistent Data
+
+User data survives OTA updates differently depending on the OTA mode.
+
+User account database files (`/etc/passwd`, `/etc/shadow`, `/etc/group`,
+`/etc/gshadow`, `/etc/subuid`, `/etc/subgid`) remain normal files in the
+overlay filesystem. This is required because tools such as `useradd` and
+`groupadd` update those files by writing a temporary file and renaming it over
+the original.
+
+Both OTA modes use overlayroot with the final `userdata` partition as the
+writable upper layer. The rootfs is the read-only lower layer, so runtime
+writes—including `/home` and `/var/lib`—persist on `armbi_usrdata` without
+changing the OTA rootfs. Encrypted A/B and Recovery images use the
+initramfs-unlocked `/dev/mapper/armbian-userdata` mapper as the overlayroot
+backing device.
+
+In Recovery mode the dedicated `/boot` partition is the **one exception**
+to overlayfs: it is mounted by fstab on top of the overlay root, so writes
+to `/boot` reach the real boot partition and stay visible to U-Boot across
+reboots. This matters for apt kernel upgrades and `armbianEnv.txt` edits,
+which would otherwise be captured by the overlay upper layer and silently
+ignored on next boot.
+
+Recovery OTA stores its pending payload and state in `userdata/ota-recovery/`
+rather than the overlay rootfs. The initramfs mounts this transaction store,
+rewrites only the raw rootfs lower layer, and leaves userdata intact.
+
+Neither OTA mode migrates data from older single-rootfs Recovery images;
+this layout is intended for new development images.
+
+On first boot, `armbian-resize-userdata.service` expands the final `userdata`
+partition to use available disk space in both modes. For encrypted A/B and
+Recovery images, it logs that a reboot is required after expanding the
+partition. The next boot reopens the `armbian-userdata` LUKS mapper at its new
+size, then expands its inner ext4 filesystem.
+
 ### U-Boot Environment Variables
 
 | Variable | Purpose |
@@ -114,7 +179,7 @@ AB_PART_OTA=yes
 
 ### How It Works
 
-1. User initiates OTA with `armbian-ota start --mode=ab <package>`
+1. User initiates OTA with `armbian-ota start <package>`
 2. OTA payload is copied to target (inactive) slot partitions
 3. `ota_in_progress=1` and `boot_slot` are set to target slot
 4. System reboots
@@ -130,15 +195,12 @@ AB_PART_OTA=yes
 armbian-ota status
 
 # Start OTA update
-armbian-ota start --mode=ab Armbian_xxx-OTA.tar.gz
+armbian-ota start Armbian_xxx-OTA.tar.gz
 
 # System will reboot and apply update automatically
 
-# Manual rollback (if needed)
-armbian-ota rollback
-
-# Mark as successful (if automatic marking failed)
-armbian-ota mark-success
+# Manually switch to the other boot slot after OTA has completed
+armbian-ota switch-slot
 ```
 
 ## Build Configuration
@@ -149,14 +211,28 @@ Add to your board configuration or build command:
 # For AB Partition OTA
 OTA_ENABLE=yes
 AB_PART_OTA=yes
-AB_BOOT_SIZE=256        # Boot partition size in MiB
-AB_ROOTFS_SIZE=4608     # Rootfs partition size in MiB
-USERDATA=256            # Userdata partition size in MiB
+OTA_BOOT_SIZE=256       # Boot partition size in MiB
+# OTA_ROOTFS_SIZE=4096  # Optional rootfs partition size override
+OTA_USERDATA_SIZE=1024  # Userdata partition size in MiB
+OTA_SECURITY_SIZE=4     # Security partition size in MiB (encrypted images)
 
 # For Recovery OTA
 OTA_ENABLE=yes
 # leave AB_PART_OTA unset
+OTA_BOOT_SIZE=256       # /boot partition size in MiB (ext4 except secure boot)
+# OTA_ROOTFS_SIZE=4096  # Optional rootfs partition size override
+OTA_USERDATA_SIZE=1024  # Userdata partition size in MiB
+OTA_SECURITY_SIZE=4     # Security partition size in MiB (encrypted images)
 ```
+
+When unset, `OTA_ROOTFS_SIZE` is calculated from the built rootfs size plus
+`EXTRA_ROOTFS_MIB_SIZE`, then adds 30% headroom. The same size-variable
+policy applies to both A/B and Recovery OTA modes.
+
+Both OTA modes require a GPT partition table. Their boot, rootfs, userdata,
+and security partitions are located by GPT partition labels.
+Both OTA layouts boot through U-Boot and do not include BIOS or UEFI
+partitions.
 
 ## OTA Package Contents
 
@@ -166,8 +242,12 @@ The OTA package (`*-OTA.tar.gz`) contains:
 - `rootfs.sha256` - Root filesystem checksum (required)
 - `boot.tar.gz` - Boot partition image (optional)
 - `boot.sha256` - Boot partition checksum (optional)
-- `ota_manifest.env` - OTA mode and package metadata
+- `package.env` - OTA mode and package metadata
 - `boot.itb` - FIT boot image (for secure boot)
+- `version.txt` - Image name, version, build commit, and extension commit
+
+The package does not include an offline `ota_tools/` bundle; the required OTA
+runtime is installed into the firmware at image build time.
 
 ## Troubleshooting
 
@@ -190,11 +270,32 @@ cat /var/log/armbian-ota/health-check.log
 cat /run/initramfs/ab-ota.log
 ```
 
-### Manual Rollback
+### Automatic Rollback
 
-```bash
-armbian-ota rollback
-```
+Rollback is triggered by `armbian-ota-rollback.service` if first boot health checks fail during A/B OTA verification.
+Use `armbian-ota switch-slot [a|b]` for manual slot maintenance after OTA has completed.
+
+### A/B Boot State
+
+Non-secure A/B images store boot state in the fixed raw U-Boot environment
+offset (`0x3f8000`, size `0x8000`) on the selected boot disk.  This works the
+same way for SD, eMMC, and NVMe images. The A/B backend uses an internal
+helper to manage this `fw_setenv` state.
+
+Filesystem A/B images package U-Boot's complete compiled default environment
+and merge the A/B variables into `/etc/u-boot-initial-env`. On the first
+boot, U-Boot uses its compiled default environment; the runtime then creates
+the persistent environment with `fw_setenv -f`. This prevents that
+initialization from discarding commands such as `distro_bootcmd` and
+`scan_dev_for_boot`.
+
+For Secure Boot A/B packages, the A/B backend verifies `boot.itb` and writes
+it directly to the inactive raw `boot_a` or `boot_b` partition. It never
+mounts a FIT boot partition or treats the FIT image as `boot.tar.gz`.
+When automatic rootfs decryption is enabled, both A/B modes create a shared
+`security` partition and format both rootfs slots as LUKS-backed ext4.
+Slot-state transitions use the A/B backend's internal U-Boot environment
+helper.
 
 ### Check U-Boot Environment
 
@@ -216,16 +317,18 @@ fw_setenv ota_in_progress 0
 
 ### Adding New Features
 
-1. For Recovery OTA: Modify files in `recovery_ota/`
-2. For AB OTA: Modify files in `ab_ota/`
-3. For shared functionality: Use `common/lib/`
+1. For Recovery OTA: Modify files in `recovery/rootfs/`, `recovery/initramfs/`, or `recovery/build-hooks/`
+2. For AB OTA: Modify files in `ab/rootfs/` or `ab/build-hooks/`
+3. For shared functionality: Use `common/rootfs/` or `common/build-hooks/`
 
-### Function Naming Convention
+### Build Hook Entry Points
 
-In `ota-support.sh`:
-- Recovery OTA: `pre_update_initramfs__301_*` (priority 301)
-- AB OTA: `pre_update_initramfs__302_*` (priority 302)
-- Shared: Use appropriate priority based on dependencies
+In `ota-support.sh` and `*/build-hooks/*.sh`:
+- Recovery initramfs hook installation: `pre_update_initramfs__*`
+- Runtime/assets installation: `pre_update_initramfs__89x_*`
+- Resize userdata service enablement: `pre_umount_final_image__896_*`
+- OTA package creation: `pre_umount_final_image__901_*`
+- U-Boot env tool build: `pre_package_uboot_image__*`
 
 ## License
 

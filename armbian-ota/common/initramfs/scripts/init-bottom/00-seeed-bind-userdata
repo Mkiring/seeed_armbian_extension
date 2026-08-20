@@ -1,0 +1,85 @@
+#!/bin/sh
+# Initramfs init-bottom script: create a stable /dev/armbian-userdata symlink
+# pointing at the userdata partition that lives on the same physical disk as
+# the rootfs. Runs BEFORE the overlayroot init-bottom hook so the overlayroot
+# config can use dev=/dev/armbian-userdata and avoid the multi-disk label
+# race on /dev/disk/by-label/armbi_usrdata.
+#
+# Behaviour:
+#   * If /dev/mapper/armbian-userdata already exists (encrypted case, unlocked
+#     earlier by init-top/0-decryption-disk), symlink to it and exit.
+#   * Otherwise (unencrypted), parse root= from /proc/cmdline, walk up to the
+#     parent disk, and find the PARTLABEL=userdata partition on that disk.
+#   * If anything fails, log loudly but do not abort boot: the overlayroot
+#     hook will fall back to its own dev= resolution, preserving current
+#     behaviour.
+
+PREREQ=""
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+HELPER=/usr/share/armbian-ota/find-userdata.sh
+if [ -r "${HELPER}" ]; then
+    # shellcheck source=/usr/share/armbian-ota/find-userdata.sh
+    . "${HELPER}"
+else
+    echo "[seeed-bind-userdata] ${HELPER} missing; skipping" >&2
+    exit 0
+fi
+
+LINK=/dev/armbian-userdata
+
+log() { echo "[seeed-bind-userdata] $*"; }
+warn() { echo "[seeed-bind-userdata] WARN: $*" >&2; }
+
+# Encrypted case: mapper already set up by 0-decryption-disk in init-top.
+if [ -b /dev/mapper/armbian-userdata ]; then
+    ln -sf /dev/mapper/armbian-userdata "${LINK}"
+    log "linked ${LINK} -> /dev/mapper/armbian-userdata (encrypted)"
+    exit 0
+fi
+
+root_dev="$(find_user_data__root_dev_from_cmdline)" || {
+    warn "could not resolve root= from cmdline; skipping"
+    exit 0
+}
+
+# When root= resolves to a LUKS mapper (auto-decrypt case where the unlocked
+# ext4 is the root), the mapper's parent disk has to be found by looking at
+# the backing LUKS partition. Defer to dmsetup if available; otherwise skip.
+case "${root_dev}" in
+    /dev/mapper/*)
+        if command -v dmsetup >/dev/null 2>&1; then
+            backing="$(dmsetup deps -o devname "${root_dev#/dev/mapper/}" 2>/dev/null | sed -n 's/.*(\([^ )]*\)).*/\1/p' | head -n1)"
+            if [ -n "${backing}" ]; then
+                root_dev="/dev/${backing}"
+            fi
+        fi
+        ;;
+esac
+
+userdata_part="$(find_user_data__partition_for_root "${root_dev}")" || {
+    warn "no PARTLABEL=userdata partition on the same disk as root=${root_dev}; skipping"
+    exit 0
+}
+
+# If the found partition is itself LUKS, the encrypted handler above should
+# have produced the mapper. If it didn't (e.g. decryption-disk.sh hasn't run
+# or failed), we can't fabricate it here -- leave the symlink absent and let
+# overlayroot's own fallback deal with it.
+fstype="$(blkid -s TYPE -o value "${userdata_part}" 2>/dev/null || true)"
+if [ "${fstype}" = "crypto_LUKS" ]; then
+    warn "${userdata_part} is LUKS but mapper not available; skipping"
+    exit 0
+fi
+
+ln -sf "${userdata_part}" "${LINK}"
+log "linked ${LINK} -> ${userdata_part} (root=${root_dev})"

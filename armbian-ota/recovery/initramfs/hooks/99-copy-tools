@@ -1,0 +1,95 @@
+#!/bin/sh
+
+# initramfs-tools hook: add recovery OTA tools into initramfs
+
+set -e
+
+. /usr/share/initramfs-tools/hook-functions
+
+echo "[99-copy-tools] adding OTA runtime tools into initramfs..." >&2
+
+# Recovery persistence uses three directory-level overlayfs mounts before the
+# real root is switched into place. Include the module for kernels where it is
+# not built in.
+manual_add_modules overlay
+
+copy_exec_first() {
+    dest="$1"
+    shift
+
+    for candidate in "$@"; do
+        if [ -x "${candidate}" ]; then
+            copy_exec "${candidate}" "${dest}"
+            return 0
+        fi
+    done
+    return 0
+}
+
+copy_ota_lib() {
+    lib="$1"
+    src="/usr/share/armbian-ota/${lib}"
+    dest="${DESTDIR}/usr/share/armbian-ota/${lib}"
+
+    [ -f "${src}" ] || {
+        echo "[99-copy-tools] missing required OTA library: ${src}" >&2
+        return 1
+    }
+    mkdir -p "$(dirname "${dest}")"
+    cp -p "${src}" "${dest}"
+}
+
+copy_recovery_initramfs_lib() {
+    lib="$1"
+    src="/etc/initramfs-tools/ota/recovery/${lib}"
+    dest="${DESTDIR}/usr/share/armbian-ota/recovery/${lib}"
+
+    [ -f "${src}" ] || {
+        echo "[99-copy-tools] missing required recovery initramfs library: ${src}" >&2
+        return 1
+    }
+    mkdir -p "$(dirname "${dest}")"
+    cp -p "${src}" "${dest}"
+}
+
+while read -r dest candidates; do
+    [ -n "${dest}" ] || continue
+    copy_exec_first "${dest}" ${candidates}
+done <<'EOF'
+/usr/bin /usr/bin/rm /bin/rm
+/usr/bin /usr/bin/cp /bin/cp
+/usr/bin /usr/bin/tar /bin/tar
+/usr/bin /usr/bin/gzip /bin/gzip
+/usr/bin /usr/bin/gunzip /bin/gunzip
+/usr/bin /usr/bin/sed /bin/sed
+/usr/bin /usr/bin/find /bin/find
+/usr/bin /usr/bin/grep /bin/grep
+/usr/bin /usr/bin/head /bin/head
+/usr/bin /usr/bin/cat /bin/cat
+/usr/bin /usr/bin/basename /bin/basename
+/usr/bin /usr/bin/tail /bin/tail
+/usr/bin /usr/bin/date /bin/date
+/usr/bin /usr/bin/sync /bin/sync
+/usr/bin /usr/bin/awk /bin/awk
+/usr/bin /usr/bin/wc /bin/wc
+/usr/bin /usr/bin/od /bin/od
+/usr/bin /usr/bin/tr /bin/tr
+/usr/bin /usr/bin/dd /bin/dd
+/usr/bin /usr/bin/mount /bin/mount
+/usr/bin /usr/bin/umount /bin/umount
+/usr/bin /usr/bin/mountpoint /bin/mountpoint
+/usr/sbin /usr/sbin/blkid /sbin/blkid
+/usr/bin /usr/bin/udevadm /bin/udevadm
+/usr/bin /usr/bin/sleep /bin/sleep
+/usr/sbin /usr/sbin/reboot /sbin/reboot
+EOF
+
+copy_ota_lib state.sh
+copy_ota_lib find-userdata.sh
+copy_recovery_initramfs_lib log.sh
+copy_recovery_initramfs_lib device.sh
+copy_recovery_initramfs_lib payload.sh
+
+# readlink is used by find-userdata.sh to walk sysfs parent links.
+copy_exec /usr/bin/readlink /usr/bin 2>/dev/null || \
+copy_exec /bin/readlink /bin 2>/dev/null || true

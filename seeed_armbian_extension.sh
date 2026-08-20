@@ -1,10 +1,141 @@
-if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${CRYPTROOT_ENABLE}" != "yes" ]]; then
-	display_alert "Secure U-Boot" "RK_SECURE_UBOOT_ENABLE requires CRYPTROOT_ENABLE=yes, forcing enable" "warn"
-	export CRYPTROOT_ENABLE=yes
+SEEED_EXTENSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+function seeed_apply_armbian_build_patch_bundle() {
+	local patch_file idx all_applied=yes
+	local -a patch_files=(
+		"0001-rk3588-enable-panthor-gpu-stack.patch"
+		"0002-rk35xx-install-fcs960k-bluez-with-common-packages.patch"
+		"0003-rk3576-enable-panfrost-gpu-stack.patch"
+	)
+	local -a patch_paths=()
+
+	# Apply before later build phases consume board, kernel, and
+	# common-source files.
+	for patch_file in "${patch_files[@]}"; do
+		patch_file="${SEEED_EXTENSION_ROOT}/patches/armbian-build/${patch_file}"
+		[[ -f "${patch_file}" ]] ||
+			exit_with_error "Seeed Armbian build patch is missing" "${patch_file}"
+		patch_paths+=("${patch_file}")
+	done
+
+	for patch_file in "${patch_paths[@]}"; do
+		(cd "${SRC}" && git apply --reverse --check "${patch_file}") 2>/dev/null || {
+			all_applied=no
+			break
+		}
+	done
+	if [[ "${all_applied}" == "yes" ]]; then
+		display_alert "Seeed Armbian build patch" "Bundle already applied" "debug"
+		return 0
+	fi
+
+	# Patches are coupled: one applied on top of another can break its
+	# reverse check, so a stale tree must be unwound in reverse numeric
+	# order before re-applying in ascending order.
+	for ((idx = ${#patch_paths[@]} - 1; idx >= 0; idx--)); do
+		patch_file="${patch_paths[idx]}"
+		if (cd "${SRC}" && git apply --reverse --check "${patch_file}") 2>/dev/null; then
+			(cd "${SRC}" && git apply --reverse "${patch_file}") ||
+				exit_with_error "Failed to revert Seeed Armbian build patch" "${patch_file}"
+			display_alert "Seeed Armbian build patch" "Reverted: ${patch_file##*/}" "info"
+		fi
+	done
+
+	for patch_file in "${patch_paths[@]}"; do
+		if (cd "${SRC}" && git apply --check "${patch_file}" && git apply "${patch_file}"); then
+			display_alert "Seeed Armbian build patch" "Applied: ${patch_file##*/}" "info"
+		else
+			exit_with_error "Seeed Armbian build patch conflicts with build sources" "${patch_file}"
+		fi
+	done
+}
+
+seeed_apply_armbian_build_patch_bundle
+
+function seeed_apply_uboot_patch_bundle() {
+	local patch_dir="${SEEED_EXTENSION_ROOT}/patches/u-boot"
+	local userpatch_root="${USERPATCHES_PATH}/u-boot/legacy/u-boot-radxa-rk35xx"
+	local patch_file source_defconfig target_defconfig
+	local -a patch_files=(
+		"0001-u-boot-add-FIT-environment-partition-fallback.patch"
+		"0002-u-boot-scan-OS-boot-devices-after-SPI-boot.patch"
+		"0003-u-boot-normalize-recomputer-rk35xx-defconfigs.patch"
+		"0004-u-boot-rk3576-fdt-fixup-fallback-bootdev.patch"
+	)
+	local -a defconfigs=(
+		"recomputer-rk3576-devkit_defconfig"
+		"recomputer-rk3588-devkit_defconfig"
+	)
+
+	case "${BOARD}" in
+		recomputer-rk3576-devkit|recomputer-rk3588-devkit)
+			;;
+		*)
+			return 0
+			;;
+	esac
+
+	for patch_file in "${patch_files[@]}"; do
+		[[ -f "${patch_dir}/${patch_file}" ]] ||
+			exit_with_error "Seeed U-Boot patch bundle is incomplete" "${patch_dir}/${patch_file}"
+	done
+	mkdir -p "${userpatch_root}/board_recomputer-rk3576-devkit" \
+		"${userpatch_root}/board_recomputer-rk3588-devkit" \
+		"${userpatch_root}/defconfig" ||
+		exit_with_error "Failed to create Seeed U-Boot userpatch directories" "${userpatch_root}"
+
+	# 0003 is a modification patch, so seed the userpatch overlay with the
+	# core defconfigs before applying it. Userpatches then takes precedence over
+	# the core overlay during Armbian's normal U-Boot patching phase.
+	for source_defconfig in "${defconfigs[@]}"; do
+		target_defconfig="${userpatch_root}/defconfig/${source_defconfig}"
+		[[ -e "${target_defconfig}" ]] && continue
+
+		[[ -f "${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/${source_defconfig}" ]] ||
+			exit_with_error "Base U-Boot defconfig is missing" "${source_defconfig}"
+		install -D -m 0644 \
+			"${SRC}/patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/${source_defconfig}" \
+			"${target_defconfig}" ||
+			exit_with_error "Failed to stage Seeed U-Boot defconfig" "${target_defconfig}"
+	done
+
+	for patch_file in "${patch_files[@]}"; do
+		patch_file="${patch_dir}/${patch_file}"
+		if (
+			cd "${USERPATCHES_PATH}" &&
+			git apply -p2 --reverse --check "${patch_file}"
+		) 2>/dev/null; then
+			display_alert "Seeed U-Boot patches" "Already staged: ${patch_file##*/}" "debug"
+		elif (
+			cd "${USERPATCHES_PATH}" &&
+			git apply -p2 --check "${patch_file}"
+		); then
+			(
+				cd "${USERPATCHES_PATH}" &&
+				# The outer MBOX adds inner unified-diff patch files. Their
+				# context marker followed by a tab is valid payload, but appears
+				# as whitespace to the outer git-apply invocation.
+				git apply --whitespace=nowarn -p2 "${patch_file}"
+			) ||
+				exit_with_error "Failed to stage Seeed U-Boot patch" "${patch_file}"
+			display_alert "Seeed U-Boot patches" "Staged: ${patch_file##*/}" "info"
+		else
+			exit_with_error "Seeed U-Boot patch conflicts with userpatches" "${patch_file}"
+		fi
+	done
+}
+
+if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
+	exit_with_error "RK_SECURE_UBOOT_ENABLE and RK_OPTEE_BOOT_ENABLE are mutually exclusive" "use secure-boot or secure-rootfs, not both"
 fi
 
-if [[ "${CRYPTROOT_ENABLE}" == "yes" ]]; then
-	enable_extension "seeed_armbian_extension/rk_secure-disk-encryption/rk-cryptroot-verbosity"
+if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
+	export CRYPTROOT_ENABLE=yes
+	export RK_AUTO_DECRYP=yes
+fi
+
+if [[ "${RK_AUTO_DECRYP}" == "yes" && "${RK_SECURE_UBOOT_ENABLE}" != "yes" && "${RK_OPTEE_BOOT_ENABLE}" != "yes" ]]; then
+	exit_with_error "RK_AUTO_DECRYP requires an explicit boot security mode" "set RK_OPTEE_BOOT_ENABLE=yes or RK_SECURE_UBOOT_ENABLE=yes"
 fi
 
 if [[ "${CRYPTROOT_ENABLE}" == "yes" && "${RK_AUTO_DECRYP}" == "yes" ]]; then
@@ -17,12 +148,14 @@ if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes"
 	if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" ]]; then
 		display_alert "Secure U-Boot" "Enable Secure Boot Extensions" "info"
 	else
-		display_alert "OP-TEE bootchain" "Enable rk-secure-boot extension in OP-TEE bootchain mode" "info"
+		display_alert "OP-TEE bootchain" "Enable secure boot build hooks in OP-TEE bootchain mode" "info"
 	fi
 	enable_extension "seeed_armbian_extension/rk_secure-disk-encryption/rk-secure-boot"
 fi
 
 if [[ "${OTA_ENABLE}" == "yes" ]]; then
+	seeed_apply_uboot_patch_bundle
+
 	display_alert "OTA_ENABLE" "Enable OTA extension ota-support" "info"
 	enable_extension "seeed_armbian_extension/armbian-ota/ota-support"
 fi
@@ -39,3 +172,37 @@ if [[ "yes" == "yes" ]]; then
 	display_alert "RK U-Boot postprocess" "Enable rk-uboot-postprocess hooks" "info"
 	enable_extension "seeed_armbian_extension/rk-uboot-postprocess/rk-uboot-postprocess"
 fi
+
+# Add the PCIe ASPM workaround to the generated image's kernel command line.
+# Keep any board- or user-provided extraargs intact and make this hook idempotent.
+function post_customize_image__010_disable_pcie_aspm() {
+	local armbian_env="${MOUNT}/boot/armbianEnv.txt"
+	local line
+	local extraargs=""
+
+	mkdir -p "${MOUNT}/boot"
+	touch "${armbian_env}"
+
+	while IFS= read -r line; do
+		if [[ "${line}" == extraargs=* ]]; then
+			extraargs="${line#extraargs=}"
+			break
+		fi
+	done < "${armbian_env}"
+
+	if [[ " ${extraargs} " == *" pcie_aspm=off "* ]]; then
+		return 0
+	fi
+
+	if [[ -n "${extraargs}" ]]; then
+		sed -i '0,/^extraargs=/{/^extraargs=/s|$| pcie_aspm=off|}' "${armbian_env}"
+	else
+		if grep -q '^extraargs=' "${armbian_env}"; then
+			sed -i '0,/^extraargs=/{/^extraargs=/s|$|pcie_aspm=off|}' "${armbian_env}"
+		else
+			printf 'extraargs=pcie_aspm=off\n' >> "${armbian_env}"
+		fi
+	fi
+
+	display_alert "PCIe ASPM" "Added pcie_aspm=off to armbianEnv.txt" "info"
+}
