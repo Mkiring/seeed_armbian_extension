@@ -101,14 +101,51 @@ first_match_on_disk() {
     fi
 }
 
+# Parent disk of a partition device via sysfs (e.g. mmcblk1p3 -> mmcblk1).
+# Works for partition nodes only; returns 1 for whole disks or dm devices.
+parent_disk_of() {
+    local partdev="$1" base parent_sys parent_name
+
+    case "${partdev}" in
+        /dev/*) ;;
+        *) partdev="/dev/${partdev}" ;;
+    esac
+    [ -e "${partdev}" ] || return 1
+    base="$(basename "${partdev}")"
+    [ -L "/sys/class/block/${base}" ] || return 1
+    [ -f "/sys/class/block/${base}/partition" ] || return 1
+    parent_sys="$(dirname "$(readlink -f "/sys/class/block/${base}")")"
+    parent_name="$(basename "${parent_sys}")"
+    [ -e "/sys/class/block/${parent_name}/dev" ] || return 1
+    printf '%s\n' "/dev/${parent_name}"
+}
+
+# First PARTLABEL=$partlabel partition that is actually a crypto_LUKS
+# container. Must iterate ALL blkid matches: with a second disk carrying a
+# plain (unencrypted) image, the first match is that disk's ext4 partition
+# and a single-match type check silently drops the real LUKS partition --
+# userdata then never gets unlocked and overlayroot falls back to mounting
+# the root lower layer read-write. Candidates on $2 (optional anchor disk)
+# are preferred when given, falling back to any disk.
 get_luks_device_by_partlabel() {
     local partlabel="$1"
-    local dev
+    local anchor_disk="${2:-${BOOT_DISK:-}}"
+    local dev pass
 
-    dev="$(first_match_on_disk "PARTLABEL=$partlabel" "${BOOT_DISK:-}" || true)"
-    if [ -n "$dev" ] && [ "$(blkid -s TYPE -o value "$dev" 2>/dev/null || true)" = "crypto_LUKS" ]; then
-        echo "$dev"
-    fi
+    for pass in 1 2; do
+        for dev in $(blkid -t "PARTLABEL=$partlabel" -o device 2>/dev/null); do
+            [ "$(blkid -s TYPE -o value "$dev" 2>/dev/null || true)" = "crypto_LUKS" ] || continue
+            if [ "${pass}" -eq 1 ] && [ -n "${anchor_disk}" ]; then
+                case "${dev}" in
+                    "${anchor_disk}"p[0-9]*) ;;
+                    *) continue ;;
+                esac
+            fi
+            printf '%s\n' "${dev}"
+            return 0
+        done
+    done
+    return 1
 }
 
 unlock_luks_device() {
@@ -263,7 +300,11 @@ unlock_luks_device "$ROOT_DEVICE" "$MAPPER_NAME" "root LUKS partition" || {
 log_step "[Decryption-disk] root mapper ready: /dev/mapper/${MAPPER_NAME}"
 log_step "[Decryption-disk] LUKS partition unlocked successfully"
 
-USERDATA_DEVICE="$(get_luks_device_by_partlabel userdata || true)"
+# Anchor the userdata lookup to the disk the root LUKS partition was just
+# unlocked from: recovery images carry no bootdev cmdline token, and with a
+# second LUKS-capable disk carrying the same image an unanchored scan could
+# mix root from one disk with userdata from another.
+USERDATA_DEVICE="$(get_luks_device_by_partlabel userdata "$(parent_disk_of "${ROOT_DEVICE}")" || true)"
 if [ -n "$USERDATA_DEVICE" ]; then
     log_step "[Decryption-disk] Found encrypted userdata: ${USERDATA_DEVICE}"
     if unlock_luks_device "$USERDATA_DEVICE" armbian-userdata "userdata LUKS partition"; then
