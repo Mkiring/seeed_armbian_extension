@@ -165,6 +165,26 @@ PLAIN_TABLE="/dev/nvme0n1p3 PARTLABEL=rootfs TYPE=ext4
 MOCK_BLKID_TABLE="${PLAIN_TABLE}"
 assert_eq "plain-foreign userdata" "$(get_luks_device_by_partlabel userdata)" "/dev/mmcblk1p4"
 
+# Mixed-layout scenario (2026-08-27 matrix failure): recovery boot disk has
+# no rootfs_a, a foreign encrypted A/B disk does. With a token the slot
+# fallback must come up empty instead of defecting to the foreign disk, and
+# the plain rootfs label on the boot disk must win.
+MIXED_TABLE="/dev/nvme0n1p3 PARTLABEL=boot_a TYPE=ext4
+/dev/nvme0n1p4 PARTLABEL=rootfs_a TYPE=crypto_LUKS
+/dev/nvme0n1p5 PARTLABEL=rootfs_b TYPE=crypto_LUKS
+/dev/nvme0n1p6 PARTLABEL=userdata TYPE=crypto_LUKS
+/dev/mmcblk1p2 PARTLABEL=security TYPE=crypto_LUKS
+/dev/mmcblk1p3 PARTLABEL=rootfs TYPE=crypto_LUKS
+/dev/mmcblk1p4 PARTLABEL=userdata TYPE=crypto_LUKS"
+MOCK_BLKID_TABLE="${MIXED_TABLE}"
+BOOT_DISK="/dev/mmcblk1"
+assert_eq "mixed token slot fallback empty" "$(get_luks_device_by_partlabel rootfs_a || echo NONE)" "NONE"
+assert_eq "mixed token rootfs" "$(get_luks_device_by_partlabel rootfs)" "/dev/mmcblk1p3"
+unset BOOT_DISK
+
+# Legacy no-token boot keeps the old any-disk behavior.
+assert_eq "mixed no-token slot fallback" "$(get_luks_device_by_partlabel rootfs_a)" "/dev/nvme0n1p4"
+
 # Single disk: token or not, same result.
 MOCK_BLKID_TABLE="/dev/mmcblk1p3 PARTLABEL=rootfs TYPE=crypto_LUKS"
 assert_eq "single disk" "$(get_luks_device_by_partlabel rootfs)" "/dev/mmcblk1p3"

@@ -125,14 +125,23 @@ parent_disk_of() {
 # plain (unencrypted) image, the first match is that disk's ext4 partition
 # and a single-match type check silently drops the real LUKS partition --
 # userdata then never gets unlocked and overlayroot falls back to mounting
-# the root lower layer read-write. Candidates on $2 (optional anchor disk)
-# are preferred when given, falling back to any disk.
+# the root lower layer read-write. With an anchor disk the search is
+# STRICT: the token-named boot disk must also supply the container, and a
+# foreign disk carrying the same PARTLABEL (e.g. an encrypted A/B image's
+# rootfs_a next to a recovery boot disk) must never win a fallback. The
+# unanchored two-pass form only serves legacy boots without a token.
 get_luks_device_by_partlabel() {
     local partlabel="$1"
     local anchor_disk="${2:-${BOOT_DISK:-}}"
-    local dev pass
+    local dev pass max_pass
 
+    if [ -n "${anchor_disk}" ]; then
+        max_pass=1
+    else
+        max_pass=2
+    fi
     for pass in 1 2; do
+        [ "${pass}" -le "${max_pass}" ] || break
         for dev in $(blkid -t "PARTLABEL=$partlabel" -o device 2>/dev/null); do
             [ "$(blkid -s TYPE -o value "$dev" 2>/dev/null || true)" = "crypto_LUKS" ] || continue
             if [ "${pass}" -eq 1 ] && [ -n "${anchor_disk}" ]; then
@@ -282,7 +291,7 @@ if [ -z "$ROOT_DEVICE" ]; then
     ROOT_DEVICE="$(get_luks_device_by_partlabel rootfs || true)"
 fi
 
-[ -n "$ROOT_DEVICE" ] || ROOT_DEVICE="$(blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | first_line || true)"
+[ -n "$ROOT_DEVICE" ] || ROOT_DEVICE="$(first_match_on_disk TYPE=crypto_LUKS "${BOOT_DISK:-}" || true)"
 if [ -z "$ROOT_DEVICE" ]; then
     log_step "[Decryption-disk] Error: No LUKS partition found"
     blkid 2>/dev/null || true
@@ -301,9 +310,8 @@ log_step "[Decryption-disk] root mapper ready: /dev/mapper/${MAPPER_NAME}"
 log_step "[Decryption-disk] LUKS partition unlocked successfully"
 
 # Anchor the userdata lookup to the disk the root LUKS partition was just
-# unlocked from: recovery images carry no bootdev cmdline token, and with a
-# second LUKS-capable disk carrying the same image an unanchored scan could
-# mix root from one disk with userdata from another.
+# unlocked from, so root and userdata always come from the same physical
+# disk even when the root resolution took a fallback path.
 USERDATA_DEVICE="$(get_luks_device_by_partlabel userdata "$(parent_disk_of "${ROOT_DEVICE}")" || true)"
 if [ -n "$USERDATA_DEVICE" ]; then
     log_step "[Decryption-disk] Found encrypted userdata: ${USERDATA_DEVICE}"
