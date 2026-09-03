@@ -43,10 +43,12 @@ exit_with_error() {
 rk_full_secure_boot_enabled() { return 0; }
 
 # ===== source reusable functions from secure-boot-image.sh =====
-# These three are self-contained enough to reuse:
+# These two are self-contained enough to reuse:
 #   - rk_secure_boot_apply_default_overlays  (fdtoverlay)
 #   - rk_secure_boot_patch_dtb_bootargs      (fdtput /chosen/bootargs)
-#   - rk_secure_boot_run_secondary_fit_signing (mkimage -r)
+# Signing is done inline below, NOT via rk_secure_boot_run_secondary_fit_signing:
+# that function writes its result into ${uboot_dir}/fit/boot.itb, which would
+# clobber the source image when --source-boot-itb points into the u-boot tree.
 # shellcheck disable=SC1090
 source "${SECURE_BOOT_HOOK}"
 
@@ -82,7 +84,8 @@ Required:
   --source-boot-itb PATH      Existing signed boot.itb to extract artifacts from
   --dtbo-list "NAMES"         Space-separated dtbo names (no .dtbo suffix)
   --linux-source PATH         linux-rockchip source root (for dtbo compilation)
-  --u-boot-dir PATH           U-Boot worktree (provides tools/mkimage, tools/dumpimage, tools/fit_check_sign)
+  --u-boot-dir PATH           U-Boot worktree (provides tools/mkimage, tools/dumpimage,
+                              u-boot.dtb; tools/fit_check_sign optional). Read-only usage.
   --keys-source-dir PATH      Directory containing private_key.pem (+ optional dev.crt, public_key.pem)
   --boot-soc SOC              rk3576 or rk3588 (selects ITS template + load addresses)
   --output PATH               Where to write the new boot.itb
@@ -96,9 +99,9 @@ Optional:
   --workdir PATH              Use this workdir instead of mktemp -d
   --docker-image IMAGE        Sign + verify inside this docker container
                               (e.g. armbian.local.only/armbian-build:<tag>).
-                              Required unless running as root: the U-Boot
-                              worktree is root-owned AND the host OpenSSL
-                              signs PSS with the wrong salt length.
+                              Recommended: the container's OpenSSL signs PSS
+                              with the salt length this U-Boot's verifier
+                              expects; host OpenSSL 3.x does not.
   --keep-workdir              Don't delete workdir on exit (debug)
   -h, --help                  Show this help
 EOF
@@ -163,37 +166,39 @@ parse_args() {
         declare -g "${p}=$(readlink -m "${!p}")"
     done
     OUTPUT_PATH="$(readlink -m "${OUTPUT_PATH}")"
+
+    # ${UBOOT_DIR}/fit/boot.itb doubles as the signing scratch location in the
+    # armbian build flow. Repacking from it stacks the requested dtbo list on
+    # top of whatever overlays a previous run already merged into that file —
+    # each output poisons the next run's input. Refuse the footgun.
+    if [[ "${SOURCE_BOOT_ITB}" == "${UBOOT_DIR}/fit/boot.itb" ]]; then
+        cat >&2 <<EOF
+!! [ERR] --source-boot-itb must not be ${UBOOT_DIR}/fit/boot.itb
+
+That path is a signing scratch location, not a pristine image. Repacking
+from it merges the new dtbo list on top of a previous run's overlays.
+
+Point --source-boot-itb at a pristine boot.itb (e.g. the armbian build output).
+EOF
+        exit 2
+    fi
 }
 
 check_required_tools() {
     local -a missing=()
     local tool
 
-    # The signing step writes ${UBOOT_DIR}/fit/boot.itb — the armbian-build
-    # cache is root-owned, so an unprivileged run fails halfway through.
-    # Fail early with a clear hint instead. Docker mode bypasses this: the
-    # write happens inside the container (docker daemon is root).
-    if [[ -z "${DOCKER_IMAGE}" && ! -w "${UBOOT_DIR}" ]]; then
-        cat >&2 <<EOF
-!! [ERR] No write permission in --u-boot-dir: ${UBOOT_DIR}
-
-The signing step must write ${UBOOT_DIR}/fit/boot.itb and may need to
-rebuild tools/mkimage. The armbian-build cache is typically root-owned.
-
-Either rerun with sudo, or use --docker-image to sign inside the armbian
-build container (recommended — the container OpenSSL signs PSS with the
-salt length this U-Boot's fit_check_sign expects; the host OpenSSL 3.x
-default does not, and signatures made on the host fail verification).
-EOF
-        exit 1
-    fi
+    # The u-boot tree is only read (tools/mkimage, tools/dumpimage, u-boot.dtb);
+    # all intermediate artifacts land in the temp workdir. No write access needed.
 
     for tool in fdtoverlay fdtput fdtget openssl make install; do
         command -v "${tool}" >/dev/null 2>&1 || missing+=("${tool}")
     done
 
     # u-boot tools live in ${UBOOT_DIR}/tools/
-    local -a uboot_tools=("mkimage" "dumpimage" "fit_check_sign")
+    # fit_check_sign is optional: signature verification is skipped with a
+    # warning when unavailable (the device verifies the signature on boot).
+    local -a uboot_tools=("mkimage" "dumpimage")
     for tool in "${uboot_tools[@]}"; do
         local path="${UBOOT_DIR}/tools/${tool}"
         if [[ ! -x "${path}" ]]; then
@@ -212,7 +217,7 @@ $(printf '  - %s\n' "${missing[@]}")
 Install hints:
   fdtoverlay/fdtput/fdtget : apt install device-tree-compiler
   openssl/install/make     : standard build-essential
-  mkimage/dumpimage/fit_check_sign : build u-boot, or point --u-boot-dir at its worktree
+  mkimage/dumpimage        : build u-boot, or point --u-boot-dir at its worktree
 
 The u-boot tools must live in <u-boot-dir>/tools/. If they're elsewhere on PATH,
 symlink them or extend this script.
@@ -470,6 +475,16 @@ secondary_signing() {
         fit_padding="0x1200"
     fi
 
+    # All intermediates stay in the temp workdir (removed on exit). Nothing is
+    # written into the u-boot worktree — historically the signed FIT went to
+    # ${UBOOT_DIR}/fit/boot.itb, which clobbered the source image when
+    # --source-boot-itb pointed there and poisoned every subsequent repack.
+    local keys_work
+    keys_work="$(prepare_keys_workdir "${work}")"
+
+    local sign_cmd
+    sign_cmd="'${UBOOT_DIR}/tools/mkimage' -f '${work}/boot-final.its' -k '${keys_work}' -E -p ${fit_padding} -r '${work}/boot.itb'"
+
     if [[ -n "${DOCKER_IMAGE}" ]]; then
         # Sign inside the armbian build container. Reason: this U-Boot fork's
         # rsa-sign.c never sets a PSS salt length, so mkimage follows the
@@ -477,57 +492,59 @@ secondary_signing() {
         # (222 for RSA2048+sha256), matching the hardcoded expectation in
         # rsa-verify.c padding_pss_verify. Host OpenSSL 3.x defaults to
         # salt = hash length (32) — such signatures always fail verification.
+        # UBOOT_DIR is mounted read-only: the tree must not be modified.
         display_alert "repack-fit" "Signing FIT in docker: ${DOCKER_IMAGE}" "info"
         if ! docker run --rm \
                 -v "${work}:${work}" \
-                -v "${UBOOT_DIR}:${UBOOT_DIR}" \
-                "${DOCKER_IMAGE}" bash -c "
-                    set -e
-                    cd '${UBOOT_DIR}'
-                    mkdir -p fit
-                    ./tools/mkimage -f '${work}/boot-final.its' -k keys/ -E -p ${fit_padding} -r fit/boot.itb
-                "; then
+                -v "${UBOOT_DIR}:${UBOOT_DIR}:ro" \
+                "${DOCKER_IMAGE}" bash -c "set -e; ${sign_cmd}"; then
             exit_with_error "docker signing failed" "${DOCKER_IMAGE}"
         fi
         return 0
     fi
 
-    # rk_secure_boot_run_secondary_fit_signing expects to be called from the
-    # u-boot tree (uses ${uboot_dir}/tools/mkimage and ${uboot_dir}/u-boot.dtb).
-    # It writes the signed FIT to ${uboot_dir}/fit/boot.itb.
-    #
-    # This u-boot's mkimage exits 1 on `-h` (unknown option, usage still
-    # printed). Under `set -o pipefail` the `mkimage -h | grep` guards inside
-    # the sourced function inherit that rc and falsely report "lacks FIT
-    # signature support". Disable pipefail for the duration of the call.
     display_alert "repack-fit" "Signing FIT on host (RSA, key-name-hint=dev)" "info"
-    set +o pipefail
-    rk_secure_boot_run_secondary_fit_signing "${work}" "${UBOOT_DIR}"
-    local rc=$?
-    set -o pipefail
-    return "${rc}"
+
+    # Same guard as secure-boot-image.sh: a USBPLUG-postprocessed mkimage may
+    # lack signature support and silently emit an unsigned FIT. NB: this
+    # mkimage exits 1 on `-h`, so capture output instead of piping into grep
+    # (pipefail would turn the usage print into a false positive).
+    local mkimage_help
+    mkimage_help="$("${UBOOT_DIR}/tools/mkimage" -h 2>&1 || true)"
+    [[ "${mkimage_help}" != *"Signing / verified boot not supported"* ]] ||
+        exit_with_error "mkimage lacks FIT signature support" "${UBOOT_DIR}/tools/mkimage"
+
+    if ! bash -c "set -e; ${sign_cmd}"; then
+        exit_with_error "FIT signing failed" "${work}/boot-final.its"
+    fi
 }
 
 fit_check_sign() {
-    local check_tool
-    check_tool="$(resolve_tool fit_check_sign)"
+    local signed_itb="$1"
 
-    if [[ -n "${DOCKER_IMAGE}" ]]; then
+    # The docker-signed FIT is root-owned, and this U-Boot fork's
+    # fit_check_sign opens its inputs read-write — as a non-root user it gets
+    # EACCES. Verify inside the container (as root) when available; the PSS
+    # salt expectations are compiled into the binary itself.
+    if [[ -n "${DOCKER_IMAGE}" && -x "${UBOOT_DIR}/tools/fit_check_sign" ]]; then
+        # fit_check_sign opens the key dtb read-write; stage a writable copy
+        # in the workdir instead of exposing the root-owned tree file rw.
+        local work_dir key_dtb
+        work_dir="$(dirname "${signed_itb}")"
+        key_dtb="${work_dir}/u-boot-key.dtb"
+        cp -f "${UBOOT_DIR}/u-boot.dtb" "${key_dtb}" ||
+            exit_with_error "Failed to stage u-boot.dtb for verification" "${UBOOT_DIR}/u-boot.dtb"
         display_alert "repack-fit" "Verifying signature in docker" "info"
         if ! docker run --rm \
-                -v "${UBOOT_DIR}:${UBOOT_DIR}" \
-                "${DOCKER_IMAGE}" bash -c "
-                    set -e
-                    cd '${UBOOT_DIR}'
-                    ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb
-                " >/dev/null; then
-            cat >&2 <<'EOF'
+                -v "${work_dir}:${work_dir}" \
+                -v "${UBOOT_DIR}:${UBOOT_DIR}:ro" \
+                "${DOCKER_IMAGE}" bash -c "set -e; '${UBOOT_DIR}/tools/fit_check_sign' -f '${signed_itb}' -k '${key_dtb}'" >/dev/null; then
+            cat >&2 <<EOF
 
 Signature verification failed. Likely causes:
-  1. The keys in --u-boot-dir/keys or --keys-source-dir do not match the
-     public key embedded in u-boot.dtb (this U-Boot was built with a
-     different key).
-  2. The docker image's OpenSSL signs with an unexpected PSS salt length.
+  1. The private_key.pem in --keys-source-dir does not match the public key
+     embedded in u-boot.dtb (this U-Boot was built with a different key).
+  2. u-boot.dtb was rebuilt after the key was rotated.
 EOF
             exit 1
         fi
@@ -535,16 +552,24 @@ EOF
         return 0
     fi
 
-    if [[ ! -x "${check_tool}" ]]; then
-        display_alert "repack-fit" "fit_check_sign not available, skipping verification" "warn"
+    # Host fallback: only meaningful when signing also happened on host (or
+    # running as root), for the ownership reason above.
+    local check_tool=""
+    if [[ -x "${UBOOT_DIR}/tools/fit_check_sign" ]]; then
+        check_tool="${UBOOT_DIR}/tools/fit_check_sign"
+    else
+        check_tool="$(type -P fit_check_sign || true)"
+    fi
+    if [[ -z "${check_tool}" ]]; then
+        display_alert "repack-fit" \
+            "fit_check_sign not available (apt install u-boot-tools or build it in the u-boot tree), skipping verification" "warn"
         return 0
     fi
 
-    local signed_itb="${UBOOT_DIR}/fit/boot.itb"
-    local uboot_dtb="${UBOOT_DIR}/u-boot.dtb"
-
     [[ -f "${signed_itb}" ]] ||
         exit_with_error "Signed boot.itb missing after signing" "${signed_itb}"
+
+    local uboot_dtb="${UBOOT_DIR}/u-boot.dtb"
     [[ -f "${uboot_dtb}" ]] ||
         exit_with_error "u-boot.dtb missing (needed for signature verification)" "${uboot_dtb}"
 
@@ -554,21 +579,23 @@ EOF
 
 Signature verification failed. Likely causes:
   1. The private_key.pem in --keys-source-dir does not match the public key
-     embedded in u-boot.dtb (i.e. this U-Boot was built with a different key).
+     embedded in u-boot.dtb (this U-Boot was built with a different key).
   2. u-boot.dtb was rebuilt after the key was rotated.
 
-Resolution: obtain the matching private key, or rebuild U-Boot from the same
-source with --keys-source-dir pointing at this key.
+Resolution: obtain the matching private key, rebuild U-Boot from the same
+source with --keys-source-dir pointing at this key, or sign in docker.
 EOF
         exit 1
     fi
+    display_alert "repack-fit" "Signature check OK" "info"
 }
 
 emit_output() {
-    local signed_itb="${UBOOT_DIR}/fit/boot.itb"
+    local work="$1"
+    local signed_itb="${work}/boot.itb"
 
     [[ -f "${signed_itb}" ]] ||
-        exit_with_error "Signed boot.itb not where expected" "${signed_itb}"
+        exit_with_error "Signed FIT not where expected" "${signed_itb}"
 
     cp -f "${signed_itb}" "${OUTPUT_PATH}" ||
         exit_with_error "Failed to write output" "${OUTPUT_PATH}"
@@ -613,8 +640,8 @@ main() {
     substitute_its_template "${WORKDIR}"
     initial_mkimage "${WORKDIR}"
     secondary_signing "${WORKDIR}"
-    fit_check_sign
-    emit_output
+    fit_check_sign "${WORKDIR}/boot.itb"
+    emit_output "${WORKDIR}"
 
     display_alert "repack-fit" "Done. Flash with: dd if=${OUTPUT_PATH} of=/dev/mmcblkXp1 conv=fsync" "info"
 }
