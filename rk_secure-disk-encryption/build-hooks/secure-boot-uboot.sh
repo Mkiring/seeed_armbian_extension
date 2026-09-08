@@ -326,6 +326,17 @@ function rk_secure_boot_sign_uboot_fit() {
     grep -qx 'CONFIG_SPL_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_SPL_FIT_SIGNATURE must be enabled for full secure boot" ".config"
     grep -Eq 'rsa(2048|4096)' u-boot.its || exit_with_error "U-Boot ITS has no supported RSA signature node" "u-boot.its"
 
+    # With CONFIG_FIT_ENABLE_RSASSA_PSS_SUPPORT the generated U-Boot ITS is
+    # signed with padding = "pss", and the SPL/U-Boot verifiers in this tree
+    # only accept maximum-salt PSS signatures.  A tree-built mkimage linked
+    # against OpenSSL >= 3.5 signs with digest-length salt, which SPL rejects
+    # on the device.  Sign with the Rockchip prebuilt mkimage instead: it is
+    # statically linked, so its maximum-salt behaviour is frozen into the
+    # binary regardless of the build container's OpenSSL.  The tree-built
+    # fit_check_sign below uses the same verify code as SPL, so any salt
+    # drift in the signing tool fails the build instead of the boot.
+    rk_secure_boot_resolve_mkimage
+
     # The USBPLUG postprocess rebuilds host tools with its temporary config,
     # leaving mkimage without FIT-signature support. Restore the host tools
     # from the final secure U-Boot configuration before signing the FIT.
@@ -342,11 +353,11 @@ function rk_secure_boot_sign_uboot_fit() {
     # generating the final U-Boot FIT so the DTB embedded in u-boot.itb is the
     # same trusted DTB used by the running U-Boot instance.
     if ! fdtget -l u-boot.dtb /signature >/dev/null 2>&1; then
-        tools/mkimage -f u-boot.its -k "${keys_dir}" -K u-boot.dtb \
+        "${RK_SECURE_BOOT_MKIMAGE}" -f u-boot.its -k "${keys_dir}" -K u-boot.dtb \
             -E -p "${fit_padding}" -r fit/uboot.itb ||
             exit_with_error "Failed to inject the boot FIT public key into U-Boot DTB" "u-boot.dtb"
     fi
-    tools/mkimage -f u-boot.its -k "${keys_dir}" -K spl/u-boot-spl.dtb \
+    "${RK_SECURE_BOOT_MKIMAGE}" -f u-boot.its -k "${keys_dir}" -K spl/u-boot-spl.dtb \
         -E -p "${fit_padding}" -r fit/uboot.itb ||
         exit_with_error "Failed to sign Armbian-built U-Boot FIT" "${platform}"
 

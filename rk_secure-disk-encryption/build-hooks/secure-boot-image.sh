@@ -156,11 +156,11 @@ function rk_secure_boot_run_secondary_fit_signing() {
 
     rm -f "${uboot_dir}/fit/boot.itb" "${uboot_dir}/boot-final.img" 2>/dev/null || true
 
-    if [[ ! -x "${uboot_dir}/tools/mkimage" ]]; then
+    if [[ ! -x "${uboot_dir}/tools/fit_check_sign" ]]; then
         if rk_full_secure_boot_enabled; then
-            exit_with_error "FIT signing failed: mkimage missing" "${uboot_dir}/tools/mkimage"
+            exit_with_error "FIT signing failed: fit_check_sign missing" "${uboot_dir}/tools/fit_check_sign"
         fi
-        display_alert "fit-post-initrd" "mkimage not found, using unsigned fallback image" "warn"
+        display_alert "fit-post-initrd" "fit_check_sign not found, using unsigned fallback image" "warn"
         return 0
     fi
 
@@ -168,16 +168,23 @@ function rk_secure_boot_run_secondary_fit_signing() {
         fit_padding="0x1200"
     fi
 
+    # The boot FIT carries padding = "pss", and the on-board verifiers (SPL /
+    # U-Boot from the radxa v2024.10 tree) only accept maximum-salt PSS
+    # signatures.  A tree-built mkimage linked against OpenSSL >= 3.5 signs
+    # with digest-length salt, which the device rejects.  Sign with the
+    # Rockchip prebuilt mkimage instead: it is statically linked, so its
+    # maximum-salt behaviour is frozen into the binary regardless of the
+    # build container's OpenSSL.
+    [[ -x "${RK_SECURE_BOOT_MKIMAGE}" ]] || rk_secure_boot_resolve_mkimage
+
     # USBPLUG postprocessing can leave a stale tools/mkimage built from a
-    # temporary config without CONFIG_FIT_SIGNATURE.  That binary accepts the
-    # FIT arguments but creates an unsigned image, only failing later in
-    # fit_check_sign with "No RSA key found".  Rebuild it from the final,
-    # secure U-Boot configuration before the secondary FIT signing pass.
-    if "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -q 'Signing / verified boot not supported'; then
-        make -C "${uboot_dir}" -B tools-only || exit_with_error "FIT signing failed: unable to rebuild mkimage" "${uboot_dir}/tools"
+    # temporary config without CONFIG_FIT_SIGNATURE.  That also leaves
+    # fit_check_sign failing with "No RSA key found".  Rebuild the host tools
+    # from the final secure U-Boot configuration before verifying the FIT.
+    if [[ -x "${uboot_dir}/tools/mkimage" ]] &&
+        "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -q 'Signing / verified boot not supported'; then
+        make -C "${uboot_dir}" -B tools-only || exit_with_error "FIT signing failed: unable to rebuild U-Boot host tools" "${uboot_dir}/tools"
     fi
-    "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -qv 'Signing / verified boot not supported' ||
-        exit_with_error "FIT signing failed: mkimage lacks FIT signature support" "${uboot_dir}/tools/mkimage"
 
     display_alert "fit-post-initrd" "Signing final FIT from boot-final.its" "info"
     (
@@ -185,11 +192,11 @@ function rk_secure_boot_run_secondary_fit_signing() {
         mkdir -p fit
         # The U-Boot build phase already embeds key-dev into u-boot.dtb.
         # Re-injecting it here is redundant and can exhaust DTB free space.
-        ./tools/mkimage -f "${fit_work}/boot-final.its" -k keys/ -E -p "${fit_padding}" -r fit/boot.itb || exit 1
+        "${RK_SECURE_BOOT_MKIMAGE}" -f "${fit_work}/boot-final.its" -k keys/ -E -p "${fit_padding}" -r fit/boot.itb || exit 1
         fdtget -l u-boot.dtb /signature 2>/dev/null | grep -qx 'key-dev' || exit 1
-        if [[ -x ./tools/fit_check_sign ]]; then
-            ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
-        fi
+        # Tree-built verifier: same verify code as the running U-Boot, so a
+        # salt drift in the signing tool fails the build instead of the boot.
+        ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
     ) || {
         if rk_full_secure_boot_enabled; then
             exit_with_error "FIT signing failed: mkimage signing failed" "${fit_work}/boot-final.its"
