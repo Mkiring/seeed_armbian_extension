@@ -100,7 +100,7 @@ function pre_prepare_partitions__050_set_raw_boot_partition() {
     BOOTPART_REQUIRED="yes"
 
     # Keep raw FIT boot size aligned with the shared OTA partition policy.
-    export BOOTSIZE=${OTA_BOOT_SIZE:-256}
+    export BOOTSIZE=${OTA_BOOT_SIZE:-512}
     display_alert "secure-uboot" "Forcing boot partition size: ${BOOTSIZE} MiB" "info"
 
     # Disable standard boot filesystem handling
