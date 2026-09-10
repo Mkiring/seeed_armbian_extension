@@ -45,6 +45,13 @@ if [[ "yes" == "yes" ]]; then
 	enable_extension "seeed_armbian_extension/security-hardening/recomputer-security"
 fi
 
+# SSH power-loss recovery: run the ssh-protect repair script as ExecStartPre
+# of ssh.service in every seeed image.
+if [[ "yes" == "yes" ]]; then
+	display_alert "SSH protection" "Enable ssh-protect power-loss recovery" "info"
+	enable_extension "seeed_armbian_extension/ssh-protect/ssh-protect"
+fi
+
 # RK3576/RK3588 U-Boot SPL loader hooks: boot_merger + optional usbplug recompile
 # for Maskrom recovery on new SPI flash boards. Hook functions are inert for SoCs
 # they don't handle (they fall back to upstream mkimage behavior).
