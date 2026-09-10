@@ -1,0 +1,72 @@
+#!/bin/bash
+# Recover SSH from power-loss corruption before sshd starts.
+# Installed as ExecStartPre for ssh.service via systemd drop-in.
+#
+# Power loss during first boot / firstlogin can leave files in /etc/ssh
+# zero-filled or truncated (ext4 delayed allocation). sshd then refuses to
+# start and the board is unreachable over the network. Repair the damage
+# before sshd validates its config:
+#   - host keys: remove missing/empty/unparseable keys and regenerate
+#   - sshd_config (only if still broken after keys are fixed): restore the
+#     distro default, re-applying the Armbian essentials (PermitRootLogin
+#     yes / PubkeyAuthentication yes) set at image build time
+#
+# sshd -t treats 0x00 bytes as whitespace and returns success, so
+# null-byte corruption must be checked explicitly.
+
+mkdir -p /run/sshd
+
+# Validate host keys FIRST: sshd -t also fails when host keys are missing or
+# unparseable ("no hostkeys available"), so the keys must be repaired before
+# deciding whether the config itself is at fault - otherwise a keys-only
+# failure would needlessly replace sshd_config (losing user customisations).
+# ssh-keygen -A only creates keys that are absent, so broken keys (empty,
+# zero-filled or truncated, i.e. non-empty but unparseable) must be removed
+# first, together with their .pub files.
+keys_found=0
+keys_broken=0
+for key in /etc/ssh/ssh_host_*_key; do
+	[[ -e "${key}" ]] || continue
+	keys_found=1
+	if [[ ! -s "${key}" ]] || ! ssh-keygen -l -f "${key}" >/dev/null 2>&1; then
+		rm -f "${key}" "${key}.pub"
+		keys_broken=1
+	fi
+done
+if [[ ${keys_broken} -eq 1 || ${keys_found} -eq 0 ]]; then
+	ssh-keygen -A
+fi
+
+config_broken=0
+if ! /usr/sbin/sshd -t 2>/dev/null; then
+	config_broken=1
+elif grep -qPal '\x00' /etc/ssh/sshd_config 2>/dev/null; then
+	config_broken=1
+fi
+
+if [[ $config_broken -eq 1 ]]; then
+	# Write the replacement atomically (temp file + rename): power loss
+	# during the repair itself must not leave a half-written config behind.
+	# The end-of-script sync makes the rename durable.
+	repair_tmp="$(mktemp /etc/ssh/sshd_config.repair.XXXXXX)"
+	if [[ -f /usr/share/openssh/sshd_config ]]; then
+		cp /usr/share/openssh/sshd_config "${repair_tmp}"
+	else
+		# no pristine copy available, write a minimal working config
+		cat > "${repair_tmp}" << 'EOF'
+Include /etc/ssh/sshd_config.d/*.conf
+PermitRootLogin yes
+PubkeyAuthentication yes
+UsePAM yes
+Subsystem sftp /usr/lib/openssh/sftp-server
+EOF
+	fi
+	# re-apply the Armbian defaults set at image build time
+	sed -i -e 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' \
+		-e 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' \
+		"${repair_tmp}"
+	chmod 644 "${repair_tmp}"
+	mv -f "${repair_tmp}" /etc/ssh/sshd_config
+fi
+
+sync
