@@ -1,20 +1,22 @@
 #!/bin/sh
 set -e
 
-# rkr7 userspace must be paired with a matching rkisp kernel driver
-# (6.1.172+). On older kernels (e.g. 6.1.115) the engine aborts during
-# init with "failed to get cac buf info" and the 3A server dies —
-# refuse to configure instead of shipping a silently dead camera.
+# rkr7 userspace must be paired with a matching rkisp kernel driver.
+# 6.1.115 and older are known broken (engine aborts during init with
+# "failed to get cac buf info"); 6.1.172 is verified good. Kernels in
+# between are untested — allow them, and set no upper bound for now
+# (forward compatibility of newer kernels is not yet characterized).
+# Refuse to configure instead of shipping a silently dead camera.
 MINKVER="@MINKVER@"
 
 # Skip the check inside a chroot (image builds): uname -r there is the
 # build host kernel, not the target kernel.
 if [ "$(stat -c '%d:%i' / 2>/dev/null)" = "$(stat -c '%d:%i' /proc/1/root/. 2>/dev/null)" ]; then
     KVER=$(uname -r | cut -d- -f1)
-    if ! dpkg --compare-versions "$KVER" ge "$MINKVER"; then
-        echo "ERROR: camera-engine-rkaiq-@SOC@ rkr7 userspace requires kernel >= ${MINKVER} (running: $(uname -r))." >&2
+    if ! dpkg --compare-versions "$KVER" gt "$MINKVER"; then
+        echo "ERROR: camera-engine-rkaiq-@SOC@ rkr7 userspace requires kernel > ${MINKVER} (running: $(uname -r))." >&2
         echo "       rkaiq userspace and the rkisp driver uAPI must be paired:" >&2
-        echo "       upgrade the vendor kernel first, or stay on camera-engine-rkaiq-@SOC@ 1.0-1 for older kernels." >&2
+        echo "       ${MINKVER} and older are known broken; upgrade the vendor kernel, or stay on camera-engine-rkaiq-@SOC@ 1.0-1." >&2
         exit 1
     fi
 fi

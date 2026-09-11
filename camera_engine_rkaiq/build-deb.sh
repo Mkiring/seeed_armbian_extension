@@ -23,8 +23,8 @@ set -euo pipefail
 
 SOC="${1:?Usage: $0 <rk3576|rk3588>}"
 case "${SOC}" in
-    rk3576) IQDIR="isp39"; ISPVER="-DISP_HW_V39"; MINKVER="6.1.172"; EXTRA_DEPENDS="" ;;
-    rk3588) IQDIR="isp3x"; ISPVER="-DISP_HW_V30"; MINKVER="6.1.172"; EXTRA_DEPENDS="libstdc++6," ;;
+    rk3576) IQDIR="isp39"; ISPVER="-DISP_HW_V39"; MINKVER="6.1.115"; EXTRA_DEPENDS="" ;;
+    rk3588) IQDIR="isp3x"; ISPVER="-DISP_HW_V30"; MINKVER="6.1.115"; EXTRA_DEPENDS="libstdc++6," ;;
     *) echo "ERROR: Unsupported SoC: ${SOC}. Use rk3576 or rk3588."; exit 1 ;;
 esac
 
