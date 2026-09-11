@@ -23,8 +23,8 @@ set -euo pipefail
 
 SOC="${1:?Usage: $0 <rk3576|rk3588>}"
 case "${SOC}" in
-    rk3576) IQDIR="isp39"; EXTRA_DEPENDS="" ;;
-    rk3588) IQDIR="isp3x"; EXTRA_DEPENDS="libstdc++6," ;;
+    rk3576) IQDIR="isp39"; ISPVER="-DISP_HW_V39"; EXTRA_DEPENDS="" ;;
+    rk3588) IQDIR="isp3x"; ISPVER="-DISP_HW_V30"; EXTRA_DEPENDS="libstdc++6," ;;
     *) echo "ERROR: Unsupported SoC: ${SOC}. Use rk3576 or rk3588."; exit 1 ;;
 esac
 
@@ -110,6 +110,7 @@ cmake -G Ninja -S "${SCRIPT_DIR}" -B "${BUILD_DIR}" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DRKAIQ_TARGET_SOC="${SOC}" \
+    -DISP_HW_VERSION="${ISPVER}" \
     -DARCH=aarch64 \
     -DRKAIQ_BUILD_BINARY_IQ=OFF \
     -DRKAIQ_USE_RAWSTREAM_LIB=OFF \
