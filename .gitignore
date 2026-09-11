@@ -1,0 +1,4 @@
+
+# rkaiq cross-build outputs
+camera-engine-rkaiq-*_arm64.deb
+camera_engine_rkaiq/build/
