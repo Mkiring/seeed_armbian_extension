@@ -2,3 +2,4 @@
 # rkaiq cross-build outputs
 camera-engine-rkaiq-*_arm64.deb
 camera_engine_rkaiq/build/
+camera_engine_rkaiq/IspFec/src/gen_mesh/android/
