@@ -6,9 +6,17 @@
 # ota_detect_devices logs). /bin/sh + busybox (blkid, udevadm).
 
 # ===== helper: get DEV + UUID by LABEL (e.g. /dev/mmcblk0p5 + UUID) =====
+# Optional $2 restricts the match to partitions of that disk: cloned images on
+# several disks expose duplicate LABELs and a first blkid match may address
+# the wrong disk.
 get_dev_and_uuid_by_label() {
     label="$1"
-    dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | head -n1)"
+    disk="${2:-}"
+    if [ -n "${disk}" ]; then
+        dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | grep -E "^${disk}p[0-9]+$" | head -n1)"
+    else
+        dev="$(blkid -t LABEL="${label}" -o device 2>/dev/null | head -n1)"
+    fi
     [ -n "${dev}" ] || return 1
     uuid="$(blkid -s UUID -o value "${dev}" 2>/dev/null | head -n1)"
     [ -n "${uuid}" ] || return 1
@@ -16,22 +24,87 @@ get_dev_and_uuid_by_label() {
 }
 
 get_uuid_by_label() {
-    set -- $(get_dev_and_uuid_by_label "$1" 2>/dev/null) || return 1
+    set -- $(get_dev_and_uuid_by_label "$1" "${2:-}" 2>/dev/null) || return 1
     [ -n "$2" ] || return 1
     printf '%s\n' "$2"
 }
 
-# ===== helper: get LUKS UUID for encrypted root backing device =====
-get_luks_uuid_for_root() {
-    local root_luks_dev
+# Disk U-Boot actually loaded the image from, passed on the kernel command
+# line by the raw-fit bootcmd prefix (armbian.bootdev/armbian.bootdevnum).
+# Cloned images on several disks expose duplicate PARTLABELs/LABELs/UUIDs,
+# so an unanchored first match may address the wrong disk; the lookups below
+# prefer partitions of this disk when the tokens are present, and keep the
+# legacy first-match otherwise (single disk, older bootcmd).
+recovery_boot_disk() {
+    local token devtype devnum
 
-    root_luks_dev="$(blkid -t PARTLABEL=rootfs -o device 2>/dev/null | head -n1 || true)"
-    if [ -n "${root_luks_dev}" ] && [ "$(blkid -s TYPE -o value "${root_luks_dev}" 2>/dev/null || true)" = "crypto_LUKS" ]; then
-        blkid -s UUID -o value "${root_luks_dev}" 2>/dev/null | head -n1
-        return 0
+    for token in $(cat /proc/cmdline 2>/dev/null); do
+        case "${token}" in
+            armbian.bootdev=*) devtype="${token#armbian.bootdev=}" ;;
+            armbian.bootdevnum=*) devnum="${token#armbian.bootdevnum=}" ;;
+        esac
+    done
+
+    case "${devtype:-}" in
+        mmc)
+            [ -b "/dev/mmcblk${devnum:-}" ] || return 1
+            echo "/dev/mmcblk${devnum}"
+            ;;
+        nvme)
+            [ -b "/dev/nvme${devnum:-}n1" ] || return 1
+            echo "/dev/nvme${devnum}n1"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# First blkid device match for KEY=value, restricted to partitions of $disk
+# (mmcblkNpX / nvmeXn1pY naming) when a disk is given.
+first_match_on_disk() {
+    local filter="$1" disk="$2"
+
+    if [ -n "${disk}" ]; then
+        blkid -t "${filter}" -o device 2>/dev/null |
+            grep -E "^${disk}p[0-9]+$" | head -n1
+    else
+        blkid -t "${filter}" -o device 2>/dev/null | head -n1
+    fi
+}
+
+# ===== helper: get LUKS UUID for encrypted root backing device =====
+# Anchored: prefer the container the initramfs actually unlocked (its sysfs
+# slaves entry names the backing partition), then PARTLABEL=rootfs / any LUKS
+# container restricted to the boot disk. Unanchored first-match remains the
+# last resort for images without the cmdline tokens.
+get_luks_uuid_for_root() {
+    local root_luks_dev disk _dm _slave
+
+    root_luks_dev=""
+    if [ -e /dev/mapper/armbian-root ]; then
+        for _dm in /sys/class/block/dm-*; do
+            [ -e "${_dm}" ] || continue
+            [ "$(cat "${_dm}/dm/name" 2>/dev/null)" = "armbian-root" ] || continue
+            for _slave in "${_dm}/slaves/"*; do
+                [ -e "${_slave}" ] || continue
+                root_luks_dev="/dev/$(sed -n 's/^DEVNAME=//p' "${_slave}/uevent" 2>/dev/null | head -n1)"
+                break
+            done
+            break
+        done
     fi
 
-    blkid -t TYPE=crypto_LUKS -s UUID -o value 2>/dev/null | head -n1
+    if [ -z "${root_luks_dev}" ] || [ "$(blkid -s TYPE -o value "${root_luks_dev}" 2>/dev/null || true)" != "crypto_LUKS" ]; then
+        disk="$(recovery_boot_disk || true)"
+        root_luks_dev="$(first_match_on_disk "PARTLABEL=rootfs" "${disk}" || true)"
+        if [ -z "${root_luks_dev}" ] || [ "$(blkid -s TYPE -o value "${root_luks_dev}" 2>/dev/null || true)" != "crypto_LUKS" ]; then
+            root_luks_dev="$(first_match_on_disk "TYPE=crypto_LUKS" "${disk}" || true)"
+        fi
+    fi
+
+    [ -n "${root_luks_dev}" ] || return 1
+    blkid -s UUID -o value "${root_luks_dev}" 2>/dev/null | head -n1
 }
 
 get_partname_for_dev() {
@@ -44,12 +117,23 @@ get_partname_for_dev() {
 }
 
 find_raw_boot_dev() {
+    local disk devname partname uevent
+
+    # Cloned disks each carry a PARTNAME=boot partition; boot.itb must land on
+    # the disk U-Boot booted from, so restrict the scan to its partitions.
+    disk="$(recovery_boot_disk || true)"
     for uevent in /sys/class/block/*/uevent; do
         [ -f "${uevent}" ] || continue
         devname="$(sed -n 's/^DEVNAME=//p' "${uevent}" | head -n1)"
         partname="$(sed -n 's/^PARTNAME=//p' "${uevent}" | head -n1)"
         [ -n "${devname}" ] || continue
         [ "${partname}" = "boot" ] || continue
+        if [ -n "${disk}" ]; then
+            case "/dev/${devname}" in
+                "${disk}"p*) ;;
+                *) continue ;;
+            esac
+        fi
         printf '/dev/%s\n' "${devname}"
         return 0
     done
@@ -118,7 +202,7 @@ ota_detect_devices() {
         log "no crypto_LUKS container, using standard recovery OTA mode"
     fi
 
-    boot_info="$(get_dev_and_uuid_by_label "armbi_boot" || true)"
+    boot_info="$(get_dev_and_uuid_by_label "armbi_boot" "$(recovery_boot_disk || true)" || true)"
 
     if [ "${AUTO_DECRYPT_MODE}" -eq 0 ]; then
         # Standard mode root detection. Prefer /proc/cmdline root= (always present,
@@ -151,7 +235,7 @@ ota_detect_devices() {
                     ;;
                 LABEL=*)
                     _clbl="${cmdline_root#LABEL=}"
-                    _cinfo="$(get_dev_and_uuid_by_label "${_clbl}" || true)"
+                    _cinfo="$(get_dev_and_uuid_by_label "${_clbl}" "$(recovery_boot_disk || true)" || true)"
                     [ -n "${_cinfo}" ] && root_info="${_cinfo}"
                     ;;
                 /dev/*)
@@ -167,7 +251,7 @@ ota_detect_devices() {
 
         if [ -z "${root_info}" ]; then
             log "cmdline root= unavailable or unresolved, fallback to LABEL=armbi_root"
-            root_info="$(get_dev_and_uuid_by_label "armbi_root" || true)"
+            root_info="$(get_dev_and_uuid_by_label "armbi_root" "$(recovery_boot_disk || true)" || true)"
         fi
 
         if [ -n "${root_info}" ]; then
