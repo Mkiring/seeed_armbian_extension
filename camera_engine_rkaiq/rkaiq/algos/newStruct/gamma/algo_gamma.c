@@ -28,6 +28,7 @@
 
 // RKAIQ_BEGIN_DECLARE
 XCamReturn GammaSelectParam(GammaContext_t* pGammaCtx, gamma_param_t* out, int iso);
+XCamReturn GammaApplyStrength(GammaContext_t* pGammaCtx, gamma_param_t* out);
 
 static XCamReturn create_context(RkAiqAlgoContext** context, const AlgoCtxInstanceCfg* cfg) {
     XCamReturn result                 = XCAM_RETURN_NO_ERROR;
@@ -42,6 +43,7 @@ static XCamReturn create_context(RkAiqAlgoContext** context, const AlgoCtxInstan
     ctx->isReCal_       = true;
     ctx->prepare_params = NULL;
     ctx->gamma_attrib   = (gamma_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(pCalibDbV2, gamma));
+    ctx->gamma_strg     = 1.0;
 
     *context = (RkAiqAlgoContext*)ctx;
     LOGV_AGAMMA("%s: (exit)\n", __FUNCTION__);
@@ -104,6 +106,7 @@ XCamReturn Agamma_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outp
 
     if (pGammaCtx->isReCal_) {
         GammaSelectParam(pGammaCtx, outparams->algoRes, iso);
+        GammaApplyStrength(pGammaCtx, outparams->algoRes);
         outparams->cfg_update = true;
         outparams->en         = gamma_attrib->en;
         outparams->bypass     = gamma_attrib->bypass;
@@ -151,6 +154,45 @@ XCamReturn GammaSelectParam(GammaContext_t* pGammaCtx, gamma_param_t* out, int i
             interpolation_u16(paut->dyn[ilow].hw_gammaT_outCurve_val[i],
                               paut->dyn[ihigh].hw_gammaT_outCurve_val[i], uratio);
     }
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn
+GammaApplyStrength(GammaContext_t* pGammaCtx, gamma_param_t* out)
+{
+    if (!pGammaCtx) {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
+
+    if (!out) {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
+
+    LOGD_AGAMMA("gamma strength %f", pGammaCtx->gamma_strg);
+
+    for (int i = 0; i < CALIBDB_AGAMMA_KNOTS_NUM_V11 - 1; i++) {
+        out->dyn.hw_gammaT_outCurve_val[i] = CLIP(out->dyn.hw_gammaT_outCurve_val[i] * pGammaCtx->gamma_strg, 0, 4095);
+    }
+    if (out->dyn.hw_gammaT_outCurve_val[CALIBDB_AGAMMA_KNOTS_NUM_V11 - 1] != 4095) {
+        out->dyn.hw_gammaT_outCurve_val[CALIBDB_AGAMMA_KNOTS_NUM_V11 - 1] =
+            CLIP(out->dyn.hw_gammaT_outCurve_val[CALIBDB_AGAMMA_KNOTS_NUM_V11 - 1] * pGammaCtx->gamma_strg, 0, 4095);
+    }
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn algo_gamma_SetStrength(RkAiqAlgoContext* ctx, int strg)
+{
+    if (ctx == NULL) {
+        LOGE_AGAMMA("%s(%d): null pointer\n", __FUNCTION__, __LINE__);
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    GammaContext_t* pGammaCtx = (GammaContext_t*)ctx;
+    float fix_strg            = strg > 128 ? (strg - 128) / 12.8 / 2 + 1 : strg / 128.0;
+    pGammaCtx->gamma_strg     = fix_strg;
+    pGammaCtx->isReCal_        = true;
 
     return XCAM_RETURN_NO_ERROR;
 }

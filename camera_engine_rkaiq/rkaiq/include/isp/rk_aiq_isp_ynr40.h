@@ -560,32 +560,6 @@ typedef struct ynr_loNr_tex2NrStrg_s {
     float sw_ynrT_edgeRegionNr_strg;
 } ynr_loNr_tex2NrStrg_t;
 
-typedef struct ynr_loNr_locSgmStrg2NrStrg_s {
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(hw_ynr_loSpnrGain2strg_val),
-        M4_TYPE(f32),
-        M4_SIZE_EX(1,9),
-        M4_RANGE_EX(0,16.0),
-        M4_DEFAULT(1.0),
-        M4_DIGIT_EX(4),
-        M4_FP_EX(0,6,9),
-        M4_HIDE_EX(0),
-        M4_UI_MODULE(curve),
-        M4_GROUP(loNr_en_group),
-        M4_DATAX([1, 2, 4, 8, 16, 32, 64, 128, 256]),
-        M4_RO(0),
-        M4_ORDER(1),
-        M4_NOTES(....\n
-        ....
-        Freq of use: high))  */
-    // @reg: hw_ynr_loSpnrGain2strg_val0~8
-    /*
-    The pixSgm values of the 8 nodes on the x-axis are as follows:
-    [2, 4, 8, 16, 32, 64, 128, 256]
-    */
-    float hw_ynrT_locSgmStrg2NrStrg_val[YNR_PIXSGMSCL_SEGMENT_MAX];
-} ynr_loNr_locSgmStrg2NrStrg_t;
-
 typedef struct ynr_loNrEPF_s {
     /* M4_GENERIC_DESC(
         M4_ALIAS(hw_ynr_loSpnr_strg),
@@ -601,23 +575,6 @@ typedef struct ynr_loNrEPF_s {
         Freq of use: high))  */
     // reg: hw_ynr_loSpnr_strg
     float hw_ynrT_rgeSgm_scale;
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(sw_ynr_loSpnr_strg),
-        M4_TYPE(f32),
-        M4_SIZE_EX(1,6),
-        M4_RANGE_EX(0.016, 16),
-        M4_DEFAULT([1.0, 1.0, 1.0, 1.0]),
-        M4_DIGIT_EX(3f7b),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_UI_MODULE(curve),
-        M4_DATAX([0, 32, 64, 128, 192, 256]),
-        M4_NOTES(The scaling factor of the range sigma of the bilateral filter\n
-        Freq of use: high))  */
-    // reg: hw_ynr_loSpnr_strg
-    // para: luma2loStrg, loSpnr_strg
-    float hw_ynrT_luma2RgeSgm_scale[6];
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_ynr_loSpnrThumbThred_scale),
         M4_TYPE(f32),
@@ -661,7 +618,7 @@ typedef struct ynr_loNrEPF_s {
     // reg: sw_ynr_loSpnrSoftThred_scale
     float hw_ynrT_softThd_scale;
     /* M4_GENERIC_DESC(
-       M4_ALIAS(sw_ynr_miSpnr_wgt),
+       M4_ALIAS(sw_ynr_loSpnr_wgt),
        M4_TYPE(f32),
        M4_SIZE_EX(1,1),
        M4_RANGE_EX(0.0,1.0),
@@ -672,25 +629,9 @@ typedef struct ynr_loNrEPF_s {
        M4_ORDER(6),
        M4_NOTES(Blending weight of input for lo-NR.
        Freq of use: high))  */
-    //reg: hw_ynr_miSpnr_wgt
+    //reg: hw_ynr_loSpnr_wgt
     float hw_ynrT_loNrOut_alpha;
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(hw_ynr_loSpnrGain2strg_val),
-        M4_TYPE(f32),
-        M4_SIZE_EX(1,9),
-        M4_RANGE_EX(0,1.0),
-        M4_DEFAULT(1.0),
-        M4_DIGIT_EX(3),
-        M4_FP_EX(0,1,7),
-        M4_HIDE_EX(0),
-        M4_UI_MODULE(curve),
-        M4_DATAX([1, 2, 4, 8, 16, 32, 64, 128, 256]),
-        M4_RO(0),
-        M4_ORDER(1),
-        M4_NOTES(Scale factor of blending weight for nr-result in low-NR.\n
-        Freq of use: high))  */
-    // @reg: hw_ynr_loSpnr_wgt = 1.0, hw_ynr_loGain2wgt_val0~8
-    float hw_ynrT_locSgmStrg2NrOut_alpha[YNR_PIXSGMSCL_SEGMENT_MAX];
+
 } ynr_loNrEPF_t;
 
 typedef struct ynr_loNr_dyn_s {
@@ -716,16 +657,6 @@ typedef struct ynr_loNr_dyn_s {
         M4_GROUP(loNr_en_group),
         M4_NOTES(TODO))  */
     ynr_loNr_tex2NrStrg_t locYnrStrg_texRegion;
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(locYnrStrg_locSgmStrg),
-        M4_TYPE(struct),
-        M4_UI_MODULE(normal_ui_style),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(2),
-        M4_GROUP(loNr_en_group),
-        M4_NOTES(TODO))  */
-    ynr_loNr_locSgmStrg2NrStrg_t locYnrStrg_locSgmStrg;
     /* M4_GENERIC_DESC(
         M4_ALIAS(bifilt),
         M4_TYPE(struct),
@@ -870,6 +801,97 @@ typedef struct ynr_params_static_s {
     ynr_ynrLP_t lowPowerCfg;
 } ynr_params_static_t;
 
+typedef struct ynr_locMidLoNrStrg_dyn_s {
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(sw_ynr_loSpnr_strg),
+        M4_TYPE(f32),
+        M4_SIZE_EX(1,6),
+        M4_RANGE_EX(0.016, 16),
+        M4_DEFAULT([1.0, 1.0, 1.0, 1.0]),
+        M4_DIGIT_EX(3f7b),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(0),
+        M4_UI_MODULE(curve),
+        M4_DATAX([0, 32, 64, 128, 192, 256]),
+        M4_NOTES(The scaling factor of the range sigma of the bilateral filter\n
+        Freq of use: high))  */
+    // reg: hw_ynr_loSpnr_strg
+    // para: luma2loStrg, loSpnr_strg
+    float hw_ynrT_luma2RgeSgm_scale[6];
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(hw_ynr_loSpnrGain2strg_val),
+        M4_TYPE(f32),
+        M4_SIZE_EX(1,9),
+        M4_RANGE_EX(0,16.0),
+        M4_DEFAULT(1.0),
+        M4_DIGIT_EX(4),
+        M4_FP_EX(0,6,9),
+        M4_HIDE_EX(0),
+        M4_UI_MODULE(curve),
+        M4_GROUP(loNr_en_group),
+        M4_DATAX([1, 2, 4, 8, 16, 32, 64, 128, 256]),
+        M4_RO(0),
+        M4_ORDER(1),
+        M4_NOTES(....\n
+        ....
+        Freq of use: high))  */
+    // @reg: hw_ynr_loSpnrGain2strg_val0~8
+    /*
+      The pixSgm values of the 8 nodes on the x-axis are as follows:
+      [2, 4, 8, 16, 32, 64, 128, 256]
+      */
+    float hw_ynrT_locSgmStrg2NrStrg_val[YNR_PIXSGMSCL_SEGMENT_MAX];
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(hw_ynr_loSpnrGain2strg_val),
+        M4_TYPE(f32),
+        M4_SIZE_EX(1,9),
+        M4_RANGE_EX(0,1.0),
+        M4_DEFAULT(1.0),
+        M4_DIGIT_EX(3),
+        M4_FP_EX(0,1,7),
+        M4_HIDE_EX(0),
+        M4_UI_MODULE(curve),
+        M4_DATAX([1, 2, 4, 8, 16, 32, 64, 128, 256]),
+        M4_RO(0),
+        M4_ORDER(1),
+        M4_NOTES(Scale factor of blending weight for nr-result in low-NR.\n
+        Freq of use: high))  */
+    // @reg: hw_ynr_loSpnr_wgt = 1.0, hw_ynr_loGain2wgt_val0~8
+    float hw_ynrT_locSgmStrg2NrOut_alpha[YNR_PIXSGMSCL_SEGMENT_MAX];
+} ynr_locMidLoNrStrg_dyn_t;
+
+typedef struct ynr_midLoNr_dyn_s {
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(midNr),
+        M4_TYPE(struct),
+        M4_UI_MODULE(normal_ui_style),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(3),
+        M4_GROUP(miNr_en_group||loNr_en_group),
+        M4_NOTES(TODO))  */
+    ynr_locMidLoNrStrg_dyn_t locNrStrg;
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(midNr),
+        M4_TYPE(struct),
+        M4_UI_MODULE(normal_ui_style),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(3),
+        M4_NOTES(TODO))  */
+    ynr_midNr_dyn_t mf;
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(loNr),
+        M4_TYPE(struct),
+        M4_UI_MODULE(normal_ui_style),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(2),
+        M4_NOTES(TODO))  */
+    ynr_loNr_dyn_t lf;
+} ynr_midLoNr_dyn_t;
+
 typedef struct ynr_params_dyn_s {
     /* M4_GENERIC_DESC(
         M4_ALIAS(locYnrStrg),
@@ -899,23 +921,14 @@ typedef struct ynr_params_dyn_s {
         M4_NOTES(TODO))  */
     ynr_hiNr_dyn_t hiNr;
     /* M4_GENERIC_DESC(
-        M4_ALIAS(midNr),
+        M4_ALIAS(midLoNr),
         M4_TYPE(struct),
         M4_UI_MODULE(normal_ui_style),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(3),
         M4_NOTES(TODO))  */
-    ynr_midNr_dyn_t midNr;
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(loNr),
-        M4_TYPE(struct),
-        M4_UI_MODULE(normal_ui_style),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(2),
-        M4_NOTES(TODO))  */
-    ynr_loNr_dyn_t loNr;
+    ynr_midLoNr_dyn_t midLoNr;
 } ynr_params_dyn_t;
 
 typedef struct ynr_param_s {

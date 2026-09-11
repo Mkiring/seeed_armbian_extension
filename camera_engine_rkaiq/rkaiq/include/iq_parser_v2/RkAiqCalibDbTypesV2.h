@@ -16,6 +16,7 @@
 #ifndef ___RK_AIQ_CALIB_DB_TYPES_V2_H__
 #define ___RK_AIQ_CALIB_DB_TYPES_V2_H__
 
+#include "iq_parser_v2/cis_head.h"
 #include "iq_parser_v2/moduleinfo_head.h"
 #include "iq_parser_v2/sensorinfo_head.h"
 #include "iq_parser_v2/sys_static_cfg_head.h"
@@ -38,7 +39,9 @@
 #ifdef ISP_HW_V33
 #include "iq_parser_v2/RkAiqCalibDbV2TypesIsp33.h"
 #endif
-#include "common/rk_aiq_comm.h"
+#ifdef ISP_HW_V35
+#include "iq_parser_v2/RkAiqCalibDbV2TypesIsp35.h"
+#endif
 #include "iq_parser_v2/RkAiqUapitypes.h"
 #include "RkAiqCalibDbJustForRtt.h"
 
@@ -140,6 +143,7 @@ typedef struct CamCalibDbV2Context_s {
     CalibDb_SysStaticCfg_ParaV2_t* sys_cfg;
     int sys_cfg_len;
     char* calib_scene;
+    char* scene_cis;
 } CamCalibDbV2Context_t;
 
 /**
@@ -163,9 +167,12 @@ typedef struct CamCalibDbV2Tuning_s {
     CamCalibDbV2ContextIsp39_t calib_scene;
 #elif defined(ISP_HW_V33)
     CamCalibDbV2ContextIsp33_t calib_scene;
+#elif defined(ISP_HW_V35)
+    CamCalibDbV2ContextIsp35_t calib_scene;
 #else
 #error "WRONG ISP_HW_VERSION, ONLY SUPPORT V20 AND V21 AND V30 NOW !"
 #endif
+    calibdb_cis_para_t calib_cis;
 } CamCalibDbV2Tuning_t;
 
 typedef struct CamCalibSubSceneList_s {
@@ -189,10 +196,12 @@ typedef struct CamCalibSubSceneList_s {
     CamCalibDbV2ContextIsp39_t scene_isp39;
 #elif defined(ISP_HW_V33)
     CamCalibDbV2ContextIsp33_t scene_isp33;
+#elif defined(ISP_HW_V35)
+    CamCalibDbV2ContextIsp35_t scene_isp35;
 #else
 #error "WRONG ISP_HW_VERSION, ONLY SUPPORT V20 AND V21 AND V30 NOW !"
 #endif
-
+    calibdb_cis_para_t scene_cis;
 } CamCalibSubSceneList_t;
 
 typedef struct CamCalibMainSceneList_s {

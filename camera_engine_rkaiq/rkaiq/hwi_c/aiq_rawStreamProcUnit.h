@@ -42,6 +42,8 @@ typedef struct AiqV4l2Buffer_s AiqV4l2Buffer_t;
 typedef struct AiqV4l2Device_s AiqV4l2Device_t;
 typedef struct rk_sensor_full_info_s rk_sensor_full_info_t;
 
+typedef XCamReturn (*rawStream_send_sync_buf_func)(void* ctx, AiqV4l2Buffer_t* buf_s, AiqV4l2Buffer_t* buf_m, AiqV4l2Buffer_t* buf_l);
+
 typedef struct AiqRawStreamProcUnit_s {
     int mCamPhyId;
     AiqV4l2Device_t* _dev[3];
@@ -60,6 +62,7 @@ typedef struct AiqRawStreamProcUnit_s {
     // aiq_VideoBuffer_t*
     AiqList_t* cache_list[3];  // before trigger
     AiqPollCallback_t* _pcb[3];
+    bool _is_split;
 
     AiqThread_t* _raw_proc_thread;
     bool _isRawProcThQuit;
@@ -115,14 +118,12 @@ XCamReturn AiqRawStreamProcUnit_capture_raw_ctl(AiqRawStreamProcUnit_t* pRawStrP
                                                 capture_raw_t type, int count,
                                                 const char* capture_dir, char* output_dir);
 XCamReturn AiqRawStreamProcUnit_notify_capture_raw(AiqRawStreamProcUnit_t* pRawStrProcUnit);
-XCamReturn AiqRawStreamProcUnit_set_csi_mem_word_big_align(AiqRawStreamProcUnit_t* pRawStrProcUnit,
-                                                           uint32_t width, uint32_t height,
-                                                           uint32_t sns_v4l_pix_fmt,
-                                                           int8_t sns_bpp);
+XCamReturn AiqRawStreamProcUnit_set_csi_mem_word_align_mode(AiqRawStreamProcUnit_t* pRawStrProcUnit, int mode);
 void AiqRawStreamProcUnit_setPollCallback(AiqRawStreamProcUnit_t* pRawStrProcUnit,
                                           AiqPollCallback_t* cb);
 
 XCamReturn setIspInfoToDump(AiqRawStreamProcUnit_t* pRawStrProcUnit);
+void AiqRawStreamProcUnit_setRxBufferCnt(AiqRawStreamProcUnit_t* pRawStrProcUnit, uint16_t buf_num);
 
 #if RKAIQ_HAVE_DUMPSYS
 int AiqRawStreamProcUnit_dump(void* dumper, st_string* result, int argc, void* argv[]);

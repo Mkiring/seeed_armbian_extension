@@ -33,6 +33,8 @@ typedef struct {
     bool isReCal_;
     bool strength_en;
     float fStrength;
+
+    int sameISO_cnt;
 } BtnrContext_t;
 
 #define DEFAULT_RECALCULATE_DELTA_ISO (10.0)

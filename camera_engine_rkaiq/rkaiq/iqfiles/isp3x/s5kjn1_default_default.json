@@ -5914,6 +5914,7 @@
 									"pdDiscardRegionEn":	0,
 									"pdLessTextureRatio":	0.25,
 									"pdTargetOffset":	8,
+									"pdNumJobs":	1,
 									"pdCalibInf":	{
 										"pdGainMapW":	32,
 										"pdGainMapH":	64,
@@ -5924,6 +5925,11 @@
 									"pdCenterMinFv":	0,
 									"pdCenterMinRatio":	0,
 									"pdHighlightRatio":	0.5,
+									"pdUnStableCnt_thred":	10,
+									"pdSearchCnt_thred":	4,
+									"pdChgDirCnt_thred":	2,
+									"pdFocusNearObject":	0,
+									"pdNearObjectRatio":	0.7,
 									"pdStepRatio":	[1, 0.8, 0.8, 0.8, 0.8, 0.7, 0.7],
 									"pdStepDefocus":	[16, 32, 64, 96, 128, 160, 192],
 									"pdIsoPara":	[{
@@ -5943,6 +5949,7 @@
 											"noconfCntThresh":	5,
 											"roiBlkCntW":	3,
 											"roiBlkCntH":	3,
+											"badPdRatio":	0,
 											"fineSearchTbl":	[{
 													"confidence":	0.5,
 													"range":	24,
@@ -5970,6 +5977,7 @@
 											"noconfCntThresh":	5,
 											"roiBlkCntW":	3,
 											"roiBlkCntH":	3,
+											"badPdRatio":	0,
 											"fineSearchTbl":	[{
 													"confidence":	0.5,
 													"range":	24,
@@ -5997,6 +6005,7 @@
 											"noconfCntThresh":	5,
 											"roiBlkCntW":	1,
 											"roiBlkCntH":	1,
+											"badPdRatio":	0,
 											"fineSearchTbl":	[{
 													"confidence":	0.5,
 													"range":	24,
@@ -6017,7 +6026,9 @@
 											"pdCropX":	0,
 											"pdCropY":	0,
 											"pdBaseWidth":	508,
-											"pdBaseHeight":	760
+											"pdBaseHeight":	760,
+											"pdHBinMode":	0,
+											"pdVBinMode":	0
 										}],
 									"pdResoInf_len":	1
 								},
@@ -11715,6 +11726,7 @@
 									"pdDiscardRegionEn":	0,
 									"pdLessTextureRatio":	0.25,
 									"pdTargetOffset":	0,
+									"pdNumJobs":	1,
 									"pdCalibInf":	{
 										"pdGainMapW":	32,
 										"pdGainMapH":	64,
@@ -11725,6 +11737,11 @@
 									"pdCenterMinFv":	0,
 									"pdCenterMinRatio":	0,
 									"pdHighlightRatio":	0.5,
+									"pdUnStableCnt_thred":	10,
+									"pdSearchCnt_thred":	4,
+									"pdChgDirCnt_thred":	2,
+									"pdFocusNearObject":	0,
+									"pdNearObjectRatio":	0.7,
 									"pdStepRatio":	[1, 0.8, 0.8, 0.8, 0.8, 0.7, 0.7],
 									"pdStepDefocus":	[16, 32, 64, 96, 128, 160, 192],
 									"pdIsoPara":	[{
@@ -11744,6 +11761,7 @@
 											"noconfCntThresh":	5,
 											"roiBlkCntW":	3,
 											"roiBlkCntH":	3,
+											"badPdRatio":	0,
 											"fineSearchTbl":	[{
 													"confidence":	0.5,
 													"range":	24,
@@ -11771,6 +11789,7 @@
 											"noconfCntThresh":	5,
 											"roiBlkCntW":	3,
 											"roiBlkCntH":	3,
+											"badPdRatio":	0,
 											"fineSearchTbl":	[{
 													"confidence":	0.5,
 													"range":	24,
@@ -11798,6 +11817,7 @@
 											"noconfCntThresh":	5,
 											"roiBlkCntW":	1,
 											"roiBlkCntH":	1,
+											"badPdRatio":	0,
 											"fineSearchTbl":	[{
 													"confidence":	0.5,
 													"range":	24,
@@ -11818,7 +11838,9 @@
 											"pdCropX":	0,
 											"pdCropY":	0,
 											"pdBaseWidth":	508,
-											"pdBaseHeight":	760
+											"pdBaseHeight":	760,
+											"pdHBinMode":	0,
+											"pdVBinMode":	0
 										}],
 									"pdResoInf_len":	1
 								},

@@ -86,7 +86,7 @@ void aiqList_deinit(AiqList_t* list) {
 
     if (list->_pBaseMem) {
         if (list->_free_nums != list->_item_nums) {
-            LOGE("%s: %d list items are still in use !", list->_name,
+            LOGW("%s: %d list items are still in use !", list->_name,
                  list->_item_nums - list->_free_nums);
         }
         aiq_free(list->_pBaseMem);
@@ -366,6 +366,34 @@ int aiqList_size(AiqList_t* list) {
     aiqMutex_unlock(&list->_mutex);
 
     return size;
+}
+
+int aiqList_num(AiqList_t* list) {
+    int num = 0;
+
+    XCAM_ASSERT(list);
+
+    aiqMutex_lock(&list->_mutex);
+
+    num = list->_item_nums;
+
+    aiqMutex_unlock(&list->_mutex);
+
+    return num;
+}
+
+bool aiqList_empty(AiqList_t* list) {
+    bool empty = true;
+
+    XCAM_ASSERT(list);
+
+    aiqMutex_lock(&list->_mutex);
+
+    empty = !(list->_used_list);
+
+    aiqMutex_unlock(&list->_mutex);
+
+    return empty;
 }
 
 void aiqList_dump(AiqList_t* list) {

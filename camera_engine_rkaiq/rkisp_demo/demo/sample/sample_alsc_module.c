@@ -36,15 +36,18 @@ static int sample_lsc_set_attr(const rk_aiq_sys_ctx_t* ctx, rk_aiq_uapi_mode_syn
   ret = rk_aiq_user_api2_alsc_GetAttrib(ctx, &attr);
   RKAIQ_SAMPLE_CHECK_RET(ret, "setlscAttr failed in getting lsc attrib!");
 
-  printf("LSC r_data_tbl[0]:%d\n", attr.stManual.r_data_tbl[0]);
-
   attr.sync.sync_mode = sync;
   if (attr.mode == RK_AIQ_LSC_MODE_AUTO) {
     attr.mode = RK_AIQ_LSC_MODE_MANUAL;
     attr.byPass = false;
-    memset(attr.stManual.r_data_tbl, 4096, 17*17*sizeof(unsigned short));
+    attr.stManual.r_data_tbl[0] = 4096;
   } else {
     attr.mode = RK_AIQ_LSC_MODE_AUTO;
+    if (attr.stAuto.tbl.tableAll[0].lsc_samples_red.uCoeff[0] == 8191) {
+      attr.stAuto.tbl.tableAll[0].lsc_samples_red.uCoeff[0] = 4096;
+    } else {
+      attr.stAuto.tbl.tableAll[0].lsc_samples_red.uCoeff[0] = 8191;
+    }
   }
   //set
   ret = rk_aiq_user_api2_alsc_SetAttrib(ctx, attr);
@@ -85,9 +88,10 @@ static int sample_lsc_get_attr(const rk_aiq_sys_ctx_t* ctx)
            attr.stManual.b_data_tbl[1],
            attr.stManual.b_data_tbl[2]);
   } else if (attr.mode == RK_AIQ_LSC_MODE_AUTO) {
-    printf("\t mode = Auto\n");
+    printf("\t mode = Auto, tableAll[0].lsc_samples_red.uCoeff[0] = %d\n", \
+            attr.stAuto.tbl.tableAll[0].lsc_samples_red.uCoeff[0]);
   } else {
-    printf("\t mode is Manual");
+    printf("\t mode is invalid");
   }
   return 0;
 }

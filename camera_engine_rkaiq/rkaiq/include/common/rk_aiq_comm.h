@@ -126,6 +126,11 @@ typedef enum _camAlgoResultType {
     RESULT_TYPE_HSV_PARAM,
     // hold postisp params
     RESULT_TYPE_POSTISP_PARAM,
+    RESULT_TYPE_AIBNR_PARAM,
+    RESULT_TYPE_AMTD_PARAM,
+    RESULT_TYPE_AIRMS_PARAM,
+    RESULT_TYPE_AIYNR_PARAM,
+    RESULT_TYPE_FPNSW_PARAM,
     RESULT_TYPE_MAX_PARAM,
 } camAlgoResultType;
 
@@ -503,22 +508,37 @@ typedef enum {
     RK_AIQ_WORKING_MODE_NORMAL,
     RK_AIQ_WORKING_MODE_ISP_HDR2    = 0x10,
     RK_AIQ_WORKING_MODE_ISP_HDR3    = 0x20,
-//    RK_AIQ_WORKING_MODE_SENSOR_HDR = 10, // sensor built-in hdr mode
 } rk_aiq_working_mode_t;
 
 typedef enum {
     RK_AIQ_ISP_HDR_MODE_2_FRAME_HDR = RK_AIQ_WORKING_MODE_ISP_HDR2 + 1,
     RK_AIQ_ISP_HDR_MODE_2_LINE_HDR = RK_AIQ_WORKING_MODE_ISP_HDR2 + 2,
+    RK_AIQ_ISP_HDR_MODE_2_BUILTIN, // sensor built-in hdr mode
     RK_AIQ_ISP_HDR_MODE_3_FRAME_HDR = RK_AIQ_WORKING_MODE_ISP_HDR3 + 1,
     RK_AIQ_ISP_HDR_MODE_3_LINE_HDR = RK_AIQ_WORKING_MODE_ISP_HDR3 + 2,
+    RK_AIQ_ISP_HDR_MODE_3_BUILTIN, // sensor built-in hdr mode
 } rk_aiq_isp_hdr_mode_t;
 
 typedef enum {
-    RKAIQ_SENSOR_HDR_MODE_DCG, // 2frame: share the same exptime, use dual conversion gain; 3frame: DCG+VS, VS frame use individual gain & time
-    RKAIQ_SENSOR_HDR_MODE_STAGGER, // 2frame or 3frame
+    // old version
+    RKAIQ_SENSOR_HDR_MODE_DCG = 0,       // 2frame
+    RKAIQ_SENSOR_HDR_MODE_STAGGER = 1,   // 2frame
+    // new version
+    // TODO: only used by AE, new mode value need to be same with upper exp mode
+    RKAIQ_SENSOR_HDR3_DCG_VS,
+    RKAIQ_SENSOR_HDR3_DCG_SPD,
+    RKAIQ_SENSOR_HDR3_STA,
+    RKAIQ_SENSOR_HDR3_DCG_LOFIC,
+    RKAIQ_SENSOR_HDR3_LCG_LOFIC_VS,
 } rk_aiq_sensor_hdr_line_mode_t;
 
 #define RK_AIQ_HDR_GET_WORKING_MODE(mode) (mode & 0xF0)
+#define RK_AIQ_HDR_IS_HDR2(mode) (mode & 0x10)
+#define RK_AIQ_HDR_IS_HDR3(mode) (mode & 0x20)
+#define RK_AIQ_HDR_IS_SENSOR_BUILTIN(mode) \
+    ((mode == RK_AIQ_ISP_HDR_MODE_2_BUILTIN) || \
+    (mode == RK_AIQ_ISP_HDR_MODE_3_BUILTIN))
+
 
 typedef enum {
     RKAIQ_ISPP_TNR_MODE_2TO1,
@@ -611,6 +631,9 @@ extern int g_rkaiq_isp_hw_ver;
 #define CHECK_ISP_HW_V33() \
     (g_rkaiq_isp_hw_ver == 33 ? true : false)
 
+#define CHECK_ISP_HW_V35() \
+    (g_rkaiq_isp_hw_ver == 35 ? true : false)
+
 #define CHECK_ISP_HW_V3X() \
     (g_rkaiq_isp_hw_ver == 30 ? true : \
      g_rkaiq_isp_hw_ver == 31 ? true : false)
@@ -630,6 +653,29 @@ extern int g_rkaiq_isp_hw_ver;
 #define AIQ_UNUSED_PARAM(x) (void)(x)
 #endif
 #endif  // AIQ_UNUSED_PARAM
+
+// 函数用于将补码表示的整数转换为真值，指定符号位位置
+static inline int32_t c2trval(int signBitPosition, uint32_t complement)
+{
+    // 计算符号掩码，只保留符号位
+    uint32_t signMask = 1 << signBitPosition;
+    if ((complement & signMask) == 0) {
+        // 符号位为 0，补码就是真值
+        return (int32_t)complement;
+    }
+    else {
+        // 符号位为 1，计算真值
+        // 取反所有位，然后加1得到反码
+        // 注意：这里使用了 uint32_t 来避免在取反时发生符号扩展
+        uint32_t oneComplement = ~complement + 1;
+        // 现在 oneComplement 可能包含比原整数更多的1
+        // 需要将其限制到原整数的位数内
+        oneComplement &= (signMask << 1) - 1;
+        // 将反码转换为真值，即取反后加1的结果
+        return -(int32_t)oneComplement;
+    }
+}
+
 
 RKAIQ_END_DECLARE
 

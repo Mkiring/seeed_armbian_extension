@@ -24,6 +24,8 @@
 #include "uAPI2/rk_aiq_user_api2_isp33.h"
 #elif ISP_HW_V39
 #include "uAPI2/rk_aiq_user_api2_isp39.h"
+#elif ISP_HW_V35
+#include "uAPI2/rk_aiq_user_api2_isp35.h"
 #endif
 
 #define CLEAR() printf("\x1b[2J\x1b[H");

@@ -216,7 +216,7 @@ FakeSensorHw::setExposureParams(SmartPtr<RkAiqExpParamsProxy>& expPar)
 {
     ENTER_CAMHW_FUNCTION();
 
-    if (_first) {
+    if (_first && !use_rkrawstream) {
         RKAiqAecExpInfoWrapper_t* exp = &expPar->data()->result;
         SmartPtr<RkAiqSensorExpParamsProxy> expParamsProxy = NULL;
         if (exp->ae_proc_res_rk.exp_set_cnt > 0) {
@@ -414,6 +414,17 @@ FakeSensorHw::prepare(rk_aiq_raw_prop_t prop)
 }
 
 XCamReturn
+FakeSensorHw::set_fake_sensor_format(int width, int height, uint32_t fmt_core)
+{
+    ENTER_CAMHW_FUNCTION();
+    _width = width;
+    _height = height;
+    _fmt_code = fmt_core;
+    EXIT_CAMHW_FUNCTION();
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn
 FakeSensorHw::enqueue_rawbuffer(struct rk_aiq_vbuf *vbuf, bool sync)
 {
     int max_count = 0;
@@ -493,7 +504,7 @@ FakeSensorHw::enqueue_rawbuffer(struct rk_aiq_vbuf *vbuf, bool sync)
         exp_param_prx->data()->aecExpInfo.LinearExp.exp_sensor_params.digital_gain_global = 1;
         exp_param_prx->data()->aecExpInfo.LinearExp.exp_sensor_params.isp_digital_gain = 1;
         exp_param_prx->data()->aecExpInfo.LinearExp.exp_real_params.digital_gain = 1.0f;
-        exp_param_prx->data()->aecExpInfo.LinearExp.exp_real_params.isp_dgain = 1.0f;
+        exp_param_prx->data()->aecExpInfo.LinearExp.exp_real_params.isp_dgain = vbuf->buf_info[0].exp_ispdgain;
         exp_param_prx->data()->aecExpInfo.CISFeature.SNR = 0;
 
         exp_param_prx->data()->aecExpInfo.HdrExp[2].exp_sensor_params.analog_gain_code_global = vbuf->buf_info[2].exp_gain_reg;
@@ -503,7 +514,7 @@ FakeSensorHw::enqueue_rawbuffer(struct rk_aiq_vbuf *vbuf, bool sync)
         exp_param_prx->data()->aecExpInfo.HdrExp[2].exp_sensor_params.digital_gain_global = 1;
         exp_param_prx->data()->aecExpInfo.HdrExp[2].exp_sensor_params.isp_digital_gain = 1;
         exp_param_prx->data()->aecExpInfo.HdrExp[2].exp_real_params.digital_gain = 1.0f;
-        exp_param_prx->data()->aecExpInfo.HdrExp[2].exp_real_params.isp_dgain = 1.0f;
+        exp_param_prx->data()->aecExpInfo.HdrExp[2].exp_real_params.isp_dgain = vbuf->buf_info[2].exp_ispdgain;
 
         exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_sensor_params.analog_gain_code_global = vbuf->buf_info[1].exp_gain_reg;
         exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_sensor_params.coarse_integration_time = vbuf->buf_info[1].exp_time_reg;
@@ -512,7 +523,7 @@ FakeSensorHw::enqueue_rawbuffer(struct rk_aiq_vbuf *vbuf, bool sync)
         exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_sensor_params.digital_gain_global = 1;
         exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_sensor_params.isp_digital_gain = 1;
         exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_real_params.digital_gain = 1.0f;
-        exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_real_params.isp_dgain = 1.0f;
+        exp_param_prx->data()->aecExpInfo.HdrExp[1].exp_real_params.isp_dgain = vbuf->buf_info[1].exp_ispdgain;
 
 
         exp_param_prx->data()->aecExpInfo.HdrExp[0].exp_sensor_params.analog_gain_code_global = vbuf->buf_info[0].exp_gain_reg;
@@ -522,7 +533,7 @@ FakeSensorHw::enqueue_rawbuffer(struct rk_aiq_vbuf *vbuf, bool sync)
         exp_param_prx->data()->aecExpInfo.HdrExp[0].exp_sensor_params.digital_gain_global = 1;
         exp_param_prx->data()->aecExpInfo.HdrExp[0].exp_sensor_params.isp_digital_gain = 1;
         exp_param_prx->data()->aecExpInfo.HdrExp[0].exp_real_params.digital_gain = 1.0f;
-        exp_param_prx->data()->aecExpInfo.HdrExp[0].exp_real_params.isp_dgain = 1.0f;
+        exp_param_prx->data()->aecExpInfo.HdrExp[0].exp_real_params.isp_dgain = vbuf->buf_info[0].exp_ispdgain;
 
         _effecting_exp_map[fid] = exp_param_prx;
         LOGD_CAMHW_SUBM(FAKECAM_SUBM, "add id[%d] to the effected exp map", fid);

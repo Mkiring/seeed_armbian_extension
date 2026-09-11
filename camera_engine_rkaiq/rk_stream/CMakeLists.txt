@@ -12,8 +12,22 @@ cmake_minimum_required(VERSION 2.8)
 
 PROJECT(rk_stream)
 
+#set(CMAKE_CXX_FLAGS                "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -fPIC")
+#set(CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -gdwarf -fexceptions -funwind-tables")
+#set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG")
+#set(CMAKE_CXX_FLAGS_RELEASE        "-O4 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -gdwarf -fexceptions -funwind-tables")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -g -gdwarf -fexceptions -funwind-tables")
+
 add_compile_options(-DUSE_RAWSTREAM_LIB)
 add_compile_options(${ISP_HW_VERSION})
+
+if (${CMAKE_SYSTEM_NAME} EQUAL "")
+    set(OS "linux")
+else()
+    string(TOLOWER ${CMAKE_SYSTEM_NAME} OS)
+endif()
+
 include_directories(
     include
     ${AIQ_DIR}
@@ -63,13 +77,13 @@ set(RK_VI_STREAM_CFG_LIB rkrawstream)
 add_library(${RK_VI_STREAM_CFG_LIB} SHARED ${STREAMCFG_SRC} ${XCORE_SRC} )
 target_link_libraries(${RK_VI_STREAM_CFG_LIB} PRIVATE)
 install(TARGETS ${RK_VI_STREAM_CFG_LIB} LIBRARY DESTINATION lib)
-install(DIRECTORY include/ DESTINATION include/rk_stream FILES_MATCHING PATTERN "*.h")
-install(DIRECTORY rkvi_demo/ DESTINATION include/rk_stream FILES_MATCHING PATTERN "*.h")
 
-
+set(RKVIDEMO_HAVE_AIQ TRUE CACHE INTERNAL "")
 if(RKVIDEMO_HAVE_AIQ)
     set(RK_AIQ_LIB rkaiq)
     add_compile_options(-DHAVE_RKAIQ)
+    set(RK_AIQ_INSTALLED_DIR "${AIQ_DIR}/build/${OS}/output/${ARCH}/installed" CACHE STRING "AIQ library installed dir")
+    set(RK_AIQ_LIB_DIR ${RK_AIQ_INSTALLED_DIR}/lib)
 endif()
 if(RKVIDEMO_HAVE_RGA)
     set(RK_RGA_LIB rga)
@@ -84,6 +98,7 @@ message("\n****** rkvi_demo build with: ${RK_VI_STREAM_CFG_LIB} ${RK_AIQ_LIB} ${
 
 set (VI_DEMO_SRCS
     rkvi_demo/rkrawstream_demo.c
+    rkvi_demo/rkrawstream_video_out.c
     )
 
 set (RKAIQ_TEST_SRCS
@@ -104,10 +119,15 @@ set (RKAIQ_TEST_SRCS
 cmake_policy(SET CMP0015 NEW)
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/all_lib/${CMAKE_BUILD_TYPE})
 link_directories("${LIBRARY_OUTPUT_PATH}")
+link_directories("${RK_AIQ_LIB_DIR}")
 
+set(RKRAWSTREAM_DEMO TRUE CACHE INTERNAL "")
 if(RKRAWSTREAM_DEMO)
 add_executable(rkrawstream_demo ${VI_DEMO_SRCS})
-target_link_libraries(rkrawstream_demo rkrawstream pthread)
+target_link_libraries(rkrawstream_demo rkrawstream ${RK_AIQ_LIB})
+if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+	target_link_libraries(rkrawstream_demo pthread)
+endif()
 endif()
 
 if(RKAIQ_TEST)

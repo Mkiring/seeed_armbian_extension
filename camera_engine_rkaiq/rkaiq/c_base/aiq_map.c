@@ -103,7 +103,7 @@ void aiqMap_deinit(AiqMap_t* map) {
 
     if (map->_pBaseMem) {
         if (map->_free_nums != map->_item_nums) {
-            LOGE("%s: %d map items are still in use !", map->_name,
+            LOGW("%s: %d map items are still in use !", map->_name,
                  map->_item_nums - map->_free_nums);
         }
         aiq_free(map->_pBaseMem);
@@ -407,6 +407,34 @@ int aiqMap_size(AiqMap_t* map) {
     aiqMutex_lock(&map->_mutex);
 
     size = map->_item_nums - map->_free_nums;
+
+    aiqMutex_unlock(&map->_mutex);
+
+    return size;
+}
+
+int aiqMap_itemNums(AiqMap_t* map) {
+    int num = 0;
+
+    XCAM_ASSERT(map);
+
+    aiqMutex_lock(&map->_mutex);
+
+    num = map->_item_nums;
+
+    aiqMutex_unlock(&map->_mutex);
+
+    return num;
+}
+
+int aiqMap_itemSize(AiqMap_t* map) {
+    int size = 0;
+
+    XCAM_ASSERT(map);
+
+    aiqMutex_lock(&map->_mutex);
+
+    size = map->_item_size;
 
     aiqMutex_unlock(&map->_mutex);
 

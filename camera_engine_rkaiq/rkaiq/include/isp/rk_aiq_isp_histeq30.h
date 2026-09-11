@@ -55,7 +55,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All histeq stats params in static.))  */
+    M4_NOTES(All histeq stats params in static.\n Freq of use: low))  */
     histeq_stats_params_static_t statsHist;
 } histeq_params_static_t;
 
@@ -149,7 +149,7 @@ typedef struct {
     M4_RO(0),
     M4_ORDER(0),
     M4_NOTES(The iir sigma coefficient of histeq mapping curve.\n
-        Freq of use: low))  */
+        Freq of use: high))  */
     uint8_t sw_histT_iirSgm_scale;
     /* M4_GENERIC_DESC(
     M4_ALIAS(hw_histT_iirFrm_maxLimit),
@@ -297,7 +297,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All statsHist params corresponded with iso array))  */
+    M4_NOTES(All statsHist params corresponded with iso array.\n Freq of use: low))  */
     histeq_stats_params_t statsHist;
     /* M4_GENERIC_DESC(
     M4_ALIAS(mapHist),
@@ -306,7 +306,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All mapHist params corresponded with iso array))  */
+    M4_NOTES(All mapHist params corresponded with iso array.\n Freq of use: high))  */
     histeq_mapHist_params_t mapHist;
     /* M4_GENERIC_DESC(
     M4_ALIAS(mapHistIIR),
@@ -315,7 +315,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All mapHistIIR params corresponded with iso array))  */
+    M4_NOTES(All mapHistIIR params corresponded with iso array.\n Freq of use: high))  */
     histeq_mapHistIIR_params_t mapHistIIR;
     /* M4_GENERIC_DESC(
     M4_ALIAS(mapHist_idx),
@@ -324,7 +324,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All mapHist_idx params corresponded with iso array))  */
+    M4_NOTES(All mapHist_idx params corresponded with iso array.\n Freq of use: high))  */
     histeq_mapHistIdx_params_t mapHist_idx;
     /* M4_GENERIC_DESC(
     M4_ALIAS(fusion),
@@ -333,7 +333,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All fusion params corresponded with iso array))  */
+    M4_NOTES(All fusion params corresponded with iso array.\n Freq of use: high))  */
     histeq_fusion_params_t fusion;
     /* M4_GENERIC_DESC(
     M4_ALIAS(chroma),
@@ -342,7 +342,7 @@ typedef struct {
     M4_HIDE_EX(0),
     M4_RO(0),
     M4_ORDER(2),
-    M4_NOTES(All chroma params corresponded with iso array))  */
+    M4_NOTES(All chroma params corresponded with iso array.\n Freq of use: high))  */
     histeq_chroma_params_t chroma;
 } histeq_params_dyn_t;
 

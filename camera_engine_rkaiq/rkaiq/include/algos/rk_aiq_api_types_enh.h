@@ -32,7 +32,7 @@ typedef struct {
 
 typedef struct enh_param_auto_s {
     /* M4_GENERIC_DESC(
-        M4_ALIAS(dynamic_param),
+        M4_ALIAS(dyn),
         M4_TYPE(struct_list),
         M4_SIZE_EX(1,13),
         M4_UI_MODULE(dynamic_ui),

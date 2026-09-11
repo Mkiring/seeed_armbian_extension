@@ -404,6 +404,40 @@ XCamReturn RkAiqAfHandleInt::setAeStable(bool ae_stable) {
     return ret;
 }
 
+XCamReturn RkAiqAfHandleInt::getPdafLibOutput(rk_aiq_pdlib_output* pdlib_output, int timeout_ms)
+{
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    int code = 0;
+
+    if (!mEnable) {
+        return XCAM_RETURN_BYPASS;
+    }
+
+    if (!mAiqCore->isRunningState()) {
+        LOGW_AF("aiq not in running state");
+        return XCAM_RETURN_BYPASS;
+    }
+
+    {
+        SmartLock locker (mPdLibOutputMutex);
+
+        if (timeout_ms < 0)
+            code = mPdLibOutputCond.wait(mPdLibOutputMutex);
+        else if (timeout_ms > 0) {
+            code = mPdLibOutputCond.timedwait(mPdLibOutputMutex, timeout_ms * 1000);
+            if (code == ETIMEDOUT)
+                return XCAM_RETURN_ERROR_TIMEOUT;
+        }
+    }
+
+    rk_aiq_uapi_af_getPdafLibOutput(mAlgoCtx, pdlib_output);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
 XCamReturn RkAiqAfHandleInt::prepare() {
     ENTER_ANALYZER_FUNCTION();
 
@@ -428,8 +462,14 @@ XCamReturn RkAiqAfHandleInt::prepare() {
 
     if ((af_config_int->com.u.prepare.sns_op_width != 0) &&
             (af_config_int->com.u.prepare.sns_op_height != 0)) {
+#ifdef DISABLE_HANDLE_ATTRIB
+        mCfgMutex.lock();
+#endif
         RkAiqAlgoDescription* des = (RkAiqAlgoDescription*)mDes;
         ret                       = des->prepare(mConfig);
+#ifdef DISABLE_HANDLE_ATTRIB
+        mCfgMutex.unlock();
+#endif
         RKAIQCORE_CHECK_RET(ret, "af algo prepare failed");
     } else {
         LOGI_AF("input sns_op_width %d or sns_op_height %d is zero, bypass!",
@@ -715,9 +755,27 @@ XCamReturn RkAiqAfHandleInt::genIspResult(RkAiqFullParams* params, RkAiqFullPara
         //LOGD_AF("[%d] focus params needn't update", shared->frameId);
     }
 
+    {
+        SmartLock locker (mPdLibOutputMutex);
+
+        mPdLibOutputCond.broadcast();
+    }
+
     EXIT_ANALYZER_FUNCTION();
 
     return ret;
+}
+
+XCamReturn RkAiqAfHandleInt::stop() {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    SmartLock locker (mPdLibOutputMutex);
+
+    mPdLibOutputCond.broadcast();
+
+    EXIT_ANALYZER_FUNCTION();
+    return XCAM_RETURN_NO_ERROR;
 }
 
 }  // namespace RkCam

@@ -27,13 +27,16 @@
 #include "rk_aiq_user_api_sysctl.h"
 #include "uAPI2/rk_aiq_user_api2_ae.h"
 #include "uAPI2/rk_aiq_user_api2_imgproc.h"
-#include "uAPI/include/rk_aiq_user_api_sysctl.h"
 #include "uAPI2/rk_aiq_user_api2_acsm.h"
 #include "uAPI2/rk_aiq_user_api2_acgc.h"
 #include "uAPI2/rk_aiq_user_api2_ablc_v32.h"
 #include "uAPI2/rk_aiq_user_api2_a3dlut.h"
 #include "uAPI2_c/rk_aiq_api_private_c.h"
 #include "uAPI2/rk_aiq_user_api2_stats.h"
+#include "aiq_core_c/aiq_algo_handler.h"
+#include "hwi_c/aiq_ispParamsCvt.h"
+#include "modules/rk_aiq_isp32_modules.h"
+#include "modules/rk_aiq_module_btnr_common.h"
 
 static camgroup_uapi_t last_camindex;
 
@@ -82,13 +85,31 @@ int rk_aiq_uapi_get_ae_hwstats(const rk_aiq_sys_ctx_t* sys_ctx, uapi_ae_hwstats_
 
     XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
 
-	// TODO
-	//if (ret == 0)
-		//memcpy(ae_hwstats, &isp_stats.aec_stats.ae_data, sizeof(uapi_ae_hwstats_t));
+    // TODO
+    //if (ret == 0)
+    //memcpy(ae_hwstats, &isp_stats.aec_stats.ae_data, sizeof(uapi_ae_hwstats_t));
 
     return ret;
 }
+int rk_aiq_uapi_get_aeV39_hwstats(const rk_aiq_sys_ctx_t* sys_ctx, uapi_ae_v39_hwstats_t* ae_hwstats)
+{
+    rk_aiq_isp_statistics_t isp_stats;
 
+    if (sys_ctx->cam_type == RK_AIQ_CAM_TYPE_GROUP) {
+        LOGE("Can't read 3A stats for group ctx!");
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
+    if (ret)
+        return ret;
+    if (!isp_stats.bValid_aec_stats)
+        return XCAM_RETURN_ERROR_FAILED;
+
+    memcpy(ae_hwstats, &isp_stats.aec_stats.ae_data, sizeof(uapi_ae_v39_hwstats_t));
+
+    return ret;
+}
 int rk_aiq_uapi_get_awb_stat(const rk_aiq_sys_ctx_t* sys_ctx, rk_tool_awb_stat_res2_v30_t* awb_stat)
 {
     rk_aiq_isp_stats_t isp_stats;
@@ -99,7 +120,7 @@ int rk_aiq_uapi_get_awb_stat(const rk_aiq_sys_ctx_t* sys_ctx, rk_tool_awb_stat_r
     }
 
     //XCamReturn ret = rk_aiq_uapi2_sysctl_getIspStats(sys_ctx, &isp_stats, 500);
-	// TODO
+    // TODO
     //memcpy(awb_stat, &isp_stats.awb_stats_v3x, sizeof(rk_aiq_isp_awb_stats2_v3x_t));
 
     return 0;
@@ -115,7 +136,7 @@ int rk_aiq_uapi_get_awbV21_stat(const rk_aiq_sys_ctx_t* sys_ctx, rk_tool_awb_sta
 
     //XCamReturn ret = rk_aiq_uapi2_sysctl_getIspStats(sys_ctx, &isp_stats, 500);
 
-	// TODO
+    // TODO
     //memcpy(awb_stat, &isp_stats.awb_stats_v21, sizeof(rk_aiq_awb_stat_res2_v201_t));
 
     return 0;
@@ -150,40 +171,135 @@ int rk_aiq_uapi_get_awbV39_stat(const rk_aiq_sys_ctx_t* sys_ctx, rk_tool_isp_awb
     }
 
     XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
-	if (ret)
-		return ret;
-	if (!isp_stats.bValid_awb_stats)
-		return XCAM_RETURN_ERROR_FAILED;
+    if (ret)
+        return ret;
+    if (!isp_stats.bValid_awb_stats)
+        return XCAM_RETURN_ERROR_FAILED;
 
-	for (int i = 0; i < AWBSTATS_WPDCT_LS_NUM; i++){
-		awb_stat->light[i].xYType[0].RgainValue = isp_stats.awb_stats.com.wpEngine.norWp[i].hw_awbCfg_rGainSum_val;
-		awb_stat->light[i].xYType[0].BgainValue = isp_stats.awb_stats.com.wpEngine.norWp[i].hw_awbCfg_bGainSum_val;
-		awb_stat->light[i].xYType[0].WpNo = isp_stats.awb_stats.com.wpEngine.norWp[i].hw_awbCfg_statsWp_count;
-		awb_stat->light[i].xYType[1].RgainValue = isp_stats.awb_stats.com.wpEngine.bigWp[i].hw_awbCfg_rGainSum_val;
-		awb_stat->light[i].xYType[1].BgainValue = isp_stats.awb_stats.com.wpEngine.bigWp[i].hw_awbCfg_bGainSum_val;
-		awb_stat->light[i].xYType[1].WpNo = isp_stats.awb_stats.com.wpEngine.bigWp[i].hw_awbCfg_statsWp_count;
-		awb_stat->WpNo2[i] = isp_stats.awb_stats.com.wpEngine.hw_awbCfg_wpXyUvSpcRaw_cnt[i];
-	}
-	 for (int i = 0; i < AWBSTATS_WP_HIST_BIN_NUM; i++) {
-		awb_stat->WpNoHist[i] = isp_stats.awb_stats.com.wpEngine.hw_awb_wpHistBin_val[i];
-	}
-	for (int i = 0; i < AWBSTATS_ZONE_15x15_NUM; i++)
-	{
-		awb_stat->blockResult[i].Rvalue =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_rSum_val;
-		awb_stat->blockResult[i].Gvalue =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_gSum_val;
-		awb_stat->blockResult[i].Bvalue =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_bSum_val;
-		awb_stat->blockResult[i].WpNo =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_statsPix_count;
-	}
-	for (int i = 0; i < AWBSTATS_WPFLTOUTFULL_ENTITY_NUM; i++)
-	{
-		awb_stat->excWpRangeResult[i].RgainValue = isp_stats.awb_stats.com.wpFltOutFullEngine.fltPix[i].hw_awbCfg_rGainSum_val;
-		awb_stat->excWpRangeResult[i].BgainValue = isp_stats.awb_stats.com.wpFltOutFullEngine.fltPix[i].hw_awbCfg_bGainSum_val;
-		awb_stat->excWpRangeResult[i].WpNo = isp_stats.awb_stats.com.wpFltOutFullEngine.fltPix[i].hw_awbCfg_statsWp_count;
-	}
+    for (int i = 0; i < AWBSTATS_WPDCT_LS_NUM; i++) {
+        awb_stat->light[i].xYType[0].RgainValue = isp_stats.awb_stats.com.wpEngine.norWp[i].hw_awbCfg_rGainSum_val;
+        awb_stat->light[i].xYType[0].BgainValue = isp_stats.awb_stats.com.wpEngine.norWp[i].hw_awbCfg_bGainSum_val;
+        awb_stat->light[i].xYType[0].WpNo = isp_stats.awb_stats.com.wpEngine.norWp[i].hw_awbCfg_statsWp_count;
+        awb_stat->light[i].xYType[1].RgainValue = isp_stats.awb_stats.com.wpEngine.bigWp[i].hw_awbCfg_rGainSum_val;
+        awb_stat->light[i].xYType[1].BgainValue = isp_stats.awb_stats.com.wpEngine.bigWp[i].hw_awbCfg_bGainSum_val;
+        awb_stat->light[i].xYType[1].WpNo = isp_stats.awb_stats.com.wpEngine.bigWp[i].hw_awbCfg_statsWp_count;
+        awb_stat->WpNo2[i] = isp_stats.awb_stats.com.wpEngine.hw_awbCfg_wpXyUvSpcRaw_cnt[i];
+    }
+    for (int i = 0; i < AWBSTATS_WP_HIST_BIN_NUM; i++) {
+        awb_stat->WpNoHist[i] = isp_stats.awb_stats.com.wpEngine.hw_awb_wpHistBin_val[i];
+    }
+    for (int i = 0; i < AWBSTATS_ZONE_15x15_NUM; i++)
+    {
+        awb_stat->blockResult[i].Rvalue =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_rSum_val;
+        awb_stat->blockResult[i].Gvalue =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_gSum_val;
+        awb_stat->blockResult[i].Bvalue =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_bSum_val;
+        awb_stat->blockResult[i].WpNo =  isp_stats.awb_stats.com.pixEngine.zonePix[i].hw_awbCfg_statsPix_count;
+    }
+    for (int i = 0; i < AWBSTATS_WPFLTOUTFULL_ENTITY_NUM; i++)
+    {
+        awb_stat->excWpRangeResult[i].RgainValue = isp_stats.awb_stats.com.wpFltOutFullEngine.fltPix[i].hw_awbCfg_rGainSum_val;
+        awb_stat->excWpRangeResult[i].BgainValue = isp_stats.awb_stats.com.wpFltOutFullEngine.fltPix[i].hw_awbCfg_bGainSum_val;
+        awb_stat->excWpRangeResult[i].WpNo = isp_stats.awb_stats.com.wpFltOutFullEngine.fltPix[i].hw_awbCfg_statsWp_count;
+    }
 
     return 0;
 }
 
+#ifndef ISP_HW_V33
+int rk_aiq_uapi_get_af_stats(const rk_aiq_sys_ctx_t* sys_ctx, uapi_af_v20stats_t* af_hwstats)
+{
+    rk_aiq_isp_statistics_t isp_stats;
+
+    if (sys_ctx->cam_type == RK_AIQ_CAM_TYPE_GROUP) {
+        LOGE("Can't read 3A stats for group ctx!");
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+#if 0
+    XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
+    if (ret)
+        return ret;
+
+    memcpy(af_hwstats, &isp_stats.af_stats, sizeof(afStats_stats_t));
+#endif
+    return 0;
+}
+
+int rk_aiq_uapi_get_af_v3xstats(const rk_aiq_sys_ctx_t* sys_ctx, uapi_af_v30stats_t* af_hwstats)
+{
+    rk_aiq_isp_statistics_t isp_stats;
+    int i;
+
+    if (sys_ctx->cam_type == RK_AIQ_CAM_TYPE_GROUP) {
+        LOGE("Can't read 3A stats for group ctx!");
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
+    if (ret)
+        return ret;
+
+#if 0
+    af_hwstats->wndb_luma = isp_stats.af_stats_v3x.wndb_luma;
+    af_hwstats->wndb_sharpness = isp_stats.af_stats_v3x.wndb_sharpness;
+    af_hwstats->winb_highlit_cnt = isp_stats.af_stats_v3x.winb_highlit_cnt;
+    for (i = 0; i < 225; i++) {
+        af_hwstats->wnda_luma[i] = isp_stats.af_stats_v3x.wnda_luma[i];
+        af_hwstats->wnda_fv_v1[i] = isp_stats.af_stats_v3x.wnda_fv_v1[i];
+        af_hwstats->wnda_fv_v2[i] = isp_stats.af_stats_v3x.wnda_fv_v2[i];
+        af_hwstats->wnda_fv_h1[i] = isp_stats.af_stats_v3x.wnda_fv_h1[i];
+        af_hwstats->wnda_fv_h2[i] = isp_stats.af_stats_v3x.wnda_fv_h2[i];
+    }
+#endif
+    return 0;
+}
+
+int rk_aiq_uapi_get_af_v32litestats(const rk_aiq_sys_ctx_t* sys_ctx, uapi_af_v32litestats_t* af_hwstats)
+{
+    rk_aiq_isp_statistics_t isp_stats;
+    int i;
+
+    if (sys_ctx->cam_type == RK_AIQ_CAM_TYPE_GROUP) {
+        LOGE("Can't read 3A stats for group ctx!");
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
+    if (ret)
+        return ret;
+
+#if 0
+    af_hwstats->wndb_luma = isp_stats.af_stats_v3x.wndb_luma;
+    af_hwstats->wndb_sharpness = isp_stats.af_stats_v3x.wndb_sharpness;
+    af_hwstats->winb_highlit_cnt = isp_stats.af_stats_v3x.winb_highlit_cnt;
+    for (i = 0; i < 25; i++) {
+        af_hwstats->wnda_luma[i] = isp_stats.af_stats_v3x.wnda_luma[i];
+        af_hwstats->wnda_fv_v1[i] = isp_stats.af_stats_v3x.wnda_fv_v1[i];
+        af_hwstats->wnda_fv_v2[i] = isp_stats.af_stats_v3x.wnda_fv_v2[i];
+        af_hwstats->wnda_fv_h1[i] = isp_stats.af_stats_v3x.wnda_fv_h1[i];
+        af_hwstats->wnda_fv_h2[i] = isp_stats.af_stats_v3x.wnda_fv_h2[i];
+    }
+#endif
+    return 0;
+}
+
+int rk_aiq_uapi_get_af_newstats(const rk_aiq_sys_ctx_t* sys_ctx, afStats_stats_t* af_hwstats)
+{
+    rk_aiq_isp_statistics_t isp_stats;
+
+    if (sys_ctx->cam_type == RK_AIQ_CAM_TYPE_GROUP) {
+        LOGE("Can't read 3A stats for group ctx!");
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(sys_ctx, &isp_stats, 500);
+    if (ret)
+        return ret;
+
+    memcpy(af_hwstats, &isp_stats.afStats_stats, sizeof(afStats_stats_t));
+
+    return 0;
+}
+#endif
 
 XCamReturn rk_aiq_get_adpcc_manual_attr(const rk_aiq_sys_ctx_t *sys_ctx,
                                         Adpcc_Manual_Attr_t *manual) {
@@ -688,20 +804,20 @@ XCamReturn rk_aiq_get_accm_v2_manual_attr(const rk_aiq_sys_ctx_t* sys_ctx,
 }
 
 XCamReturn rk_aiq_set_tool_3dlut_mode(rk_aiq_sys_ctx_t *ctx, uapi_wb_mode_t *mode) {
-#ifndef ISP_HW_V33
-    return rk_aiq_uapi2_setLut3dMode(ctx, mode->mode);
-#else
+#if defined(ISP_HW_V33) || defined(ISP_HW_V35)
     LOGW("rv1103b not support 3dlut\n");
     return XCAM_RETURN_NO_ERROR;
+#else
+    return rk_aiq_uapi2_setLut3dMode(ctx, mode->mode);
 #endif
 }
 
 XCamReturn rk_aiq_get_a3dlut_mode(rk_aiq_sys_ctx_t* ctx, uapi_wb_mode_t* mode) {
-#ifndef ISP_HW_V33
-    return rk_aiq_uapi2_getLut3dMode(ctx, &mode->mode);
-#else
+#if defined(ISP_HW_V33) || defined(ISP_HW_V35)
     LOGW("rv1103b not support 3dlut\n");
     return XCAM_RETURN_NO_ERROR;
+#else
+    return rk_aiq_uapi2_getLut3dMode(ctx, &mode->mode);
 #endif
 }
 
@@ -1851,6 +1967,86 @@ rk_aiq_get_ayuvme_info(const rk_aiq_sys_ctx_t *sys_ctx,
     return XCAM_RETURN_NO_ERROR;
 }
 
+XCamReturn
+rk_aiq_uapi2_query_algoInterpIsoInfo(const rk_aiq_sys_ctx_t *sys_ctx,
+                       algo_interp_iso_list_t* info)
+{
+
+    AiqAlgoHandler_t* algo_handle = NULL;
+
+    int i = 0;
+    memset(info, 0, sizeof(algo_interp_iso_list_t));
+
+#define ADD_CASE(resultT, algoT) \
+        case RESULT_TYPE_##resultT##_PARAM: { \
+            algo_handle = \
+                sys_ctx->_analyzer->mAlgoHandleMaps[RK_AIQ_ALGO_TYPE_##algoT]; \
+            break; \
+        } \
+
+
+    for (; i < RESULT_TYPE_MAX_PARAM; i++) {
+        switch (i) {
+            ADD_CASE(TNR,AMFNR)
+            ADD_CASE(YNR,AYNR)
+            ADD_CASE(CNR,ACNR)
+            ADD_CASE(SHARPEN,ASHARP)
+            ADD_CASE(AIBNR,AIBNR)
+            ADD_CASE(AEC,AE)
+            ADD_CASE(AWB,AWB)
+            ADD_CASE(AF,AF)
+            ADD_CASE(BLC,ABLC)
+            ADD_CASE(DPCC,ADPCC)
+            ADD_CASE(MERGE,AMERGE)
+            ADD_CASE(LSC,ALSC)
+            ADD_CASE(GIC,AGIC)
+            ADD_CASE(DEBAYER,ADEBAYER)
+            ADD_CASE(CCM,ACCM)
+            ADD_CASE(AGAMMA,AGAMMA)
+            ADD_CASE(HSV,AHSV)
+            ADD_CASE(LDC,ALDC)
+            ADD_CASE(CSM,ACSM)
+            ADD_CASE(CP,ACP)
+            ADD_CASE(IE,AIE)
+            ADD_CASE(CGC,ACGC)
+            ADD_CASE(DRC,ADRC)
+            ADD_CASE(CAC,ACAC)
+            ADD_CASE(ENH,AENH)
+            ADD_CASE(HISTEQ,AHISTEQ)
+            ADD_CASE(AMTD,AMTD)
+            ADD_CASE(AIRMS,AIRMS)
+            default: {
+                algo_handle =
+                    sys_ctx->_analyzer->mAlgoHandleMaps[RK_AIQ_ALGO_TYPE_AWB];
+                break;
+            }
+        }
+
+        if (algo_handle && algo_handle->queryInterpIso)
+            algo_handle->queryInterpIso(algo_handle,
+                    &info->isoInfo[i].interpIso, &info->isoInfo[i].isoH, &info->isoInfo[i].isoL);
+
+        info->isoInfo[i].type = i;
+        LOGD("resT:0x%x, interp:%d, isoL:%d, isoH:%d", i, info->isoInfo[i].interpIso, info->isoInfo[i].isoL, info->isoInfo[i].isoH);
+    }
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
+#if USE_NEWSTRUCT
+XCamReturn rk_aiq_user_api2_btnr_QueryStats(const rk_aiq_sys_ctx_t* sys_ctx, btnr_stats_cp_t* stats)
+{
+    btnr_cvt_info_t *pBtnrInfo = &sys_ctx->_camHw->_mIspParamsCvt->mBtnrInfo;
+    int idx = 0;
+    for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+        if (pBtnrInfo->mBtnrStats[i].id > pBtnrInfo->mBtnrStats[idx].id) {
+            idx = i;
+        }
+    }
+    memcpy(stats, &pBtnrInfo->mBtnrStats[idx], sizeof(btnr_stats_cp_t));
+    return XCAM_RETURN_NO_ERROR;
+}
+#endif
 
 rk_aiq_sys_ctx_t* rk_aiq_get_last_sysctx(rk_aiq_sys_ctx_t *sys_ctx) {
 #if RKAIQ_ENABLE_CAMGROUP

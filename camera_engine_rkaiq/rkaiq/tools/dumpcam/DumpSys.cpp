@@ -24,7 +24,7 @@
 static void usage() {
     fprintf(stderr,
             "usage: \n"
-            "         dumpsys [moudle] [moudle ARGS] [--uri uriName] [uri ARGS] \n"
+            "         dumpcam [moudle] [moudle ARGS] [--uri uriName] [uri ARGS] \n"
             "         --help: shows this help\n"
             "         --uri uriName: register service base on uriName \n"
             "         [uri ARGS]: optionally passing ARGS to service \n"
@@ -92,7 +92,7 @@ int Dumpsys::start(int argc, char* const argv[]) {
                     dumpService = false;
                 } else if (!strcmp(longOptions[optionIndex].name, "version")) {
                     dumpVersionService = true;
-                } else if (!strcmp(longOptions[optionIndex].name, "list")) {
+                } else if (!strcmp(longOptions[optionIndex].name, "ver-list")) {
                     dumpVersionList = true;
                 } else if (!strcmp(longOptions[optionIndex].name, "freq")) {
                     dumpFreqService = true;
@@ -152,7 +152,7 @@ int Dumpsys::start(int argc, char* const argv[]) {
         if (result == DUMP_SUCCESS) {
             result = DumpClientReceiveDump();
         } else {
-            DEBUG_MSG_ERROR("%s: Confirm MPI system has been initialized and running?\n", __FUNCTION__);
+            DEBUG_MSG_ERROR("%s: Confirm RKAIQ has been initialized and running?\n", __FUNCTION__);
         }
     }
     result = writeDumpToStd();

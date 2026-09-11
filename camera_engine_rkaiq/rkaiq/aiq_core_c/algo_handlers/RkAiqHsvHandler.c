@@ -42,8 +42,10 @@ static XCamReturn _handlerHsv_prepare(AiqAlgoHandler_t* pAlgoHandler) {
     ret = AiqAlgoHandler_prepare(pAlgoHandler);
     RKAIQCORE_CHECK_RET(ret, "hsv handle prepare failed");
 
+    GlobalParamsManager_lockAlgoParam(pAlgoHandler->mAiqCore->mGlobalParamsManger, pAlgoHandler->mResultType);
     RkAiqAlgoDescription* des = (RkAiqAlgoDescription*)pAlgoHandler->mDes;
     ret                       = des->prepare(pAlgoHandler->mConfig);
+    GlobalParamsManager_unlockAlgoParam(pAlgoHandler->mAiqCore->mGlobalParamsManger, pAlgoHandler->mResultType);
     RKAIQCORE_CHECK_RET(ret, "hsv algo prepare failed");
 
     EXIT_ANALYZER_FUNCTION();
@@ -116,6 +118,7 @@ XCamReturn AiqHsvHandler_queryahsvStatus(AiqHsvHandler_t* pHdlHsv, ahsv_status_t
     EXIT_ANALYZER_FUNCTION();
     return ret;
 }
+
 XCamReturn AiqHsvHandler_setCalib(AiqHsvHandler_t* pHdlHsv, ahsv_hsvCalib_t* calib) {
     ENTER_ANALYZER_FUNCTION();
 
@@ -136,6 +139,87 @@ XCamReturn AiqHsvHandler_getCalib(AiqHsvHandler_t* pHdlHsv, ahsv_hsvCalib_t* cal
     aiqMutex_lock(&pHdlHsv->mCfgMutex);
 
     ret = algo_hsv_GetCalib(pHdlHsv->mAlgoCtx, calib);
+
+    aiqMutex_unlock(&pHdlHsv->mCfgMutex);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
+XCamReturn AiqHsvHandler_setSatStrth(AiqHsvHandler_t* pHdlHsv, ahsv_satStrg_t* strg) {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    aiqMutex_lock(&pHdlHsv->mCfgMutex);
+    ret = algo_hsv_SetSatStrth(pHdlHsv->mAlgoCtx, strg);
+    aiqMutex_unlock(&pHdlHsv->mCfgMutex);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
+XCamReturn AiqHsvHandler_getSatStrth(AiqHsvHandler_t* pHdlHsv, ahsv_satStrg_t* strg) {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+
+    aiqMutex_lock(&pHdlHsv->mCfgMutex);
+
+    ret = algo_hsv_GetSatStrth(pHdlHsv->mAlgoCtx, strg);
+
+    aiqMutex_unlock(&pHdlHsv->mCfgMutex);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
+XCamReturn AiqHsvHandler_setHueOffset(AiqHsvHandler_t* pHdlHsv, ahsv_hueOffset_t* offset) {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    aiqMutex_lock(&pHdlHsv->mCfgMutex);
+    ret = algo_hsv_SetHueOffset(pHdlHsv->mAlgoCtx, offset);
+    aiqMutex_unlock(&pHdlHsv->mCfgMutex);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
+XCamReturn AiqHsvHandler_getHueOffset(AiqHsvHandler_t* pHdlHsv, ahsv_hueOffset_t* offset) {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+
+    aiqMutex_lock(&pHdlHsv->mCfgMutex);
+
+    ret = algo_hsv_getHueOffset(pHdlHsv->mAlgoCtx, offset);
+
+    aiqMutex_unlock(&pHdlHsv->mCfgMutex);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
+XCamReturn AiqHsvHandler_setValOffset(AiqHsvHandler_t* pHdlHsv, ahsv_valOffset_t* offset) {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    aiqMutex_lock(&pHdlHsv->mCfgMutex);
+    ret = algo_hsv_SetValOffset(pHdlHsv->mAlgoCtx, offset);
+    aiqMutex_unlock(&pHdlHsv->mCfgMutex);
+
+    EXIT_ANALYZER_FUNCTION();
+    return ret;
+}
+
+XCamReturn AiqHsvHandler_getValOffset(AiqHsvHandler_t* pHdlHsv, ahsv_valOffset_t* offset) {
+    ENTER_ANALYZER_FUNCTION();
+
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+
+    aiqMutex_lock(&pHdlHsv->mCfgMutex);
+
+    ret = algo_hsv_getValOffset(pHdlHsv->mAlgoCtx, offset);
 
     aiqMutex_unlock(&pHdlHsv->mCfgMutex);
 

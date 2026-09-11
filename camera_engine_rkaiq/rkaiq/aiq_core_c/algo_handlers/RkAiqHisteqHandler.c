@@ -41,8 +41,10 @@ static XCamReturn _handlerHisteq_prepare(AiqAlgoHandler_t* pAlgoHandler) {
     ret = AiqAlgoHandler_prepare(pAlgoHandler);
     RKAIQCORE_CHECK_RET(ret, "histeq handle prepare failed");
 
+    GlobalParamsManager_lockAlgoParam(pAlgoHandler->mAiqCore->mGlobalParamsManger, pAlgoHandler->mResultType);
     RkAiqAlgoDescription* des = (RkAiqAlgoDescription*)pAlgoHandler->mDes;
     ret                       = des->prepare(pAlgoHandler->mConfig);
+    GlobalParamsManager_unlockAlgoParam(pAlgoHandler->mAiqCore->mGlobalParamsManger, pAlgoHandler->mResultType);
     RKAIQCORE_CHECK_RET(ret, "histeq algo prepare failed");
 
     EXIT_ANALYZER_FUNCTION();
@@ -77,6 +79,28 @@ AiqAlgoHandler_t* AiqAlgoHandlerHisteq_constructor(RkAiqAlgoDesComm* des, AiqCor
     pHdl->prepare      = _handlerHisteq_prepare;
     pHdl->init         = _handlerHisteq_init;
 	return pHdl;
+}
+
+XCamReturn AiqHisteqHandler_setUsrCfgStrg(AiqHisteqHandler_t* pHdlHisteq,  bool en, float strength)
+{
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+
+    GlobalParamsManager_lockAlgoParam(pHdlHisteq->mAiqCore->mGlobalParamsManger, pHdlHisteq->mResultType);
+    ret = algo_histeq_SetUsrCfgStrg(pHdlHisteq->mAlgoCtx, en, strength);
+    GlobalParamsManager_unlockAlgoParam(pHdlHisteq->mAiqCore->mGlobalParamsManger, pHdlHisteq->mResultType);
+    EXIT_ANALYZER_FUNCTION();
+	return ret;
+}
+
+XCamReturn AiqHisteqHandler_getUsrCfgStrg(AiqHisteqHandler_t* pHdlHisteq,  bool *en, float *strength)
+{
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+
+    GlobalParamsManager_lockAlgoParam(pHdlHisteq->mAiqCore->mGlobalParamsManger, pHdlHisteq->mResultType);
+    ret = algo_histeq_GetUsrCfgStrg(pHdlHisteq->mAlgoCtx, en, strength);
+    GlobalParamsManager_unlockAlgoParam(pHdlHisteq->mAiqCore->mGlobalParamsManger, pHdlHisteq->mResultType);
+    EXIT_ANALYZER_FUNCTION();
+	return ret;
 }
 
 #if 0

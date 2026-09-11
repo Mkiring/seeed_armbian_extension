@@ -80,7 +80,7 @@ static void cat_main(int argc, char **argv, st_string *result) {
 #ifdef HAVE_RK_OSAL
        rkos_sprintf(buf + strlen(buf), "%s open fail fd = %d \n", path, fd);
 #endif
-       string_printf(result, buf);
+       aiq_string_printf(result, buf);
        return;
     }
 
@@ -91,7 +91,7 @@ static void cat_main(int argc, char **argv, st_string *result) {
         real_size = read(fd, buf, 512);
 #endif
         buf[real_size] = 0;
-        string_printf(result, buf);
+        aiq_string_printf(result, buf);
     } while(real_size);
 
 #ifdef HAVE_RK_OSAL

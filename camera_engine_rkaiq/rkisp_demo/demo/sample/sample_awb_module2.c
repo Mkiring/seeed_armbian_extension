@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  */
-#if defined(ISP_HW_V33)||defined(ISP_HW_V39)
+#if defined(ISP_HW_V33)||defined(ISP_HW_V39) || defined(ISP_HW_V35)
 #include "sample_comm.h"
 #define safe_free(x) if(NULL!=(x))\
                            free(x); x=NULL;
@@ -473,6 +473,21 @@ static int sample_awb_setFFWbgain(const rk_aiq_sys_ctx_t* ctx)
 
     return 0;
 }
+
+
+static int sample_awb_SetNNres(const rk_aiq_sys_ctx_t* ctx)
+{
+    awb_ai_res_t attr;
+    attr.confidence = 1;
+    attr.converged = 1;// ae converged for qs sensor
+    rk_aiq_wb_gain_t wbgain = {1.0, 1.0, 1.0, 1.0};
+    attr.awb_gain=wbgain;
+    rk_aiq_user_api2_awb_SetNNres(ctx, &attr);
+    printf("SetNNres \n\n");
+
+    return 0;
+}
+
 static void sample_awb_usage()
 {
     printf("Usage : \n");
@@ -504,7 +519,7 @@ static void sample_awb_usage()
     printf("\t J) AWB: set Mode Manual & Sync.\n");
     printf("\t L) AWB: set Mode Auto & Sync.\n");
     printf("\t N) AWB: set Manual attr & Sync.\n");
-
+    printf("\t R) AWB: set sample_awb_SetNNres\n");
     printf("\t S) AWB: set WbGainOffset & Sync.\n");
 #if ISP_HW_V32|| ISP_HW_V39|| ISP_HW_V33
     printf("\t Y) AWB: WriteAwbIn.\n");
@@ -640,6 +655,9 @@ printf("\t please press the key: ");
             break;
         case 'Z':
             sample_awb_setFFWbgain(ctx);
+            break;
+        case 'R':
+            sample_awb_SetNNres(ctx);
             break;
         default:
             break;

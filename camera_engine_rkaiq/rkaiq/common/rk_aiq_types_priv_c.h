@@ -22,6 +22,7 @@
 #include "algos/ae/rk_aiq_types_ae_algo_int.h"
 #include "algos/af/rk_aiq_types_af_algo.h"
 #include "c_base/aiq_base.h"
+#include "common/rk-isp35-config.h"
 #include "common/rk-isp33-config.h"
 #include "common/rk-isp39-config.h"
 #include "common/rk_aiq_types.h"
@@ -29,11 +30,15 @@
 #include "common/rkisp21-config.h"
 #include "common/rkisp3-config.h"
 #include "common/rkisp32-config.h"
+#include "common/rk-aiisp-config.h"
 #include "xcore_c/aiq_video_buffer.h"
 #if defined(ISP_HW_V39)
 typedef awbStats_cfg_priv_t rk_aiq_isp_awb_meas_cfg_v39_t;
 typedef awbStats_stats_priv_t rk_aiq_isp_awb_stats_v39_t;
 #elif defined(ISP_HW_V33)
+typedef awbStats_cfg_priv_t rk_aiq_isp_awb_meas_cfg_v33_t;
+typedef awbStats_stats_priv_t rk_aiq_isp_awb_stats_v39_t;
+#elif defined(ISP_HW_V35)
 typedef awbStats_cfg_priv_t rk_aiq_isp_awb_meas_cfg_v33_t;
 typedef awbStats_stats_priv_t rk_aiq_isp_awb_stats_v39_t;
 #endif
@@ -47,13 +52,13 @@ typedef btnr_param_t                    rk_aiq_isp_btnr_params_t;
 typedef gamma_param_t                   rk_aiq_isp_gamma_params_t;
 typedef ynr_param_t                     rk_aiq_isp_ynr_params_t;
 typedef sharp_param_t                   rk_aiq_isp_sharp_params_t;
-#if RKAIQ_HAVE_SHARP_V40
+#if defined(RKAIQ_HAVE_SHARP_V40) || defined(RKAIQ_HAVE_SHARP_V41)
 typedef texEst_param_t                   rk_aiq_isp_texEst_params_t;
 #endif
 typedef cnr_param_t                     rk_aiq_isp_cnr_params_t;
 typedef rk_aiq_isp_drc_v39_t            rk_aiq_isp_drc_params_t;
 typedef dpc_param_t                     rk_aiq_isp_dpcc_params_t;
-typedef blc_param_t                     rk_aiq_isp_blc_params_t;
+typedef rk_aiq_isp_blc_v33_t            rk_aiq_isp_blc_params_t;
 #if RKAIQ_HAVE_3DLUT
 typedef lut3d_param_t                   rk_aiq_isp_lut3d_params_t;
 #endif
@@ -83,7 +88,7 @@ typedef histeq_param_t                  rk_aiq_isp_histeq_params_t;
 #if RKAIQ_HAVE_ENHANCE_V10
 typedef enh_param_t                  rk_aiq_isp_enh_params_t;
 #endif
-#if RKAIQ_HAVE_HSV_V10
+#if RKAIQ_HAVE_HSV
 typedef hsv_param_t                  rk_aiq_isp_hsv_params_t;
 #endif
 typedef rk_aiq_isp_degamma_t            rk_aiq_isp_adegamma_params_t;
@@ -148,6 +153,7 @@ typedef struct AiqSensorExpInfo_s {
     rk_aiq_exposure_params_t aecExpInfo;
     Sensor_dpcc_res_t SensorDpccInfo;
     RKAiqExpI2cParam_t* exp_i2c_params;
+    uint64_t sofTime;
 } AiqSensorExpInfo_t;
 
 #define AIQ_SENSOR_EXPINFO_INIT(param) \
@@ -210,8 +216,24 @@ typedef struct aiq_isp_effect_params_s {
 #endif
     struct isp33_isp_meas_cfg meas;
     struct isp32_bls_cfg bls_cfg;
+    int blc0_diff;
+    float offset2Blc1;
     struct isp32_awb_gain_cfg awb_gain_cfg;
     awbStats_cfg_priv_t awb_cfg_v33;
+#if defined(USE_NEWSTRUCT)
+    aeStats_cfg_t ae_cfg_v39;
+#endif
+} aiq_isp_effect_params_t;
+#elif defined(ISP_HW_V35)
+typedef struct aiq_isp_effect_params_s {
+    aiq_ref_base_t _ref_base;
+#if defined(RKAIQ_HAVE_MULTIISP)
+    struct isp35_isp_params_cfg isp_params_v35[2];
+#endif
+    struct isp35_isp_meas_cfg meas;
+    struct isp35_bls_cfg bls_cfg;
+    struct isp32_awb_gain_cfg awb_gain_cfg;
+    awbStats_cfg_priv_t awb_cfg_v35;
 #if defined(USE_NEWSTRUCT)
     aeStats_cfg_t ae_cfg_v39;
 #endif
@@ -487,6 +509,11 @@ static const char* Cam3aResultType2Str[RESULT_TYPE_MAX_PARAM] = {
     [RESULT_TYPE_TRANS_PARAM]    = "TRANS",
     [RESULT_TYPE_LDC_PARAM]      = "LDC",
     [RESULT_TYPE_AESTATS_PARAM]  = "AEC",
+    [RESULT_TYPE_TEXEST_PARAM]   = "TEXEST",
+    [RESULT_TYPE_POSTISP_PARAM]  = "POSTISP",
+    [RESULT_TYPE_AIBNR_PARAM]     = "AIBNR",
+    [RESULT_TYPE_AIRMS_PARAM]     = "AIRMS",
+    [RESULT_TYPE_AIYNR_PARAM]     = "AIYNR",
 };
 
 static const char* AnalyzerGroupType2Str[RK_AIQ_CORE_ANALYZE_MAX] = {
@@ -508,11 +535,11 @@ typedef struct AiqFullParams_s {
     aiq_params_base_t* pParamsArray[RESULT_TYPE_MAX_PARAM];
 } AiqFullParams_t;
 
-typedef enum _RkAiqIspUnitedMode {
-    RK_AIQ_ISP_UNITED_MODE_NORMAL = 0,
-    RK_AIQ_ISP_UNITED_MODE_TWO_GRID,
-    RK_AIQ_ISP_UNITED_MODE_FOUR_GRID,
-} RkAiqIspUnitedMode;
+typedef enum _RkAiqIspUniteMode {
+    RK_AIQ_ISP_UNITE_MODE_NORMAL    = 0,
+    RK_AIQ_ISP_UNITE_MODE_TWO_GRID  = 1,
+    RK_AIQ_ISP_UNITE_MODE_FOUR_GRID = 2,
+} RkAiqIspUniteMode;
 
 #if defined(ISP_HW_V32_LITE)
 #define RK_AIQ_ISP_CIF_INPUT_MAX_SIZE 4224 * 3136
@@ -521,13 +548,17 @@ typedef enum _RkAiqIspUnitedMode {
 #elif defined(ISP_HW_V30)
 #define RK_AIQ_ISP_CIF_INPUT_MAX_SIZE 3840 * 2160
 #elif defined(ISP_HW_V33)
-#define RK_AIQ_ISP_CIF_INPUT_MAX_SIZE 2880 * 1620 
+#define RK_AIQ_ISP_CIF_INPUT_MAX_SIZE 2880 * 1620
+#elif defined(ISP_HW_V35)
+#define RK_AIQ_ISP_CIF_INPUT_MAX_SIZE 2880 * 1620
 #else
 #define RK_AIQ_ISP_CIF_INPUT_MAX_SIZE 3840 * 2160
 #endif
 
 typedef struct rk_aiq_tb_info_s {
     bool is_fastboot;
+    bool is_start_again;
+    float pixel_clock_freq_mhz;
 } rk_aiq_tb_info_t;
 
 typedef struct aiq_shared_base_s AlgoRstShared_t;
@@ -538,6 +569,7 @@ typedef enum rk_aiq_drv_share_mem_type_e {
     MEM_TYPE_CAC,
     MEM_TYPE_DBG_INFO,
     MEM_TYPE_LDCV,
+    MEM_TYPE_BTNR,
 } rk_aiq_drv_share_mem_type_t;
 
 typedef void (*alloc_mem_t)(uint8_t id, void* ops_ctx, void* cfg, void** mem_ctx);
@@ -553,6 +585,7 @@ typedef struct rk_aiq_lut_share_mem_info_s {
     int32_t size;
     void* map_addr;
     void* addr;
+    void* addr1;
     int32_t fd;
     char* state;
 } rk_aiq_lut_share_mem_info_t;
@@ -561,6 +594,8 @@ typedef rk_aiq_lut_share_mem_info_t rk_aiq_ldch_share_mem_info_t;
 typedef rk_aiq_lut_share_mem_info_t rk_aiq_ldcv_share_mem_info_t;
 typedef rk_aiq_lut_share_mem_info_t rk_aiq_cac_share_mem_info_t;
 typedef rk_aiq_lut_share_mem_info_t rk_aiq_dbg_share_mem_info_t;
+typedef rk_aiq_lut_share_mem_info_t rk_aiq_cac_share_mem_info_t;
+typedef rk_aiq_lut_share_mem_info_t rk_aiq_btnr_share_mem_info_t;
 
 typedef struct rk_aiq_fec_share_mem_info_s {
     int size;
@@ -608,6 +643,11 @@ typedef enum CamThreadType_e {
     VICAP_WITH_RK1608_RESET_EVT,
     VICAP_POLL_SCL,
     ISP_POLL_AIISP,
+    ISP_POLL_AIBNR_DONE,
+    ISP_POLL_RKNN_DONE,
+    ISP_POLL_AIRMS_DONE,
+    ISP_POLL_AIYNR_DONE,
+    ISP_POLL_MEMC,
     ISP_POLL_POST_MAX,
 } CamThreadType_t;
 

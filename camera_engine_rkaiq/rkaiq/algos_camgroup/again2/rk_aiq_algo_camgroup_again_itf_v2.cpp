@@ -286,6 +286,7 @@ RkAiqAlgoDescription g_RkIspAlgoDescCamgroupAgainV2 = {
     .pre_process = NULL,
     .processing = groupAgainV2Processing,
     .post_process = NULL,
+    .dump = NULL,
 };
 
 RKAIQ_END_DECLARE

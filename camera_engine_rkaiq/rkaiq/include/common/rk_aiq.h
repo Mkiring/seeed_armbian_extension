@@ -73,11 +73,15 @@ typedef struct rk_aiq_aiisp_s {
     uint16_t wr_linecnt;
     uint16_t rd_linecnt;
     int sequence;
+	unsigned long long timestamp;
     int height;
-    rkisp_bay3dbuf_info_t bay3dbuf;
+    struct rkisp_bnr_buf_info* bay3dbuf;
     void* iir_address;
     void* gain_address;
     void* aiisp_address;
+	int iir_index;
+	int gain_index;
+	int aiisp_index;
 } rk_aiq_aiisp_t;
 
 typedef XCamReturn(*rk_aiq_error_cb)(rk_aiq_err_msg_t* err_msg);
@@ -115,6 +119,17 @@ typedef struct rk_aiq_tb_info_s {
     void* rtt_share_addr;
 } rk_aiq_tb_info_t;
 #endif
+
+/**
+ * @brief Number of buffers for Aibnr
+ * @isp_fe:     Number of front-end buffers
+ * @isp_be:     Number of back-end  buffers
+ *
+ */
+typedef struct rk_aiq_aibnr_buf_count_s {
+    uint16_t isp_fe;
+    uint16_t isp_be;
+} rk_aiq_aibnr_buffer_count_t;
 
 XCAM_END_DECLARE
 

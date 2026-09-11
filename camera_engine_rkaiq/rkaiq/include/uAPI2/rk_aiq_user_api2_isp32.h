@@ -52,7 +52,9 @@
 #include "uAPI2/rk_aiq_user_api2_gic.h"
 #include "isp/rk_aiq_isp_cac21.h"
 #include "uAPI2/rk_aiq_user_api2_cac.h"
+#ifdef RKAIQ_HAVE_MERGE_V12
 #include "isp/rk_aiq_isp_merge22.h"
+#endif
 #include "uAPI2/rk_aiq_user_api2_merge.h"
 #include "isp/rk_aiq_isp_lsc21.h"
 #include "uAPI2/rk_aiq_user_api2_lsc.h"

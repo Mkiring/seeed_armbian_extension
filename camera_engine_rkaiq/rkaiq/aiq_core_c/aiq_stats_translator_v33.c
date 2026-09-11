@@ -616,8 +616,10 @@ XCamReturn translateAecStatsV33(AiqStatsTranslator_t* pStatsTrans, const aiq_Vid
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
 
 #if defined(ISP_HW_V33)
-    if (pStatsTrans->mIsMultiIsp && pStatsTrans->mIspUnitedMode)
+#if defined(RKAIQ_HAVE_MULTIISP)
+    if (pStatsTrans->mIsMultiIsp && pStatsTrans->mIspUniteMode != RK_AIQ_ISP_UNITE_MODE_NORMAL)
         return translateMultiAecStats(pStatsTrans, from, to);
+#endif
     // 0) blc awb cfg
     struct isp33_isp_meas_cfg* isp_params = &pStatsTrans->_ispParams->meas;
     uint8_t AeSwapMode, AeSelMode;
@@ -638,16 +640,18 @@ XCamReturn translateAecStatsV33(AiqStatsTranslator_t* pStatsTrans, const aiq_Vid
     u8  rawhist_mode   = 0;
     bool is_hdr = (pStatsTrans->mWorkingMode > 0) ? true : false;
     bool is_bls1_en = bls_cfg->bls1_en && !is_hdr;
+    int blc0_diff = pStatsTrans->_ispParams->blc0_diff;
+    int blc1_diff = (int)pStatsTrans->_ispParams->offset2Blc1;
 
     isp_ob_offset_rb = bls_cfg->isp_ob_offset >> 2;
     isp_ob_offset_g  = bls_cfg->isp_ob_offset;
     isp_ob_predgain =  MAX(bls_cfg->isp_ob_predgain >> 8, 1);
 
     if (is_bls1_en) {
-        bls1_ori_val.r  = (bls_cfg->bls1_val.r / isp_ob_predgain) >> 2;
-        bls1_ori_val.gr = bls_cfg->bls1_val.gr / isp_ob_predgain;
-        bls1_ori_val.gb = bls_cfg->bls1_val.gb / isp_ob_predgain;
-        bls1_ori_val.b  = (bls_cfg->bls1_val.b / isp_ob_predgain) >> 2;
+        bls1_ori_val.r  = (bls_cfg->bls1_val.r - blc1_diff + blc0_diff) >> 2;
+        bls1_ori_val.gr = bls_cfg->bls1_val.gr - blc1_diff + blc0_diff;
+        bls1_ori_val.gb = bls_cfg->bls1_val.gb - blc1_diff + blc0_diff;
+        bls1_ori_val.b  = (bls_cfg->bls1_val.b - blc1_diff + blc0_diff) >> 2;
     } else {
         bls1_ori_val.r  = 0;
         bls1_ori_val.gr = 0;
@@ -900,9 +904,9 @@ XCamReturn translateAecStatsV33(AiqStatsTranslator_t* pStatsTrans, const aiq_Vid
 
     return ret;
 }
-#endif
 
 
+#if defined(RKAIQ_HAVE_MULTIISP) && defined(ISP_HW_V33)
 void MergeAwbHistBinStats(
     unsigned int *merge_stats,
     u16 *left_stats,
@@ -1047,10 +1051,10 @@ void MergeAwbBlkStats(
         for(int i = 0; i < wnd_num; i++) {
             for(int j = 0; j < wnd_num; j++) {
                 if(j < wnd_num / 2) {
-                    merge_stats[i * wnd_num + j].hw_awbCfg_rSum_val = left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2].r + left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2+1].r;
-                    merge_stats[i * wnd_num + j].hw_awbCfg_gSum_val = left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2].g + left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2+1].g;
-                    merge_stats[i * wnd_num + j].hw_awbCfg_bSum_val = left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2].b +  left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2+1].b;
-                    merge_stats[i * wnd_num + j].hw_awbCfg_statsPix_count = left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2].wp + left_stats->ramdata_blk_y[i].ramdata_blk_x[j*2+1].wp;
+                    merge_stats[i * wnd_num + j].hw_awbCfg_rSum_val = left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2].r + left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2 + 1].r;
+                    merge_stats[i * wnd_num + j].hw_awbCfg_gSum_val = left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2].g + left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2 + 1].g;
+                    merge_stats[i * wnd_num + j].hw_awbCfg_bSum_val = left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2].b +  left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2 + 1].b;
+                    merge_stats[i * wnd_num + j].hw_awbCfg_statsPix_count = left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2].wp + left_stats->ramdata_blk_y[i].ramdata_blk_x[j * 2 + 1].wp;
                 } else if(j > wnd_num / 2) {
                     merge_stats[i * wnd_num + j].hw_awbCfg_rSum_val = right_stats->ramdata_blk_y[i ].ramdata_blk_x[j * 2 - wnd_num].r + right_stats->ramdata_blk_y[i ].ramdata_blk_x[j * 2 - wnd_num + 1].r;
                     merge_stats[i * wnd_num + j].hw_awbCfg_gSum_val = right_stats->ramdata_blk_y[i ].ramdata_blk_x[j * 2 - wnd_num].g + right_stats->ramdata_blk_y[i ].ramdata_blk_x[j * 2 - wnd_num + 1].g;
@@ -1105,7 +1109,7 @@ void MergeAwbExcWpStats(
 
 
 XCamReturn translateMultiAwbStats(AiqStatsTranslator_t* pStatsTrans, const aiq_VideoBuffer_t* from,
-                                  aiq_stats_base_t* to){
+                                  aiq_stats_base_t* to) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
     struct rkisp33_stat_buffer* left_stats =
         (struct rkisp33_stat_buffer*)(AiqV4l2Buffer_getExpbufUsrptr((AiqV4l2Buffer_t*)from));
@@ -1166,7 +1170,7 @@ XCamReturn translateMultiAwbStats(AiqStatsTranslator_t* pStatsTrans, const aiq_V
     ori_win.v_offs = pStatsTrans-> _ispParams->meas.rawawb.v_offs;
     ori_win.v_size = pStatsTrans-> _ispParams->meas.rawawb.v_size;
 
-    JudgeWinLocation33(&ori_win, &AwbWinSplitMode,pStatsTrans->left_isp_rect_, pStatsTrans->right_isp_rect_);
+    JudgeWinLocation33(&ori_win, &AwbWinSplitMode, pStatsTrans->left_isp_rect_, pStatsTrans->right_isp_rect_);
     MergeAwbWinStats(&statsInt->awb_stats_v39.com.wpEngine, &left_stats->stat.rawawb, &right_stats->stat.rawawb,
                      statsInt->awb_stats_v39.awb_cfg_effect.lightNum, AwbWinSplitMode);
 
@@ -1211,15 +1215,19 @@ XCamReturn translateMultiAwbStats(AiqStatsTranslator_t* pStatsTrans, const aiq_V
     return ret;
 }
 
+#endif
+#endif
+
 
 XCamReturn translateAwbStatsV33(AiqStatsTranslator_t* pStatsTrans, const aiq_VideoBuffer_t* from,
                                 aiq_stats_base_t* to) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
 #if defined(ISP_HW_V33)
 
-    if (pStatsTrans->mIsMultiIsp && pStatsTrans->mIspUnitedMode)
+#if defined(RKAIQ_HAVE_MULTIISP)
+    if (pStatsTrans->mIsMultiIsp && pStatsTrans->mIspUniteMode != RK_AIQ_ISP_UNITE_MODE_NORMAL)
         return translateMultiAwbStats(pStatsTrans, from, to);
-
+#endif
     aiq_awb_stats_wrapper_t* statsInt = (aiq_awb_stats_wrapper_t*)to->_data;
     struct rkisp33_stat_buffer* stats =
         (struct rkisp33_stat_buffer*)(AiqV4l2Buffer_getExpbufUsrptr((AiqV4l2Buffer_t*)from));

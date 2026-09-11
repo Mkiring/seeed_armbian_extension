@@ -373,7 +373,7 @@ typedef struct rk_tool_awb_sgc_result2_s {
     int colorEst;
     // M4_ARRAY_DESC("voteResult", "u32", M4_SIZE(1,14), M4_RANGE(0,225), "1", M4_DIGIT(0), M4_DYNAMIC(0))
     int voteResult[14];
-    // M4_ARRAY_DESC("bigWp_wgt", "f32", M4_SIZE(1,1), M4_RANGE(0,1), "1", M4_DIGIT(4), M4_DYNAMIC(0))
+    // M4_ARRAY_DESC("wgt_lv", "f32", M4_SIZE(1,1), M4_RANGE(0,1), "1", M4_DIGIT(4), M4_DYNAMIC(0))
     float wgt_lv;
     // M4_ARRAY_DESC("wgt_wpnum", "f32", M4_SIZE(1,1), M4_RANGE(0,1), "1", M4_DIGIT(4), M4_DYNAMIC(0))
     float wgt_wpnum;
@@ -480,6 +480,7 @@ typedef struct rk_tool_awb_strategy_result_s {
     float extraWp_domainWgt;
     // M4_ARRAY_DESC("aec_iso", "f32", M4_SIZE(1,1), M4_RANGE(0,1), "1", M4_DIGIT(4), M4_DYNAMIC(0))
     float aec_iso;
+    // M4_STRUCT_DESC("sinColorResult", "normal_ui_style")
     rk_tool_awb_sgc_result2_t sinColorResult;
 } rk_tool_awb_strategy_result_t;
 #endif//ifdef USE_NEWSTRUCT

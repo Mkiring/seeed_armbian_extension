@@ -24,7 +24,11 @@
 #include "sample_ae_module.h"
 #include "sample_awb_module.h"
 #include "sample_accm_module.h"
+#if USE_NEWSTRUCT && !defined(ISP_HW_V39)
+#include "sample_hsv_module.h"
+#else
 #include "sample_a3dlut_module.h"
+#endif
 #include "sample_adrc_module.h"
 #include "sample_amerge_module.h"
 #include "sample_agamma_module.h"
@@ -57,6 +61,8 @@
 #include "sample_trans_module.h"
 #include "sample_rgbir_module.h"
 #include "sample_sysctl.h"
+#include "sample_aibnr_module.h"
+#include "sample_aiynr_module.h"
 
 struct module_sample_info {
     const char * const name;
@@ -81,7 +87,11 @@ static struct module_sample_info module_samples[] = {
 #else
     MODULE_INFO(RK_ISP_ACCM, sample_accm_module, sample_print_accm_info),
 #endif
+#if USE_NEWSTRUCT && !defined(ISP_HW_V39)
+    MODULE_INFO(RK_ISP_A3DLUT, sample_hsv_module, sample_print_hsv_info),
+#else
     MODULE_INFO(RK_ISP_A3DLUT, sample_a3dlut_module, sample_print_a3dlut_info),
+#endif
     MODULE_INFO(RK_ISP_ADRC, sample_adrc_module, sample_print_adrc_info),
     MODULE_INFO(RK_ISP_AMERGE, sample_amerge_module, sample_print_amerge_info),
     MODULE_INFO(RK_ISP_AGAMMA, sample_agamma_module, sample_print_agamma_info),
@@ -155,6 +165,8 @@ static void sample_usage()
     printf("\t x) ALDC:       module test sample.\n");
     printf("\t y) RGBIR:       module test sample.\n");
     printf("\t A) SYSCTL:       module test sample.\n");
+    printf("\t B) AIBNR:      module test sample.\n");
+    printf("\t C) AIYNR:      module test sample.\n");
     printf("\t z) ALL:       module test sample.\n");
     printf("\n");
     printf("\t please press the key: ");
@@ -387,6 +399,16 @@ XCamReturn sample_main (const void *arg)
     case 'A': {
         printf("enter SYSCTL test\n");
         sample_sysctl(arg);
+        break;
+    }
+    case 'B': {
+        printf("enter AIBNR module test\n");
+        sample_aibnr_module(arg);
+        break;
+    }
+    case 'C': {
+        printf("enter AIYNR module test\n");
+        sample_aiynr_module(arg);
         break;
     }
     case 'z': {

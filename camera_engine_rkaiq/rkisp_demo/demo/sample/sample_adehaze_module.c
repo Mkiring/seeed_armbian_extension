@@ -71,7 +71,7 @@ void sample_print_adehaze_info(const void *arg)
     printf ("enter ADEHAZE modult test!\n");
 }
 
-#if USE_NEWSTRUCT && !defined(ISP_HW_V33)
+#if USE_NEWSTRUCT && !defined(ISP_HW_V33) && !defined(ISP_HW_V35)
 
 static void sample_dehaze_tuningtool_test(const rk_aiq_sys_ctx_t* ctx)
 {
@@ -926,7 +926,7 @@ XCamReturn sample_adehaze_module(const void* arg)
             printf("\t rk_aiq_uapi2_setMEnhanceChromeStrth level: %u\n\n", level);
             break;
         }
-#if USE_NEWSTRUCT && !defined(ISP_HW_V33)
+#if USE_NEWSTRUCT && !defined(ISP_HW_V33) && !defined(ISP_HW_V35)
         case 'l': {
             printf("\t sample_new_dehaze\n\n");
             sample_new_dehaze(ctx);

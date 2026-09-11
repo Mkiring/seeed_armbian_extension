@@ -540,28 +540,6 @@ static void WriteAwbReg(struct isp39_rawawb_meas_cfg* awb_cfg_v32) {
 #endif
 }
 
-// 函数用于将补码表示的整数转换为真值，指定符号位位置
-static inline int32_t c2trval(int signBitPosition, uint32_t complement)
-{
-    // 计算符号掩码，只保留符号位
-    uint32_t signMask = 1 << signBitPosition;
-    if ((complement & signMask) == 0) {
-        // 符号位为 0，补码就是真值
-        return (int32_t)complement;
-    }
-    else {
-        // 符号位为 1，计算真值
-        // 取反所有位，然后加1得到反码
-        // 注意：这里使用了 uint32_t 来避免在取反时发生符号扩展
-        uint32_t oneComplement = ~complement + 1;
-        // 现在 oneComplement 可能包含比原整数更多的1
-        // 需要将其限制到原整数的位数内
-        oneComplement &= (signMask << 1) - 1;
-        // 将反码转换为真值，即取反后加1的结果
-        return -(int32_t)oneComplement;
-    }
-}
-
 static void WriteDataForIcCmodel(struct isp39_rawawb_meas_cfg* wpDetectPara)
 {
 #if 0
@@ -802,22 +780,22 @@ static void WriteDataForIcCmodel(struct isp39_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow_en =%d;\n", wpDetectPara->multiwindow_en);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_h_offs =%d;\n", wpDetectPara->multiwindow0_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_v_offs =%d;\n", wpDetectPara->multiwindow0_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_h_size =%d;//note:diff with chip\n", wpDetectPara->multiwindow0_h_size- wpDetectPara->multiwindow0_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_v_size =%d;\n", wpDetectPara->multiwindow0_v_size- wpDetectPara->multiwindow0_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_h_size =%d;//note:diff with chip\n", wpDetectPara->multiwindow0_h_size - wpDetectPara->multiwindow0_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_v_size =%d;\n", wpDetectPara->multiwindow0_v_size - wpDetectPara->multiwindow0_v_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_h_offs =%d;\n", wpDetectPara->multiwindow1_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_v_offs =%d;\n", wpDetectPara->multiwindow1_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_h_size =%d;\n", wpDetectPara->multiwindow1_h_size- wpDetectPara->multiwindow1_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_v_size =%d;\n", wpDetectPara->multiwindow1_v_size- wpDetectPara->multiwindow1_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_h_size =%d;\n", wpDetectPara->multiwindow1_h_size - wpDetectPara->multiwindow1_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_v_size =%d;\n", wpDetectPara->multiwindow1_v_size - wpDetectPara->multiwindow1_v_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_h_offs =%d;\n", wpDetectPara->multiwindow2_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_v_offs =%d;\n", wpDetectPara->multiwindow2_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_h_size =%d;\n", wpDetectPara->multiwindow2_h_size- wpDetectPara->multiwindow2_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_v_size =%d;\n", wpDetectPara->multiwindow2_v_size- wpDetectPara->multiwindow2_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_h_size =%d;\n", wpDetectPara->multiwindow2_h_size - wpDetectPara->multiwindow2_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_v_size =%d;\n", wpDetectPara->multiwindow2_v_size - wpDetectPara->multiwindow2_v_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_h_offs =%d;\n", wpDetectPara->multiwindow3_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_v_offs =%d;\n", wpDetectPara->multiwindow3_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_h_size =%d;\n", wpDetectPara->multiwindow3_h_size- wpDetectPara->multiwindow3_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_v_size =%d;\n", wpDetectPara->multiwindow3_v_size- wpDetectPara->multiwindow3_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen0 =%d;\n", wpDetectPara->exc_wp_region0_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen1 =%d;\n", wpDetectPara->exc_wp_region0_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_h_size =%d;\n", wpDetectPara->multiwindow3_h_size - wpDetectPara->multiwindow3_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_v_size =%d;\n", wpDetectPara->multiwindow3_v_size - wpDetectPara->multiwindow3_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen0 =%d;\n", wpDetectPara->exc_wp_region0_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen1 =%d;\n", wpDetectPara->exc_wp_region0_excen & 0x2 >> 1);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_measen =%d;\n", wpDetectPara->exc_wp_region0_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_domain =%d;\n", wpDetectPara->exc_wp_region0_domain);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_weight =%d;\n", wpDetectPara->exc_wp_region0_weight);
@@ -1865,13 +1843,19 @@ static void convertAiqAwbToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
 
     WriteAwbReg(awb_cfg_v32);
     WriteDataForIcCmodel(awb_cfg_v32);
+    pCvt->mLatestMeasCfg.rawawb = pCvt->isp_params.isp_cfg->meas.rawawb;
 }
 #endif
 #if RKAIQ_HAVE_AF_V33 || RKAIQ_ONLY_AF_STATS_V33
 
 static void ConfigAfBlc(const blc_res_cvt_t *ablc, const afStats_cfg_t* af_data, float isp_dgain,
-                        float isp_ob_predgain, struct isp39_rawaf_meas_cfg *rawaf)
+                        float isp_ob_predgain, void *isp_rawaf)
 {
+#if ISP_HW_V39
+    struct isp39_rawaf_meas_cfg* rawaf = (struct isp39_rawaf_meas_cfg*)isp_rawaf;
+#elif ISP_HW_V35
+    struct isp35_rawaf_meas_cfg* rawaf = (struct isp35_rawaf_meas_cfg*)isp_rawaf;
+#endif
     if (af_data->hw_afCfg_statsSrc_mode == afStats_dmIn_mode ||
             af_data->hw_afCfg_statsSrc_mode == afStats_ynrOut_mode) {
         //don't support to use blc2
@@ -1901,12 +1885,18 @@ static void ConfigAfBlc(const blc_res_cvt_t *ablc, const afStats_cfg_t* af_data,
         //update by offset +blc1
         rawaf->bls_offset = bls_offset + 0.5;
     }
+    // change to 10bit
+    rawaf->bls_offset >>= 2;
     rawaf->bls_en = 1;
 }
 
-static void convertAiqAfToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
-    const afStats_cfg_t* afStats_cfg   = (afStats_cfg_t*)pBase->_data;
+void convertAiqAfToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
+    const afStats_cfg_t* afStats_cfg = (afStats_cfg_t*)pBase->_data;
+#if ISP_HW_V39
     struct isp39_rawaf_meas_cfg* rawaf = &pCvt->isp_params.isp_cfg->meas.rawaf;
+#elif ISP_HW_V35
+    struct isp35_rawaf_meas_cfg* rawaf = &pCvt->isp_params.isp_cfg->meas.rawaf;
+#endif
     int i;
 
     if (afStats_cfg->hw_afCfg_stats_en) pCvt->isp_params.isp_cfg->module_ens |= ISP2X_MODULE_RAWAF;
@@ -1963,7 +1953,9 @@ static void convertAiqAfToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t
     rawaf->win[1].v_size = afStats_cfg->subWin.hw_afCfg_win_height;
     rawaf->aehgl_en      = 1;
     rawaf->ae_mode       = 0;
+#if ISP_HW_V39
     rawaf->ae_config_use = 1;
+#endif
     rawaf->vldg_sel      = 0;
     rawaf->y_mode        = 0;
     rawaf->num_afm_win   = 2;
@@ -2177,7 +2169,8 @@ static void convertAiqBtnrToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base
     }
 
     pCvt->isp_params.isp_cfg->others.bay3d_cfg.bypass_en = pBase->bypass;
-    rk_aiq_btnr40_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo, &pCvt->mBtnrInfo);
+    pCvt->mBtnrInfo.btnr_attrib = pCvt->btnr_attrib;
+    rk_aiq_btnr40_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo, &pCvt->mBtnrInfo, &pCvt->mergeLuma2Wgt);
 }
 #endif
 
@@ -2239,7 +2232,9 @@ static void convertAiqDmToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t
         return;
     }
 
+#ifdef ISP_HW_V39
     rk_aiq_dm23_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo);
+#endif
 }
 #endif
 
@@ -2256,7 +2251,7 @@ void convertAiqMergeToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pB
         return;
     }
 
-    rk_aiq_merge22_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo);
+    rk_aiq_merge22_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo, &pCvt->mergeLuma2Wgt);
 }
 #endif
 
@@ -2319,7 +2314,7 @@ void convertAiqDrcToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBas
 #endif
 
 #if RKAIQ_HAVE_RGBIR_REMOSAIC_V10
-static void convertAiqRgbirToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
+void convertAiqRgbirToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
     if (pBase->en) {
         pCvt->isp_params.isp_cfg->module_ens |= ISP39_MODULE_RGBIR;
         pCvt->isp_params.isp_cfg->module_en_update |= ISP39_MODULE_RGBIR;
@@ -2375,7 +2370,7 @@ void convertAiqBlcToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBas
     pCvt->isp_params.isp_cfg->module_en_update |= ISP2X_MODULE_BLS;
     pCvt->isp_params.isp_cfg->module_cfg_update |= ISP2X_MODULE_BLS;
 
-    rk_aiq_blc30_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo);
+    rk_aiq_blc30_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo, &pCvt->mBlcInfo, &pCvt->awb_gain_final);
 
     LOGD_ABLC("frame_id:%d, blc_module_en:%d,fixed_val.rggb(%d,%d,%d,%d),bls1_en:(%d),isp_ob_offset:%d,bls1_val.rggb(%d,%d,%d,%d),isp_ob_predgain(%d),isp_ob_max(%d)",
               pCvt->isp_params.isp_cfg->frame_id, pBase->en,
@@ -2386,14 +2381,43 @@ void convertAiqBlcToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBas
               pCvt->isp_params.isp_cfg->others.bls_cfg.bls1_val.gb, pCvt->isp_params.isp_cfg->others.bls_cfg.bls1_val.b,
               pCvt->isp_params.isp_cfg->others.bls_cfg.isp_ob_predgain, pCvt->isp_params.isp_cfg->others.bls_cfg.isp_ob_max
              );
-
+    /*if (!pBase->en) {
+    #if ISP_HW_V35
+        struct isp35_bls_cfg* blcCfg = &pCvt->isp_params.isp_cfg->others.bls_cfg;
+    #else
+        struct isp32_bls_cfg* blcCfg = &pCvt->isp_params.isp_cfg->others.bls_cfg;
+    #endif
+            blcCfg->fixed_val.r = 0;
+            blcCfg->fixed_val.gr = 0;
+            blcCfg->fixed_val.gb = 0;
+            blcCfg->fixed_val.b = 0;
+    }*/
+    if (RK_AIQ_HDR_IS_SENSOR_BUILTIN(pCvt->_working_mode)) {
+    #if ISP_HW_V35
+            struct isp35_bls_cfg* blcCfg = &pCvt->isp_params.isp_cfg->others.bls_cfg;
+    #else
+            struct isp32_bls_cfg* blcCfg = &pCvt->isp_params.isp_cfg->others.bls_cfg;
+    #endif
+            if (pBase->en) {
+                    blcCfg->bls1_en = true;
+                    blcCfg->bls1_val.r=blcCfg->fixed_val.r;
+                    blcCfg->bls1_val.gr=blcCfg->fixed_val.gr;
+                    blcCfg->bls1_val.gb=blcCfg->fixed_val.gb;
+                    blcCfg->bls1_val.b=blcCfg->fixed_val.b;
+                    blcCfg->isp_ob_offset = 0;
+                    blcCfg->fixed_val.r = 0;
+                    blcCfg->fixed_val.gr = 0;
+                    blcCfg->fixed_val.gb = 0;
+                    blcCfg->fixed_val.b = 0;
+                }
+    }
     pCvt->mLatestBlsCfg = pCvt->isp_params.isp_cfg->others.bls_cfg;
 
 }
 
 #if RKAIQ_HAVE_LDC
 static void convertAiqAldchToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase,
-                                         bool is_multi_isp) {
+        bool is_multi_isp) {
     ldc_param_t* ldc_param = (ldc_param_t*)(pBase->_data);
 
     LOGD_ALDC("LDCH %s in params CVT", ldc_param->sta.ldchCfg.en ? "on" : "off");
@@ -2415,7 +2439,7 @@ static void convertAiqAldchToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_bas
 
 #if RKAIQ_HAVE_LDCV
 static void convertAiqAldcvToIsp39Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase,
-                                         bool is_multi_isp) {
+        bool is_multi_isp) {
     ldc_param_t* ldc_param = (ldc_param_t*)(pBase->_data);
 
     LOGD_ALDC("LDCV %s in params CVT", ldc_param->sta.ldcvCfg.en ? "on" : "off");
@@ -2455,7 +2479,7 @@ void convertAiqExpIspDgainToIsp39Params(AiqIspParamsCvt_t* pCvt,
         float isp_dgain = MAX(1.0f, ae_exp->LinearExp.exp_real_params.isp_dgain);
 
         if (fabs(isp_dgain - pCvt->mLatestIspDgain) < FLT_EPSILON &&
-            fabs(isp_dgain - 1.0f) < FLT_EPSILON)
+                fabs(isp_dgain - 1.0f) < FLT_EPSILON)
             return;
 
         pCvt->mLatestIspDgain = isp_dgain;
@@ -2488,29 +2512,52 @@ void convertAiqExpIspDgainToIsp39Params(AiqIspParamsCvt_t* pCvt,
 
         float isp_dgain = isp_dgain0 + isp_dgain1 + isp_dgain2;
         if (fabs(isp_dgain - pCvt->mLatestIspDgain) < FLT_EPSILON &&
-            fabs(isp_dgain - 3.0f) < FLT_EPSILON)
+                fabs(isp_dgain - 3.0f) < FLT_EPSILON)
             return;
         pCvt->mLatestIspDgain = isp_dgain;
 
-        dest_cfg->gain0_red     = MIN(cfg->gain0_red * isp_dgain0 + 0.5, max_wb_gain);
-        dest_cfg->gain0_green_r = MIN(cfg->gain0_green_r * isp_dgain0 + 0.5, max_wb_gain);
-        dest_cfg->gain0_green_b = MIN(cfg->gain0_green_b * isp_dgain0 + 0.5, max_wb_gain);
-        dest_cfg->gain0_blue    = MIN(cfg->gain0_blue * isp_dgain0 + 0.5, max_wb_gain);
+        if (pCvt->mCommonCvtInfo._airms_en || RK_AIQ_HDR_IS_SENSOR_BUILTIN(pCvt->_working_mode)) {
+            uint16_t fixedGain1x = 1 << ISP2X_WBGAIN_FIXSCALE_BIT;
+            dest_cfg->gain0_red     = MIN(fixedGain1x * isp_dgain0 + 0.5, max_wb_gain);
+            dest_cfg->gain0_green_r = MIN(fixedGain1x * isp_dgain0 + 0.5, max_wb_gain);
+            dest_cfg->gain0_green_b = MIN(fixedGain1x * isp_dgain0 + 0.5, max_wb_gain);
+            dest_cfg->gain0_blue    = MIN(fixedGain1x * isp_dgain0 + 0.5, max_wb_gain);
 
-        dest_cfg->gain1_red     = MIN(cfg->gain1_red * isp_dgain1 + 0.5, max_wb_gain);
-        dest_cfg->gain1_green_r = MIN(cfg->gain1_green_r * isp_dgain1 + 0.5, max_wb_gain);
-        dest_cfg->gain1_green_b = MIN(cfg->gain1_green_b * isp_dgain1 + 0.5, max_wb_gain);
-        dest_cfg->gain1_blue    = MIN(cfg->gain1_blue * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_red     = MIN(fixedGain1x * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_green_r = MIN(fixedGain1x * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_green_b = MIN(fixedGain1x * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_blue    = MIN(fixedGain1x * isp_dgain1 + 0.5, max_wb_gain);
 
-        dest_cfg->gain2_red     = MIN(cfg->gain2_red * isp_dgain2 + 0.5, max_wb_gain);
-        dest_cfg->gain2_green_r = MIN(cfg->gain2_green_r * isp_dgain2 + 0.5, max_wb_gain);
-        dest_cfg->gain2_green_b = MIN(cfg->gain2_green_b * isp_dgain2 + 0.5, max_wb_gain);
-        dest_cfg->gain2_blue    = MIN(cfg->gain2_blue * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_red     = MIN(fixedGain1x * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_green_r = MIN(fixedGain1x * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_green_b = MIN(fixedGain1x * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_blue    = MIN(fixedGain1x * isp_dgain2 + 0.5, max_wb_gain);
 
-        dest_cfg->awb1_gain_r  = cfg->awb1_gain_r;
-        dest_cfg->awb1_gain_gr = cfg->awb1_gain_gr;
-        dest_cfg->awb1_gain_b  = cfg->awb1_gain_b;
-        dest_cfg->awb1_gain_gb = cfg->awb1_gain_gb;
+            dest_cfg->awb1_gain_r  = fixedGain1x;
+            dest_cfg->awb1_gain_gr = fixedGain1x;
+            dest_cfg->awb1_gain_b  = fixedGain1x;
+            dest_cfg->awb1_gain_gb = fixedGain1x;
+        } else {
+            dest_cfg->gain0_red     = MIN(cfg->gain0_red * isp_dgain0 + 0.5, max_wb_gain);
+            dest_cfg->gain0_green_r = MIN(cfg->gain0_green_r * isp_dgain0 + 0.5, max_wb_gain);
+            dest_cfg->gain0_green_b = MIN(cfg->gain0_green_b * isp_dgain0 + 0.5, max_wb_gain);
+            dest_cfg->gain0_blue    = MIN(cfg->gain0_blue * isp_dgain0 + 0.5, max_wb_gain);
+
+            dest_cfg->gain1_red     = MIN(cfg->gain1_red * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_green_r = MIN(cfg->gain1_green_r * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_green_b = MIN(cfg->gain1_green_b * isp_dgain1 + 0.5, max_wb_gain);
+            dest_cfg->gain1_blue    = MIN(cfg->gain1_blue * isp_dgain1 + 0.5, max_wb_gain);
+
+            dest_cfg->gain2_red     = MIN(cfg->gain2_red * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_green_r = MIN(cfg->gain2_green_r * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_green_b = MIN(cfg->gain2_green_b * isp_dgain2 + 0.5, max_wb_gain);
+            dest_cfg->gain2_blue    = MIN(cfg->gain2_blue * isp_dgain2 + 0.5, max_wb_gain);
+
+            dest_cfg->awb1_gain_r  = cfg->awb1_gain_r;
+            dest_cfg->awb1_gain_gr = cfg->awb1_gain_gr;
+            dest_cfg->awb1_gain_b  = cfg->awb1_gain_b;
+            dest_cfg->awb1_gain_gb = cfg->awb1_gain_gb;
+        }
 
         pCvt->isp_params.isp_cfg->module_cfg_update |= ISP39_MODULE_AWB_GAIN;
     }
@@ -2733,7 +2780,9 @@ static const struct params_cvt_info params_cvts[] = {
 #if (RKAIQ_HAVE_CNR_V31)
     CVT_INFO(RESULT_TYPE_UVNR_PARAM, convertAiqCnrToIsp39Params),
 #endif
+#if RKAIQ_HAVE_MERGE_V12
     CVT_INFO(RESULT_TYPE_MERGE_PARAM, convertAiqMergeToIsp39Params),
+#endif
 #if RKAIQ_HAVE_DEHAZE_V14
     CVT_INFO(RESULT_TYPE_DEHAZE_PARAM, convertAiqDehazeToIsp39Params),
     CVT_INFO(RESULT_TYPE_HISTEQ_PARAM, convertAiqHisteqToIsp39Params),
@@ -2752,7 +2801,9 @@ static const struct params_cvt_info params_cvts[] = {
     CVT_INFO(RESULT_TYPE_DPCC_PARAM, convertAiqDpccToIsp39Params),
     CVT_INFO(RESULT_TYPE_AGAMMA_PARAM, convertAiqGammaToIsp39Params),
     CVT_INFO(RESULT_TYPE_LSC_PARAM, convertAiqLscToIsp39Params),
+#if RKAIQ_HAVE_DRC_V20
     CVT_INFO(RESULT_TYPE_DRC_PARAM, convertAiqDrcToIsp39Params),
+#endif
 #if RKAIQ_HAVE_GIC_V2
     CVT_INFO(RESULT_TYPE_GIC_PARAM, convertAiqGicToIsp21Params),
 #endif
@@ -2786,7 +2837,8 @@ bool Convert3aResultsToIsp39Cfg(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBas
         struct isp39_isp_params_cfg* isp_cfg_right = isp_cfg + 1;
         convertAiqCacToIsp39Params(pCvt, pBase, isp_cfg, isp_cfg_right, is_multi_isp);
 #endif
-    } break;
+    }
+    break;
 #if RKAIQ_HAVE_LDC
     case RESULT_TYPE_LDC_PARAM:
         convertAiqAldcToIsp39Params(pCvt, pBase, is_multi_isp);

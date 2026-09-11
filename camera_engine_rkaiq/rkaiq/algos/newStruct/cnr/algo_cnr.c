@@ -185,12 +185,14 @@ XCamReturn CnrApplyStrength
 }
 #endif
 
-#if RKAIQ_HAVE_CNR_V35
+#if defined(RKAIQ_HAVE_CNR_V35) || defined(RKAIQ_HAVE_CNR_V36)
 XCamReturn CnrSelectParam
 (
     CnrContext_t *pCnrCtx,
     cnr_param_t* out,
-    int iso)
+    int iso,
+    bool is_aibnr_autorun,
+    int aibnr_fixIndex)
 {
     int i = 0;
     int iso_low = 0, iso_high = 0, ilow = 0, ihigh = 0, inear = 0;
@@ -204,7 +206,14 @@ XCamReturn CnrSelectParam
     }
 
     pre_interp(iso, pCnrCtx->iso_list, 13, &ilow, &ihigh, &ratio);
+    if (aibnr_fixIndex != -1 && is_aibnr_autorun) {
+        ilow = aibnr_fixIndex;
+        ihigh = aibnr_fixIndex;
+        ratio = 0;
+    }
     uratio = ratio * (1 << RATIO_FIXBIT);
+    LOGD_ANR("%s ilow %d, ihigh %d, ratio %f, aibnr_fixIndex %d, is_aibnr_autorun %d",
+        __func__, ilow, ihigh,ratio, aibnr_fixIndex, is_aibnr_autorun);
 
     if (ratio > 0.5)
         inear = ihigh;
@@ -286,6 +295,25 @@ XCamReturn CnrSelectParam
                 paut->dyn[ilow].hiNr_locFiltAlpha.hw_cnrT_locFiltAlpha_maxLimit, paut->dyn[ihigh].hiNr_locFiltAlpha.hw_cnrT_locFiltAlpha_maxLimit, ratio);
     out->dyn.hiNr_locFiltAlpha.hw_cnrT_locFiltAlpha_minLimit = interpolation_f32(
                 paut->dyn[ilow].hiNr_locFiltAlpha.hw_cnrT_locFiltAlpha_minLimit, paut->dyn[ihigh].hiNr_locFiltAlpha.hw_cnrT_locFiltAlpha_minLimit, ratio);
+#if RKAIQ_HAVE_CNR_V36
+    for(i = 0; i < 13; i++) {
+        out->dyn.loNrGuide_iirFilt.hw_cnrT_locSgmStrg2SgmRat_val[i] = interpolation_f32(
+                    paut->dyn[ilow].loNrGuide_iirFilt.hw_cnrT_locSgmStrg2SgmRat_val[i],
+                    paut->dyn[ihigh].loNrGuide_iirFilt.hw_cnrT_locSgmStrg2SgmRat_val[i], ratio);
+    }
+    out->dyn.loNrGuide_iirFilt.sw_cnrT_rgeSgmRatio_mode = paut->dyn[inear].loNrGuide_iirFilt.sw_cnrT_rgeSgmRatio_mode;
+    out->dyn.loNrGuide_iirFilt.hw_cnrT_glbSgmRatio_alpha = interpolation_f32(
+                paut->dyn[ilow].loNrGuide_iirFilt.hw_cnrT_glbSgmRatio_alpha, paut->dyn[ihigh].loNrGuide_iirFilt.hw_cnrT_glbSgmRatio_alpha, ratio);
+    out->dyn.hiNr_locFiltAlpha.hw_cnrT_hueSatAdj_en = paut->dyn[inear].hiNr_locFiltAlpha.hw_cnrT_hueSatAdj_en;
+    for (i = 0; i < 10; i++) {
+        out->dyn.hiNr_locFiltAlpha.hw_cnrT_locSgmStrg2NrOutAlpha[i] = interpolation_f32(
+                    paut->dyn[ilow].hiNr_locFiltAlpha.hw_cnrT_locSgmStrg2NrOutAlpha[i], paut->dyn[ihigh].hiNr_locFiltAlpha.hw_cnrT_locSgmStrg2NrOutAlpha[i], ratio);
+        out->dyn.hiNr_locFiltAlpha.hw_cnrT_hue2NrOutAlpha[i] = interpolation_f32(
+                    paut->dyn[ilow].hiNr_locFiltAlpha.hw_cnrT_hue2NrOutAlpha[i], paut->dyn[ihigh].hiNr_locFiltAlpha.hw_cnrT_hue2NrOutAlpha[i], ratio);
+        out->dyn.hiNr_locFiltAlpha.hw_cnrT_sat2NrOutAlpha[i] = interpolation_f32(
+                    paut->dyn[ilow].hiNr_locFiltAlpha.hw_cnrT_sat2NrOutAlpha[i], paut->dyn[ihigh].hiNr_locFiltAlpha.hw_cnrT_sat2NrOutAlpha[i], ratio);
+    }
+#endif
     return XCAM_RETURN_NO_ERROR;
 }
 
@@ -392,6 +420,9 @@ XCamReturn Acnr_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
     CnrContext_t* pCnrCtx = (CnrContext_t *)inparams->ctx;
     cnr_api_attrib_t* cnr_attrib = pCnrCtx->cnr_attrib;
     cnr_param_t* cnr_res = outparams->algoRes;
+    bool is_aibnr_autorun = inparams->u.proc.is_aibnr_autorun;
+    int aibnr_fixIndex = inparams->u.proc.aibnr_fixIndex;
+    bool is_aibnr_force_update = inparams->u.proc.is_aibnr_force_update;
 
     if (cnr_attrib->opMode != RK_AIQ_OP_MODE_AUTO) {
         LOGE_ANR("mode is %d, not auto mode, ignore", cnr_attrib->opMode);
@@ -410,7 +441,7 @@ XCamReturn Acnr_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
     bool need_recal = pCnrCtx->isReCal_;
 
     bool init = inparams->u.proc.init;
-    if (inparams->u.proc.is_attrib_update || inparams->u.proc.init) {
+    if (inparams->u.proc.is_attrib_update || inparams->u.proc.init || is_aibnr_force_update) {
         need_recal = true;
     }
 
@@ -426,8 +457,8 @@ XCamReturn Acnr_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
         CnrSelectParam(pCnrCtx, cnr_res, iso);
         CnrApplyStrength(pCnrCtx, cnr_res);
 #endif
-#if RKAIQ_HAVE_CNR_V35
-        CnrSelectParam(pCnrCtx, cnr_res, iso);
+#if defined(RKAIQ_HAVE_CNR_V35) || defined(RKAIQ_HAVE_CNR_V36)
+        CnrSelectParam(pCnrCtx, cnr_res, iso, is_aibnr_autorun, aibnr_fixIndex);
         CnrApplyStrength(pCnrCtx, cnr_res);
 #endif
         outparams->cfg_update = true;

@@ -66,9 +66,9 @@ argparse_getvalue(struct argparse *self, const struct argparse_option *opt,
         break;
     case ARGPARSE_OPT_BIT:
         if (flags & OPT_UNSET) {
-            *(int *)opt->value &= ~opt->data;
+            *(uint64_t*)opt->value &= ~opt->data;
         } else {
-            *(int *)opt->value |= opt->data;
+            *(uint64_t*)opt->value |= opt->data;
         }
         break;
     case ARGPARSE_OPT_STRING:
@@ -272,7 +272,7 @@ argparse_parse(struct argparse *self, int argc, const char **argv)
 
 unknown:
         fprintf(stderr, "error: unknown option `%s`\n", self->argv[0]);
-        argparse_usage(self);
+        // argparse_usage(self);
         if (!(self->flags & ARGPARSE_IGNORE_UNKNOWN_ARGS)) {
             return -1;
             /* exit(EXIT_FAILURE); */
@@ -383,7 +383,7 @@ argparse_help_cb_no_exit(struct argparse *self,
                          const struct argparse_option *option)
 {
     (void)option;
-    argparse_usage(self);
+    // argparse_usage(self);
     return (EXIT_SUCCESS);
 }
 
@@ -475,8 +475,6 @@ argparse_usage_string(struct argparse *self, char *usage)
     // print epilog
     if (self->epilog)
         sprintf(usage + strlen(usage), "%s\n", self->epilog);
-
-    printf ("usage: %s\n", usage);
 }
 
 

@@ -3,7 +3,7 @@
 
 // #define USE_NEWSTRUCT
 
-static void set_af_manual_meascfg(const rk_aiq_sys_ctx_t* ctx)
+static RKAIQ_AF_HWVER set_af_manual_meascfg(const rk_aiq_sys_ctx_t* ctx)
 {
     rk_aiq_af_attrib_t attr;
     uint16_t gamma_y[RKAIQ_RAWAF_GAMMA_NUM] =
@@ -799,15 +799,17 @@ static void set_af_manual_meascfg(const rk_aiq_sys_ctx_t* ctx)
     attr.sync.sync_mode = RK_AIQ_UAPI_MODE_SYNC;
     rk_aiq_user_api2_af_SetAttrib(ctx, &attr);
     printf("setFocusMeasCfg\n");
+
+    return attr.AfHwVer;
 }
 
-static void print_af_stats(rk_aiq_isp_stats_t *stats_ref)
+static void print_af_stats(rk_aiq_isp_stats_t *stats_ref, RKAIQ_AF_HWVER af_hw_ver)
 {
     // show af stats every 30 frames
     if (stats_ref->frame_id % 30 != 0)
         return;
-    printf("%s: af_hw_ver %d\n", __func__, stats_ref->af_hw_ver);
-    if (stats_ref->af_hw_ver == RKAIQ_AF_HW_V20) {
+    printf("%s: af_hw_ver %d\n", __func__, af_hw_ver);
+    if (af_hw_ver == RKAIQ_AF_HW_V20) {
         // rv1126/rv1109 rk356x
         printf("sharpness roia: 0x%llx-0x%08x roib: 0x%x-0x%08x\n",
                stats_ref->af_stats.roia_sharpness,
@@ -850,7 +852,7 @@ static void print_af_stats(rk_aiq_isp_stats_t *stats_ref)
             }
             printf("\n");
         }
-    } else if (stats_ref->af_hw_ver == RKAIQ_AF_HW_V30 || stats_ref->af_hw_ver == RKAIQ_AF_HW_V31) {
+    } else if (af_hw_ver == RKAIQ_AF_HW_V30 || af_hw_ver == RKAIQ_AF_HW_V31) {
         // rk3588 & rk1106
         printf("wnda_fv_h1\n");
         for (int i = 0; i < 15; i++) {
@@ -894,7 +896,7 @@ static void print_af_stats(rk_aiq_isp_stats_t *stats_ref)
             }
             printf("\n");
         }
-    } else if (stats_ref->af_hw_ver == RKAIQ_AF_HW_V32_LITE) {
+    } else if (af_hw_ver == RKAIQ_AF_HW_V32_LITE) {
         // rk3562
         printf("wnda_fv_h1\n");
         for (int i = 0; i < 5; i++) {
@@ -924,7 +926,7 @@ static void print_af_stats(rk_aiq_isp_stats_t *stats_ref)
             }
             printf("\n");
         }
-    } else if (stats_ref->af_hw_ver == RKAIQ_AF_HW_V33) {
+    } else if (af_hw_ver == RKAIQ_AF_HW_V33) {
         // rk3576
 
 #ifndef USE_NEWSTRUCT
@@ -1036,10 +1038,10 @@ static void print_af_stats(rk_aiq_isp_stats_t *stats_ref)
     }
 }
 
-static void custom_af_algo(rk_aiq_isp_stats_t *stats_ref)
+static void custom_af_algo(rk_aiq_isp_stats_t *stats_ref, RKAIQ_AF_HWVER af_hwver)
 {
     // show af stats
-    print_af_stats(stats_ref);
+    print_af_stats(stats_ref, af_hwver);
 
     // run af algo
 
@@ -1049,21 +1051,20 @@ static void custom_af_algo(rk_aiq_isp_stats_t *stats_ref)
 
 static void* af_thread(void* args) {
     rk_aiq_sys_ctx_t* ctx = (rk_aiq_sys_ctx_t*)args;
+    RKAIQ_AF_HWVER af_hwver;
     XCamReturn ret;
     pthread_detach (pthread_self());
     printf("begin af thread\n");
 
     // set af meas config
-    set_af_manual_meascfg(ctx);
+    af_hwver = set_af_manual_meascfg(ctx);
     while(1) {
         // get 3a stats
-//#define USE_IMPLEMENT_C
-#ifndef USE_IMPLEMENT_C
         rk_aiq_isp_stats_t *stats_ref = NULL;
         ret = rk_aiq_uapi2_sysctl_get3AStatsBlk(ctx, &stats_ref, -1);
         if (ret == XCAM_RETURN_NO_ERROR && stats_ref != NULL) {
             printf("get one stats frame id %d \n", stats_ref->frame_id);
-            custom_af_algo(stats_ref);
+            custom_af_algo(stats_ref, af_hwver);
             // release 3a stats
             rk_aiq_uapi2_sysctl_release3AStatsRef(ctx, stats_ref);
         } else {
@@ -1078,22 +1079,6 @@ static void* af_thread(void* args) {
                 break;
             }
         }
-#else
-        rk_aiq_isp_stats_t stats_ref;
-        ret = rk_aiq_uapi2_sysctl_getIspStats(ctx, &stats_ref, -1);
-        if (ret == XCAM_RETURN_NO_ERROR) {
-            printf("get one stats frame id %d \n", stats_ref.frame_id);
-            custom_af_algo(&stats_ref);
-        } else {
-            if (ret == XCAM_RETURN_ERROR_TIMEOUT) {
-                printf("aiq timeout!\n");
-                continue;
-            } else if (ret == XCAM_RETURN_ERROR_FAILED) {
-                printf("aiq stats is not right!\n");
-                continue;
-            }
-        }
-#endif
     }
     printf("end stats thread\n");
     return 0;
@@ -1106,3 +1091,62 @@ int32_t custom_af_run(rk_aiq_sys_ctx_t* ctx)
 
     return 0;
 }
+
+static void print_pdaf_stats(rk_aiq_pdlib_output *pdlib_output)
+{
+    printf("frame_id %d, map_width %d, map_height %d\n",
+        pdlib_output->frame_id, pdlib_output->map_width, pdlib_output->map_height);
+    printf("defocus_map\n");
+    for (int i = 0; i < pdlib_output->map_height; i++) {
+        for (int j = 0; j < pdlib_output->map_width; j++) {
+            printf("%08d, ", pdlib_output->defocus_map[pdlib_output->map_width * i + j]);
+        }
+        printf("\n");
+    }
+    printf("confidence_map\n");
+    for (int i = 0; i < pdlib_output->map_height; i++) {
+        for (int j = 0; j < pdlib_output->map_width; j++) {
+            printf("%08f, ", pdlib_output->confidence_map[pdlib_output->map_width * i + j]);
+        }
+        printf("\n");
+    }
+}
+
+static void* pdaf_thread(void* args) {
+    rk_aiq_sys_ctx_t* ctx = (rk_aiq_sys_ctx_t*)args;
+    XCamReturn ret;
+    pthread_detach (pthread_self());
+    printf("begin pdaf thread\n");
+
+    while(1) {
+        // get pdaf stats
+        rk_aiq_pdlib_output pdlib_output;
+        ret = rk_aiq_uapi2_getPdafLibOutput(ctx, &pdlib_output, -1);
+        if (ret == XCAM_RETURN_NO_ERROR) {
+            print_pdaf_stats(&pdlib_output);
+        } else {
+            if (ret == XCAM_RETURN_BYPASS) {
+                printf("aiq is not running !\n");
+                break;
+            } else if (ret == XCAM_RETURN_ERROR_TIMEOUT) {
+                printf("aiq timeout!\n");
+                continue;
+            } else if (ret == XCAM_RETURN_ERROR_FAILED) {
+                printf("aiq failed!\n");
+                break;
+            }
+        }
+
+    }
+    printf("end pdaf stats thread\n");
+    return 0;
+}
+
+int32_t custom_pdaf_run(rk_aiq_sys_ctx_t* ctx)
+{
+    pthread_t af_tid;
+    pthread_create(&af_tid, NULL, pdaf_thread, ctx);
+
+    return 0;
+}
+

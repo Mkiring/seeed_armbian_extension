@@ -175,6 +175,96 @@ int bayertnr_logtrans(uint32_t tmpfix, btnr_trans_params_t *pTransPrarms)
     return (int)fx;
 }
 
+int bayertnr_logiitrans(int tmpData, btnr_trans_params_t *pTransPrarms)
+{
+    long long iii, ss, n, dn, s;
+    long long one = 1;
+    long long ix1, ix2, dp;
+    long long lt1, lt2, fx;
+    long long stepbit, step, yy;
+    long long  tempdat;
+    int bayertnr_logprecision = pTransPrarms->bayertnr_logprecision;
+    int bayertnr_logfixbit = pTransPrarms->bayertnr_logfixbit;
+    int bayertnr_logtblbit = pTransPrarms->bayertnr_logtblbit;
+    int bayertnr_logscalebit = pTransPrarms->bayertnr_logscalebit;
+    int bayertnr_logfixmul = pTransPrarms->bayertnr_logfixmul;
+    int bayertnr_logtblmul = pTransPrarms->bayertnr_logtblmul;
+    uint16_t bayertnr_trans_mode_offset = pTransPrarms->transf_mode_offset;
+    uint16_t bayertnr_itrans_mode_offset = pTransPrarms->itransf_mode_offset;
+    uint8_t bayertnr_trans_mode = pTransPrarms->transf_mode;
+    uint32_t bayertnr_trans_data_max = pTransPrarms->transf_data_max_limit;
+
+    if(bayertnr_trans_mode)
+    {
+        fx = tmpData;
+        fx = fx + bayertnr_itrans_mode_offset;
+
+        n  = (long long)bayertnr_find_top_one_pos((int)fx);
+        dn = n - bayertnr_logscalebit;
+
+        s = fx - (one << (bayertnr_logscalebit + dn));
+        s = s * bayertnr_logtblmul / (one << (bayertnr_logscalebit + dn));
+        stepbit = bayertnr_logtblbit - bayertnr_logprecision;
+        step = (one << stepbit);
+
+        ix1 = s / step;
+        dp = s - ix1 * step;
+
+        ix2 = ix1 + 1;
+
+        lt1 = pTransPrarms->bayertnr_logtablei[ix1];
+        lt2 = pTransPrarms->bayertnr_logtablei[ix2];
+
+        ss = lt1 * (step - dp) + lt2 * dp;
+
+        ss = ss + (one << (bayertnr_logtblbit + stepbit - dn * 2 - 1));
+        yy = ss >> (bayertnr_logtblbit + stepbit - dn * 2);
+        yy = yy - bayertnr_trans_mode_offset;
+        tempdat = MIN(yy, bayertnr_trans_data_max);
+    }
+    else
+    {
+        fx = tmpData;
+        fx = fx + bayertnr_itrans_mode_offset;
+
+        iii = fx / (one << bayertnr_logscalebit);
+        ss = fx - iii * (one << bayertnr_logscalebit);
+
+        stepbit = bayertnr_logscalebit - bayertnr_logprecision;
+        step = (one << stepbit);
+
+        ix1 = ss / step;
+        dp = ss - ix1 * step;
+
+        ix2 = ix1 + 1;
+
+        lt1 = pTransPrarms->bayertnr_logtablei[ix1];
+        lt2 = pTransPrarms->bayertnr_logtablei[ix2];
+
+        ss = lt1 * (step - dp) + lt2 * dp;
+
+        yy = (one << iii) * ss;
+        yy = yy / (one << (bayertnr_logtblbit + stepbit));
+        yy = yy - bayertnr_trans_mode_offset;
+        tempdat = MIN(yy, bayertnr_trans_data_max);
+    }
+    return (int)tempdat;
+}
+
+int rk_autoblc_gen_tbl(unsigned int* bayertnr_itransf_tbl, uint16_t bayertnr_pixlog_max, btnr_trans_params_t *pTransPrarms)
+{
+
+    for (int j = 0; j <= bayertnr_pixlog_max; j++)
+    {
+        bayertnr_itransf_tbl[j] = pTransPrarms->isTransfBypass == 0 ? bayertnr_logiitrans(j, pTransPrarms) : j;
+    }
+    for (int j = bayertnr_pixlog_max + 1; j < 4096; j++)
+    {
+        bayertnr_itransf_tbl[j] = pTransPrarms->isTransfBypass == 0 ? bayertnr_logiitrans(bayertnr_pixlog_max, pTransPrarms) : j;
+    }
+    return 0;
+}
+
 void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
 {
     if (stats_buffer == NULL)
@@ -184,7 +274,7 @@ void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
     struct rkisp39_stat_buffer* stats = stats_buffer;
     if (stats->meas_type & ISP39_STAT_BAY3D) {
         uint8_t min_idx = 0;
-        for (uint8_t i = 0; i < RK_AIQ_BTNR_STATS_CNT; i++) {
+        for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
             if (pBtnrInfo->mBtnrStats[min_idx].id > pBtnrInfo->mBtnrStats[i].id)
                 min_idx = i;
         }
@@ -200,7 +290,7 @@ void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
         struct rkisp33_stat_buffer* stats = stats_buffer;
         if (stats->meas_type & ISP33_STAT_BAY3D) {
             uint8_t min_idx = 0;
-            for (uint8_t i = 0; i < RK_AIQ_BTNR_STATS_CNT; i++) {
+            for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
                 if (pBtnrInfo->mBtnrStats[min_idx].id > pBtnrInfo->mBtnrStats[i].id)
                     min_idx = i;
             }
@@ -235,14 +325,107 @@ void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
 #endif
         }
     }
+#elif RKAIQ_HAVE_BAYERTNR_V42
+    {
+        struct rkisp35_stat_buffer* stats = stats_buffer;
+        if (stats->meas_type & ISP35_STAT_BAY3D) {
+            uint8_t min_idx = 0;
+            for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+                if (pBtnrInfo->mBtnrStats[min_idx].id > pBtnrInfo->mBtnrStats[i].id)
+                    min_idx = i;
+            }
+            btnr_stats_t *btnr_stats = &pBtnrInfo->mBtnrStats[min_idx];
+            btnr_stats->id = stats->frame_id;
+            btnr_stats->sigma_num = stats->stat.bay3d.sigma_num;
+            for (uint8_t i = 0; i < 20; i++) {
+                btnr_stats->sigma_y[i] = stats->stat.bay3d.sigma_y[i];
+            }
+#if 0
+            printf("btnr sigma stats [%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d]\n",
+                   btnr_stats->sigma_y[0],
+                   btnr_stats->sigma_y[1],
+                   btnr_stats->sigma_y[2],
+                   btnr_stats->sigma_y[3],
+                   btnr_stats->sigma_y[4],
+                   btnr_stats->sigma_y[5],
+                   btnr_stats->sigma_y[6],
+                   btnr_stats->sigma_y[7],
+                   btnr_stats->sigma_y[8],
+                   btnr_stats->sigma_y[9],
+                   btnr_stats->sigma_y[10],
+                   btnr_stats->sigma_y[11],
+                   btnr_stats->sigma_y[12],
+                   btnr_stats->sigma_y[13],
+                   btnr_stats->sigma_y[14],
+                   btnr_stats->sigma_y[15],
+                   btnr_stats->sigma_y[16],
+                   btnr_stats->sigma_y[17],
+                   btnr_stats->sigma_y[18],
+                   btnr_stats->sigma_y[19]);
+#endif
+        }
+
+        if (stats->meas_type & ISP35_STAT_BAY3D_L2) {
+            uint8_t min_idx = 0;
+            for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+                if (pBtnrInfo->mBtnr2Stats[min_idx].id > pBtnrInfo->mBtnr2Stats[i].id)
+                    min_idx = i;
+            }
+            btnr_stats_t *btnr2_stats = &pBtnrInfo->mBtnr2Stats[min_idx];
+            btnr2_stats->id = stats->frame_id;
+            btnr2_stats->sigma_num = stats->stat.bay3d.sigma_num;
+            for (uint8_t i = 0; i < 20; i++) {
+                btnr2_stats->sigma_y[i] = stats->stat.bay3d.sigma_y[i];
+            }
+#if 0
+            printf("btnr sigma stats [%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d]\n",
+                   btnr2_stats->sigma_y[0],
+                   btnr2_stats->sigma_y[1],
+                   btnr2_stats->sigma_y[2],
+                   btnr2_stats->sigma_y[3],
+                   btnr2_stats->sigma_y[4],
+                   btnr2_stats->sigma_y[5],
+                   btnr2_stats->sigma_y[6],
+                   btnr2_stats->sigma_y[7],
+                   btnr2_stats->sigma_y[8],
+                   btnr2_stats->sigma_y[9],
+                   btnr2_stats->sigma_y[10],
+                   btnr2_stats->sigma_y[11],
+                   btnr2_stats->sigma_y[12],
+                   btnr2_stats->sigma_y[13],
+                   btnr2_stats->sigma_y[14],
+                   btnr2_stats->sigma_y[15],
+                   btnr2_stats->sigma_y[16],
+                   btnr2_stats->sigma_y[17],
+                   btnr2_stats->sigma_y[18],
+                   btnr2_stats->sigma_y[19]);
+#endif
+        }
+    }
 #endif
 
-#if RKAIQ_HAVE_SHARP_V40
+#if defined(RKAIQ_HAVE_SHARP_V40)
     {
         struct rkisp33_stat_buffer* stats = stats_buffer;
         if (stats->meas_type & ISP33_STAT_SHARP) {
             uint8_t min_idx = 0;
-            for (uint8_t i = 0; i < RK_AIQ_BTNR_STATS_CNT; i++) {
+            for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+                if (pBtnrInfo->mSharpStats[min_idx].id > pBtnrInfo->mSharpStats[i].id)
+                    min_idx = i;
+            }
+            sharp_stats_t *sharp_stats = &pBtnrInfo->mSharpStats[min_idx];
+            sharp_stats->id = stats->frame_id;
+            for (uint8_t i = 0; i < 17; i++) {
+                sharp_stats->noise_curve[i] = stats->stat.sharp.noise_curve[i];
+            }
+        }
+    }
+#elif defined(RKAIQ_HAVE_SHARP_V41)
+    {
+        struct rkisp35_stat_buffer* stats = stats_buffer;
+        if (stats->meas_type & ISP35_STAT_SHARP) {
+            uint8_t min_idx = 0;
+            for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
                 if (pBtnrInfo->mSharpStats[min_idx].id > pBtnrInfo->mSharpStats[i].id)
                     min_idx = i;
             }
@@ -262,19 +445,31 @@ btnr_stats_t *bayertnr_get_stats(btnr_cvt_info_t *pBtnrInfo, uint32_t frameId)
 {
     uint8_t idx = 0;
 
-    for (uint8_t i = 0; i < RK_AIQ_BTNR_STATS_CNT; i++) {
-        if (pBtnrInfo->mBtnrStats[i].id == frameId - BAYERTNR_STATS_DELAY)
+    for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+        if (pBtnrInfo->mBtnrStats[i].id == frameId - pBtnrInfo->stats_delay_cnt)
             idx = i;
     }
     return &pBtnrInfo->mBtnrStats[idx];
 }
-#if RKAIQ_HAVE_SHARP_V40
+
+btnr_stats_t *bayertnr2_get_stats(btnr_cvt_info_t *pBtnrInfo, uint32_t frameId)
+{
+    uint8_t idx = 0;
+
+    for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+        if (pBtnrInfo->mBtnr2Stats[i].id == frameId - pBtnrInfo->stats_delay_cnt)
+            idx = i;
+    }
+    return &pBtnrInfo->mBtnr2Stats[idx];
+}
+
+#if defined(RKAIQ_HAVE_SHARP_V40) || defined(RKAIQ_HAVE_SHARP_V41)
 sharp_stats_t *sharp_get_stats(btnr_cvt_info_t *pBtnrInfo, uint32_t frameId)
 {
     uint8_t idx = 0;
 
-    for (uint8_t i = 0; i < RK_AIQ_BTNR_STATS_CNT; i++) {
-        if (pBtnrInfo->mSharpStats[i].id == frameId - BAYERTNR_STATS_DELAY)
+    for (uint8_t i = 0; i < pBtnrInfo->stats_buffer_cnt; i++) {
+        if (pBtnrInfo->mSharpStats[i].id == frameId - pBtnrInfo->stats_delay_cnt)
             idx = i;
     }
     return &pBtnrInfo->mSharpStats[idx];
@@ -473,15 +668,17 @@ int bayertnr_autosigma_config(btnr_stats_t *pStats, btnr_trans_params_t *pTransP
     }
 
     // sigma iir
-    if(pBlc->obcPostTnr.sw_blcT_obcPostTnr_en && pBlc->obcPostTnr.sw_blcT_autoOB_offset) {
-        for (j = 2; j < sigma_bins; j++)
-        {
-            sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
-        }
-    } else {
-        for (j = 1; j < sigma_bins; j++)
-        {
-            sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
+    if(pTransPrarms->isTransfBypass) {
+        if(pBlc->obcPostTnr.sw_blcT_obcPostTnr_en && pBlc->obcPostTnr.sw_blcT_autoOB_offset) {
+            for (j = 2; j < sigma_bins; j++)
+            {
+                sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
+            }
+        } else {
+            for (j = 1; j < sigma_bins; j++)
+            {
+                sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
+            }
         }
     }
 
@@ -589,3 +786,166 @@ int bayertnr_tnr_noise_curve(int data, int isHdrShort, btnr_trans_params_t *pTra
 
     return sigma;
 }
+
+void bayertnr_sigmaY_interpolate(u16 *pSigX, u16 *pSigY, u16 *pLowX, u16 *pHighX, u16 *pLowY, u16 *pHighY,  int sigbins, float iso_ratio)
+{
+    int i, j, tmp;
+    float x_ratio = 0.0;
+    u16 y_lowISO = 0, y_highISO = 0;
+
+    for(i = 0; i < sigbins; i++) {
+        tmp = pSigX[i];
+        for(j = 0; j < sigbins - 1; j++) {
+            if(tmp >= pLowX[j] &&  tmp <= pLowX[j + 1]) {
+                x_ratio = (float)(tmp - pLowX[j]) / (pLowX[j + 1] - pLowX[j]);
+                break;
+            }
+        }
+        if(j == sigbins - 1) {
+            if(tmp < pLowX[0]) {
+                j = 0;
+                x_ratio = 0;
+            }
+            if(tmp > pLowX[sigbins - 1] ) {
+                j = sigbins - 2;
+                x_ratio = 1;
+            }
+        }
+        y_lowISO = x_ratio * (pLowY[j + 1] - pLowY[j]) + pLowY[j];
+#if 0
+        printf("tnr low: x:%u xlow:%u xHigh:%u xratio:%f ylow:%u yhigh:%u y:%u\n",
+               tmp, pLowX[j], pLowX[j + 1], x_ratio, pLowY[j], pLowY[j + 1], y_lowISO);
+#endif
+
+        //interpolate y in high iso
+        for(j = 0; j < sigbins - 1; j++) {
+            if(tmp >= pHighX[j] &&  tmp <= pHighX[j + 1]) {
+                x_ratio = (float)(tmp - pHighX[j]) / (pHighX[j + 1] - pHighX[j]);
+                break;
+            }
+        }
+        if(j == sigbins - 1) {
+            if(tmp < pHighX[0]) {
+                j = 0;
+                x_ratio = 0;
+            }
+            if(tmp > pHighX[sigbins - 1] ) {
+                j = sigbins - 2;
+                x_ratio = 1;
+            }
+        }
+        y_highISO = x_ratio * (pHighY[j + 1] - pHighY[j]) + pHighY[j];
+
+        // intepolate y between two iso
+        pSigY[i]  = iso_ratio * (y_highISO - y_lowISO) + y_lowISO;
+#if 0
+        printf("tnr high: x:%u xlow:%u xHigh:%u xratio:%f ylow:%u yhigh:%u y:%u  finnalY:%u\n",
+               tmp, pHighX[j], pHighX[j + 1], x_ratio, pHighY[j], pHighY[j + 1], y_highISO, pSigY[i]);
+#endif
+    }
+}
+
+uint16_t btnr_hdr_sigmaY_interpolate(int xData, uint16_t* sigcur_idx, uint16_t*sigcur_val, int sigbins)
+{
+    int i;
+    uint16_t sigma;
+    int ratio;
+
+    for(i = 0; i < sigbins; i++) {
+        if(xData < sigcur_idx[i])
+            break;
+    }
+
+    if(i <= 0) {
+        sigma = sigcur_val[0];
+    } else if(i >= sigbins - 1) {
+        sigma = sigcur_val[sigbins - 1];
+    } else {
+        ratio = (xData - sigcur_idx[i - 1]) * (sigcur_val[i] - sigcur_val[i - 1]);
+        ratio = ratio / (sigcur_idx[i] - sigcur_idx[i - 1]);
+
+        sigma = sigcur_val[i - 1] + ratio;
+    }
+
+    return sigma;
+}
+
+float btnr_hdr_mergeWgt_interpolate(int xData, int* luma_idx, float*luma2wgt_val)
+{
+    int lumabins = 17;
+    int i;
+    float wgt;
+    int ratio;
+
+    for(i = 0; i < lumabins; i++) {
+        if(xData < luma_idx[i])
+            break;
+    }
+
+    if(i <= 0) {
+        wgt = luma2wgt_val[0];
+    } else if(i >= lumabins - 1) {
+        wgt = luma2wgt_val[lumabins - 1];
+    } else {
+        ratio = (xData - luma_idx[i - 1]) * (luma2wgt_val[i] - luma2wgt_val[i - 1]);
+        ratio = ratio / (luma_idx[i] - luma_idx[i - 1]);
+
+        wgt = luma2wgt_val[i - 1] + ratio;
+    }
+
+    return wgt;
+}
+
+
+void btnr_hdr_sigma_calc(uint16_t* pSigmaX, uint16_t* pSigmaY, uint16_t* pCalibX, uint16_t*pShortY, uint16_t* pLongY, mergeLuma2Wgt_t* pMerge_luma2wgt, btnr_trans_params_t *pTransParams, int sigbins, float hdr_ratio)
+{
+    float short_iso_ratio = 0.0f, merge_luma2Wgt = 0.0f;
+    int i, tmp0, tmp1, short_edge_idx = 0;
+    int long_pixLuma, short_pixLuma;
+    int pixmax_long =  bayertnr_logtrans(((1 << 12) - 1), pTransParams);
+
+    for(i = 0; i < sigbins; i++) {
+        if(pSigmaX[i] <= pixmax_long) {
+            short_edge_idx = i;
+        }
+    }
+
+    for(i = 0; i < short_edge_idx; i++) {
+        tmp1 = 0;
+        merge_luma2Wgt = 0.0f;
+        tmp0 = btnr_hdr_sigmaY_interpolate(pSigmaX[i], pCalibX, pLongY, sigbins);
+        long_pixLuma = bayertnr_logiitrans(pSigmaX[i], pTransParams);
+        if(long_pixLuma >= pMerge_luma2wgt->luma_idx[0] * 4) {
+            short_pixLuma = (float)long_pixLuma / hdr_ratio;
+            short_pixLuma = bayertnr_logtrans(short_pixLuma, pTransParams);
+            tmp1 = btnr_hdr_sigmaY_interpolate(MAX(short_pixLuma, 0), pCalibX, pShortY, sigbins);
+            tmp1 += bayertnr_logtrans(hdr_ratio, pTransParams);
+            merge_luma2Wgt = btnr_hdr_mergeWgt_interpolate(long_pixLuma / 4, pMerge_luma2wgt->luma_idx, pMerge_luma2wgt->luma_wgt);
+            long_pixLuma = bayertnr_logiitrans(pSigmaX[i + 1], pTransParams);
+            merge_luma2Wgt = (merge_luma2Wgt + btnr_hdr_mergeWgt_interpolate(long_pixLuma / 4, pMerge_luma2wgt->luma_idx, pMerge_luma2wgt->luma_wgt)) / 2;
+        }
+
+        pSigmaY[i] = tmp0 * (1.0f - merge_luma2Wgt) + merge_luma2Wgt * tmp1;
+        //printf("long: [%d]: x:%d tmp0:%d  short: long_pixLuma:%d merge_luma2Wgt:%f tmp1:%d finnal:%hu\n", i, pSigmaX[i], tmp0, long_pixLuma, merge_luma2Wgt, tmp1, pSigmaY[i]);
+    }
+
+    for(i = short_edge_idx; i < sigbins; i++) {
+        tmp1 = 0;
+        merge_luma2Wgt = 1.0;
+        long_pixLuma = bayertnr_logiitrans(pSigmaX[i], pTransParams);
+        short_pixLuma = (float)long_pixLuma / hdr_ratio;
+        short_pixLuma = bayertnr_logtrans(short_pixLuma, pTransParams);
+        tmp0 = btnr_hdr_sigmaY_interpolate(MAX(short_pixLuma, 0), pCalibX, pShortY, sigbins);
+        tmp0 += bayertnr_logtrans(hdr_ratio, pTransParams);
+        if( long_pixLuma <= pMerge_luma2wgt->luma_idx[16] * 4) {
+            tmp1 = btnr_hdr_sigmaY_interpolate(pSigmaX[i], pCalibX, pLongY, sigbins);
+            merge_luma2Wgt = btnr_hdr_mergeWgt_interpolate(long_pixLuma / 4, pMerge_luma2wgt->luma_idx, pMerge_luma2wgt->luma_wgt);
+            long_pixLuma = bayertnr_logiitrans(pSigmaX[i + 1], pTransParams);
+            merge_luma2Wgt = (merge_luma2Wgt + btnr_hdr_mergeWgt_interpolate(long_pixLuma / 4, pMerge_luma2wgt->luma_idx, pMerge_luma2wgt->luma_wgt)) / 2;
+        }
+        pSigmaY[i] = tmp0 * merge_luma2Wgt + (1.0 - merge_luma2Wgt) * tmp1;
+        //printf("iitrans pSigmaX:%d short luma:%d %f tmp0:%d, merge_luma2Wgt:%f tmp1:%d finnal:%hu \n", pSigmaX[i], long_pixLuma, long_pixLuma/fdGain[0], tmp0, merge_luma2Wgt, tmp1, pSigmaY[i]);
+    }
+
+}
+

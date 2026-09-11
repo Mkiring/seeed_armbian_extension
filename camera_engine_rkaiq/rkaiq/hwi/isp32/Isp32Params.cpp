@@ -945,9 +945,10 @@ void Isp32Params::convertAiqAfToIsp32Params(struct isp32_isp_params_cfg& isp_cfg
         isp_cfg.meas.rawae3.win.v_offs = af_data.wina_v_offs;
         isp_cfg.meas.rawae3.win.h_size = af_data.wina_h_size;
         isp_cfg.meas.rawae3.win.v_size = af_data.wina_v_size;
+
+        mLatestMeasCfg.rawae3 = isp_cfg.meas.rawae3;
     }
     mLatestMeasCfg.rawaf = isp_cfg.meas.rawaf;
-    mLatestMeasCfg.rawae3 = isp_cfg.meas.rawae3;
 }
 #endif
 #if RKAIQ_HAVE_AF_V32_LITE || RKAIQ_ONLY_AF_STATS_V32_LITE
@@ -1085,9 +1086,10 @@ void Isp32Params::convertAiqAfLiteToIsp32Params(struct isp32_isp_params_cfg& isp
         isp_cfg.meas.rawae0.win.v_offs = af_data.wina_v_offs;
         isp_cfg.meas.rawae0.win.h_size = af_data.wina_h_size;
         isp_cfg.meas.rawae0.win.v_size = af_data.wina_v_size;
+
+        mLatestMeasCfg.rawae3 = isp_cfg.meas.rawae3;
     }
     mLatestMeasCfg.rawaf = isp_cfg.meas.rawaf;
-    mLatestMeasCfg.rawae3 = isp_cfg.meas.rawae3;
 }
 #endif
 #if RKAIQ_HAVE_CAC_V11
@@ -2023,13 +2025,13 @@ void Isp32Params::convertAiqCcmToIsp32Params(struct isp32_isp_params_cfg& isp_cf
     for (int i = 0; i < ISP32_CCM_CURVE_NUM; i++) {
         cfg->alp_y[i] = (u16)(ccm.alp_y[i]);
     }
-    cfg->enh_adj_en  = (u8)(ccm.enh_adj_en);
+    cfg->enh_adj_en  = 1;
     cfg->asym_adj_en = (u8)(ccm.asym_adj_en ? 1 : 0);
 
     cfg->color_coef0_r2y   = (u16)ccm.enh_rgb2y_para[0];
     cfg->color_coef1_g2y   = (u16)ccm.enh_rgb2y_para[1];
     cfg->color_coef2_b2y   = (u16)ccm.enh_rgb2y_para[2];
-    cfg->color_enh_rat_max = (u16)(ccm.enh_rat_max * 1024);
+    cfg->color_enh_rat_max = ccm.enh_adj_en ? (u16)(ccm.enh_rat_max * 1024) : 1024;
 }
 #endif
 

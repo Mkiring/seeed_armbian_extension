@@ -104,6 +104,7 @@ public:
     explicit RkAiqAnalyzerCb() {};
     virtual ~RkAiqAnalyzerCb() {};
     virtual void rkAiqCalcDone(SmartPtr<RkAiqFullParamsProxy> &results) = 0;
+    virtual void rkAiqCalcExpDone(SmartPtr<RkAiqExpParamsProxy> &results) = 0;
     virtual void rkAiqCalcFailed(const char* msg) = 0;
 private:
     XCAM_DEAD_COPY (RkAiqAnalyzerCb);
@@ -356,11 +357,13 @@ public:
         int spAlignedHeight;
         int mCamPhyId;
         uint8_t hdr_mode;
+        struct rkmodule_lsc_inf otp_lsc_Cfg;
 
         void reset() {
             xcam_mem_clear(ctxCfigs);
             xcam_mem_clear(cpslCfg);
             xcam_mem_clear(snsDes);
+            xcam_mem_clear(otp_lsc_Cfg);
 #ifdef RKAIQ_ENABLE_PARSER_V1
             calib = NULL;
 #endif
@@ -488,6 +491,13 @@ public:
     XCamReturn setUserOtpInfo(rk_aiq_user_otp_info_t otp_info);
 
     bool isGroupAlgo(int algoType);
+
+    void setAovMode(bool mode) {
+        mIsAovMode = mode;
+    }
+
+    XCamReturn setTranslaterIspUniteMode(RkAiqIspUniteMode mode);
+
 protected:
     // in analyzer thread
     XCamReturn analyze(const SmartPtr<VideoBuffer> &buffer);
@@ -767,6 +777,7 @@ private:
     GlobalParamsManager* mGlobalParamsManger {NULL};
     bool mIsAeResgister{false};
     bool mIsAwbResgister{false};
+    bool mIsAovMode{false};
 };
 
 }

@@ -31,6 +31,7 @@ algo_gamma_GetAttrib
 
 //XCamReturn GammaSelectParam(agamma_param_auto_t* pAuto, gamma_param_t* out, int iso);
 XCamReturn Agamma_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams, int iso);
+XCamReturn algo_gamma_SetStrength(RkAiqAlgoContext* ctx, int strg);
 
 extern RkAiqAlgoDescription g_RkIspAlgoDescGamma;
 XCAM_END_DECLARE

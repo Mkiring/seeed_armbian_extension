@@ -32,3 +32,4 @@
 #include "rk_aiq_module_hsv10.c"
 //#include "rkaiq_fastawb33.c"
 #include "rk_aiq_module_ldch22.c"
+#include "blc_algo/aiq_blcLoader.c"

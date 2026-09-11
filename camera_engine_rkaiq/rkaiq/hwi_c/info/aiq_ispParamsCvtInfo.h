@@ -21,7 +21,7 @@
 
 #include "hwi_c/aiq_ispParamsCvt.h"
 
-void cvt_isp_params_dump(AiqIspParamsCvt_t* self, st_string* result, int argc, void* argv[]);
+void cvt_isp_params_dump_by_type(void* self, int type, st_string* result);
 void cvt_isp_params_dump_mod_param(AiqIspParamsCvt_t* self, st_string* result);
 void cvt_isp_params_dump_rgbir_attr(AiqIspParamsCvt_t* self, st_string* result);
 void cvt_isp_params_dump_bls_attr(AiqIspParamsCvt_t* self, st_string* result);
@@ -49,5 +49,7 @@ void cvt_isp_params_dump_gain_attr(AiqIspParamsCvt_t* self, st_string* result);
 void cvt_isp_params_dump_csm_attr(AiqIspParamsCvt_t* self, st_string* result);
 void cvt_isp_params_dump_cgc_attr(AiqIspParamsCvt_t* self, st_string* result);
 void cvt_isp_params_dump_yme_attr(AiqIspParamsCvt_t* self, st_string* result);
+void cvt_isp_params_dump_aec_attr(AiqIspParamsCvt_t* self, st_string* result);
+
 
 #endif  // _AIQ_ISP_PARAMS_CVT_INFO_H_

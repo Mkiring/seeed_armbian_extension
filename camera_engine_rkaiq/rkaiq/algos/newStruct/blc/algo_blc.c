@@ -79,11 +79,14 @@ prepare(RkAiqAlgoCom* params)
             pBlcCtx->blc_attrib =
                 (blc_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, blc));
             pBlcCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
-            pBlcCtx->isReCal_ = true;
+            return XCAM_RETURN_NO_ERROR;
         }
     }
 
+    pBlcCtx->blc_attrib =
+        (blc_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, blc));
     pBlcCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
+    pBlcCtx->isReCal_ = true;
     LOG1_ABLC("%s: (exit)\n", __FUNCTION__ );
     return result;
 }
@@ -105,12 +108,12 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
     int delta_iso = 0;
     LOG1_ABLC("%s: (enter)\n", __FUNCTION__ );
 
-    RkAiqAlgoProcAblc* pAblcProcParams = (RkAiqAlgoProcAblc*)inparams;
     blc_param_t* pAblcProcResParams = (blc_param_t*)outparams->algoRes;
+    RkAiqAlgoProcBlc* blc_proc_param = (RkAiqAlgoProcBlc*)inparams;
     BlcContext_t* pBlcCtx = (BlcContext_t *)inparams->ctx;
     blc_api_attrib_t* blc_attrib = pBlcCtx->blc_attrib;
 
-    if (pAblcProcParams->com.u.proc.is_attrib_update) {
+    if (inparams->u.proc.is_attrib_update || blc_proc_param->damping) {
         pBlcCtx->isReCal_ = true;
     }
 
@@ -121,6 +124,11 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
     if(delta_iso > ABLC_RECALCULATE_DELTE_ISO) {
         pBlcCtx->isReCal_ = true;
     }
+#if defined(ISP_HW_V33) || defined(ISP_HW_V35)
+    if (!pBlcCtx->aeIsConverged && blc_proc_param->aeIsConverged && !blc_proc_param->ishdr)
+        pBlcCtx->isReCal_ = true;
+    pBlcCtx->aeIsConverged = blc_proc_param->aeIsConverged;
+#endif
 
     if (pBlcCtx->isReCal_) {
         BlcSelectParam(pBlcCtx, outparams->algoRes, iso);
@@ -200,7 +208,22 @@ BlcSelectParam(BlcContext_t *pBlcCtx, blc_param_t* out, int iso)
     out->dyn.obcPostTnr.sw_blcT_autoOB_offset = interpolation_u16(
                 paut->dyn[ilow].obcPostTnr.sw_blcT_autoOB_offset, paut->dyn[ihigh].obcPostTnr.sw_blcT_autoOB_offset, uratio);
     out->dyn.obcPostTnr.sw_blcT_obcPostTnr_en = paut->dyn[ilow].obcPostTnr.sw_blcT_obcPostTnr_en;
-
+#ifdef ISP_HW_V33
+    out->sta.debug.obcPostTnr.sw_blcT_autoOBWkArd_en = paut->sta.debug.obcPostTnr.sw_blcT_autoOBWkArd_en;
+#endif
+#if defined(ISP_HW_V33) || defined(ISP_HW_V35)
+    out->sta.autoBlc.sw_blcT_autoBlc_en = paut->sta.autoBlc.sw_blcT_autoBlc_en;
+    out->sta.autoBlc.sw_blcT_autoBlcEn_thred = paut->sta.autoBlc.sw_blcT_autoBlcEn_thred;
+    out->sta.autoBlc.sw_blcT_damping_val = paut->sta.autoBlc.sw_blcT_damping_val;
+    out->dyn.obcPostTnr.autoBlc.sw_blcT_darkArea_thred = interpolation_u16(
+        paut->dyn[ilow].obcPostTnr.autoBlc.sw_blcT_darkArea_thred, paut->dyn[ihigh].obcPostTnr.autoBlc.sw_blcT_darkArea_thred, uratio);
+    out->dyn.obcPostTnr.autoBlc.sw_blcT_lumaR_wgt = interpolation_u16(
+        paut->dyn[ilow].obcPostTnr.autoBlc.sw_blcT_lumaR_wgt, paut->dyn[ihigh].obcPostTnr.autoBlc.sw_blcT_lumaR_wgt, uratio);
+    out->dyn.obcPostTnr.autoBlc.sw_blcT_lumaG_wgt = interpolation_u16(
+        paut->dyn[ilow].obcPostTnr.autoBlc.sw_blcT_lumaG_wgt, paut->dyn[ihigh].obcPostTnr.autoBlc.sw_blcT_lumaG_wgt, uratio);
+    out->dyn.obcPostTnr.autoBlc.sw_blcT_lumaB_wgt = interpolation_u16(
+        paut->dyn[ilow].obcPostTnr.autoBlc.sw_blcT_lumaB_wgt, paut->dyn[ihigh].obcPostTnr.autoBlc.sw_blcT_lumaB_wgt, uratio);
+#endif
     return XCAM_RETURN_NO_ERROR;
 }
 

@@ -26,6 +26,20 @@
 
 RKAIQ_BEGIN_DECLARE
 
+typedef struct {
+    bool en;
+    int16_t hueOffset;
+} ahsv_hueOffset_t;
+
+typedef struct {
+    bool en;
+    float satStrg;
+} ahsv_satStrg_t;
+
+typedef struct {
+    bool en;
+    int16_t valOffset;
+} ahsv_valOffset_t;
 
 typedef struct {
     /* M4_GENERIC_DESC(

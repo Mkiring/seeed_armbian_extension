@@ -25,7 +25,11 @@ RKAIQ_BEGIN_DECLARE
     
     void rk_aiq_enh30_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_info_t* cvtinfo)
 {
+#if defined(ISP_HW_V35)
+    struct isp35_enh_cfg *pFix = &isp_params->isp_cfg->others.enh_cfg;
+#else
     struct isp33_enh_cfg *pFix = &isp_params->isp_cfg->others.enh_cfg;
+#endif
     enh_param_t* enh_attrib = (enh_param_t*) attr;
     enh_params_dyn_t *pdyn = &enh_attrib->dyn;
     int tmp;

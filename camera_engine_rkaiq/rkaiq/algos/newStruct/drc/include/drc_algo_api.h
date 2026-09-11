@@ -7,6 +7,8 @@
 #include "isp/rk_aiq_isp_drc32.h"
 #elif RKAIQ_HAVE_DRC_V20
 #include "isp/rk_aiq_isp_drc40.h"
+#elif RKAIQ_HAVE_DRC_V21
+#include "isp/rk_aiq_isp_drc41.h"
 #else
 #error "wrong drc hw version !"
 #endif

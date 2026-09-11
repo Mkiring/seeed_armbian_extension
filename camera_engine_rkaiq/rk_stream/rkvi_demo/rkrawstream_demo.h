@@ -16,13 +16,17 @@
    case is used to retrieve a setting. */
 enum Option {
     OptUseRkaiq = 'a',
+    OptHDR = 'b',
     OptSetFrameDir = 'd',
     OptSetEntityName = 'e',
     OptSetIqfileDir = 'f',
+    OptSetIspDriver = 'g',
     OptHelp = 'h',
     OptUseRockit= 'k',
     OptSetMode = 'm',
     OptSetFrameNum = 'n',
+    OptSetMainpathOut = 'o',
+    OptSetMainpathFmt = 'p',
     OptSetReadbackFmt = 'r',
     OptSetFrameSkip = 's',
     OptSetVicapFmt = 'v',

@@ -839,10 +839,73 @@
  * - new fastboot procedure for rv1103b
  * - fix ldc memleak
  * - isp33 support post aiisp
+ * v6.0x8.1
+ * - classify and rename isp33 iq files 
+ * - isp33 support auto blc 
+ * - fix memleak for isp33/isp39 camgroup mode 
+ * - support dumpsys 
+ * v6.0x8.2
+ * - update isp33 iq files
+ * - fix isp33 4k bugs: image is split to left-right obviously
+ *   - should be updated with this isp driver commit:
+ *     https://10.10.10.29/c/rk/kernel/+/237217
+ * - fix isp33/isp39 switch scene bugs: wrong ie/csm/blc
+ * - fix ae bugs: weight/stats may not be updated sometime
+ * - improve dumpcam 
+ * v6.0x9.0
+ * - set exposure info to isp driver
+ *   - should updated with isp driver:
+ *     https://10.10.10.29/c/rk/kernel/+/238143/9
+ * - tuning tool of ae and awb support api path
+ * - improve dumpcam
+ * v6.0x30.0
+ * - support isp35 
+ * v6.0x30.1
+ * - support AMTD algo
+ * - isp35 iq: modify ainr to aibnr
+ * v6.0x30.2
+ * - isp35 iq: modify sharp 
+ * v6.0x30.3
+ * - isp35 iq: modify awb, aibnr 
+ * v6.0x30.4
+ * - FEC: release v4.0.3.2
+ * - pdaf: update to v0.1.f
+ * - smartIr: release v2.0.6
+ * - fix bugs:
+ *  - hwi_c: fix frame rate decreased by condition wait
+ *  - core_c: fix msgHdlTh stuck
+ *  - hwi_c: fix green image when switching day to night
+ *  - c_base: use CLOCK_MONOTONIC instead of gettimeofday
+ *  - hwi_c: support more than 4 sensors from isp39
+ *  - sharp: fix sharpness get default strength is no default
+ *  - sysctl: fix bug of API updateIq
+ * - new features:
+ *  - add ai remosaic
+ *  - xcore: add rkaiq_set_log_callback
+ *  - awb: add scene detection function
+ *  - AIBNR: add post proc
+ *  - lsc: support otp
+ * - iqfiles: update isp35 iqfiles
+ * v6.0x30.5
+ * - Support dynamically enabling and disabling aibnr
+ * - should updated with isp driver:
+ *   - https://10.10.10.29/c/rk/kernel/+/263634
+ *   - https://10.10.10.29/c/rk/kernel/+/262660/3
+ * v6.0x31.0
+ * - Support btnr2, aiYnr, btnr memc, scene_cis
+ * - isp driver should be v3.1.0 
+ * v6.0x32.0
+ * - iq: modify af,btnr attrib
+ * - isp driver should be v3.2.0
+ * - TB: add header struct size check
+ * - PDAF: update to v0.2.1
+ * - awb: fix earlier awb logic
+ * - fakecam: rk_aiq_frame_info_t add ispdgain
+ * - awb: fix tunning tool can't use api get awbgain cause by 4c52544
  */
 
-#define RK_AIQ_VERSION_REAL_V "v6.0x8.0"
-#define RK_AIQ_RELEASE_DATE "2024-09-13"
+#define RK_AIQ_VERSION_REAL_V "v6.0x32.0"
+#define RK_AIQ_RELEASE_DATE "2025-11-07"
 
 #define RK_AIQ_IQ_HEAD_VERSION_REAL_V "v1.0.2"
 

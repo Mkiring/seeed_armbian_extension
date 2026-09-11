@@ -17,6 +17,9 @@
 #define RKISP_CMD_SET_TB_HEAD_V33 \
 	_IOW('V', BASE_VIDIOC_PRIVATE + 20, struct rkisp33_thunderboot_resmem_head)
 
+#define RKISP_CMD_GET_PARAMS_V33 \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 116, struct isp33_isp_params_cfg)
+
 #define ISP33_MODULE_DPCC		ISP3X_MODULE_DPCC
 #define ISP33_MODULE_BLS		ISP3X_MODULE_BLS
 #define ISP33_MODULE_LSC		ISP3X_MODULE_LSC
@@ -1359,6 +1362,7 @@ struct isp33_isp_params_cfg {
 	__u32 frame_id;
 	struct isp33_isp_meas_cfg meas;
 	struct isp33_isp_other_cfg others;
+    struct sensor_exposure_cfg exposure;
 } __attribute__((packed));
 
 struct rkisp33_thunderboot_resmem_head {

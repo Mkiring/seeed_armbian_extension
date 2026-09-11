@@ -30,7 +30,7 @@ typedef struct {
     bool isReCal_;
     bool strength_en;
     float fStrength;
-#if RKAIQ_HAVE_SHARP_V40
+#if defined(RKAIQ_HAVE_SHARP_V40) || defined(RKAIQ_HAVE_SHARP_V41)
     texEst_api_attrib_t* texEst_attrib;
 #endif
 } SharpContext_t;

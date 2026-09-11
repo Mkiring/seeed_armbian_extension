@@ -62,7 +62,7 @@ static void SharpCreateKernelCoeffs(int radius, int max_radius, float rsigma, in
     for (k = 0; k < coeffNums_max; k++)
     {
         gaus_table[k] = gaus_table[k] / sumTable;
-        kernel_coeffs[k] = ROUND_F(gaus_table[k] * (1 << fix_bits));
+        kernel_coeffs[k] = FLOOR(gaus_table[k] * (1 << fix_bits));
     }
 }
 
@@ -345,7 +345,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
             }
         } else {
             for (i = 0; i < 6; i++)
-                coeff[i] = pdyn->eHfDetailShp.detailExtra_hpf.hw_shpT_filtSpatial_wgt[i] * (1 << 7);
+                coeff[i] = ROUND_F(pdyn->eHfDetailShp.detailExtra_hpf.hw_shpT_filtSpatial_wgt[i] * (1 << 7));
         }
 
         for (int k = 0; k < 6; k++) {
@@ -458,7 +458,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
             SharpCreateKernelCoeffs(1, 1, rsigma, coeff, 6, 2);
         } else {
             for (i = 0; i < 3; i++)
-                coeff[i] = pdyn->detailShp.detailExtra_preBifilt.hw_shpT_filtSpatial_wgt[i] * (1 << 6);
+                coeff[i] = ROUND_F(pdyn->detailShp.detailExtra_preBifilt.hw_shpT_filtSpatial_wgt[i] * (1 << 6));
         }
 
         SharpKernelCoeffsNormalization(coeff, 1, (1 << 6), 2);
@@ -477,7 +477,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
             SharpCreateKernelCoeffs(radius, 5 / 2, rsigma, coeff, 7, 2);
         } else {
             for (i = 0; i < 6; i++)
-                coeff[i] = pdyn->detailShp.hiDetailExtra_lpf.hw_shpT_filtSpatial_wgt[i] * (1 << 7);
+                coeff[i] = ROUND_F(pdyn->detailShp.hiDetailExtra_lpf.hw_shpT_filtSpatial_wgt[i] * (1 << 7));
         }
 
         for (int k = 0; k < 6; k++) {
@@ -504,7 +504,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
             SharpCreateKernelCoeffs(radius, 5 / 2, rsigma, coeff, 7, 2);
         } else {
             for (i = 0; i < 6; i++)
-                coeff[i] = pdyn->detailShp.midDetailExtra_lpf.hw_shpT_filtSpatial_wgt[i] * (1 << 7);
+                coeff[i] = ROUND_F(pdyn->detailShp.midDetailExtra_lpf.hw_shpT_filtSpatial_wgt[i] * (1 << 7));
         }
 
         for (int k = 0; k < 6; k++) {
@@ -628,7 +628,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
             SharpCreateKernelCoeffs(radius, 7 / 2, rsigma, coeff, 7, 2);
         } else {
             for (i = 0; i < 10; i++)
-                coeff[i] = pdyn->edgeShp.edgeExtra.hw_shpT_filtSpatial_wgt[i] * (1 << 7);
+                coeff[i] = ROUND_F(pdyn->edgeShp.edgeExtra.hw_shpT_filtSpatial_wgt[i] * (1 << 7));
         }
 
         for (int k = 0; k < 10; k++) {
@@ -728,6 +728,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
         int edge_minLimit = pdyn->locShpStrg.texRegion_clsfBaseTex.hw_shpT_edgeRegion_minThred;
 
         flat_maxLimit = MAX(flat_maxLimit, 1);
+        flat_maxLimit = MIN(flat_maxLimit, 0x3fe);
         edge_minLimit = MAX(edge_minLimit, flat_maxLimit + 1);
         edge_minLimit = MIN(edge_minLimit, 0x3ff);
         tex_wgt_table_x[0] = 0;
@@ -973,7 +974,7 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
     {
         int hi_tex_threshold[9];
         for (i = 0; i < 17; i++) {
-            float ynr_lo_noise_sigma = cvtinfo->ynr_sigma[i];
+            float ynr_lo_noise_sigma = cvtinfo->ynr_sigma[i] * (1 << 3);
             float noiseSigma_scale = pdyn->dHfDetailShp.detailExtra.hw_shp_noiseThred_scale;
             int hi_tex_thred = ROUND_F(ynr_lo_noise_sigma * noiseSigma_scale / (1 << 3));
             if ((i & 1) == 0) {
@@ -1014,32 +1015,39 @@ void rk_aiq_sharp40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_
     tmp = (pTexDyn->noiseEst.hw_texEstT_nsEstTexThd_maxLimit) * (1 << 0);
     pCfg->noise_clip_max_limit = CLIP(tmp, 0, 0x7ff);
 
-    if (pTexDyn->noiseEst.hw_texEstT_nsEstTexThd_mode == texEst_baseNoiseStats_mode) {
+    if (!cvtinfo->isFirstFrame) {
         sharp_stats_t *sharp_stats = &pBtnrInfo->mSharpStats[0];
-        if (!cvtinfo->isFirstFrame) {
-            sharp_stats = sharp_get_stats(pBtnrInfo, cvtinfo->frameId);
-            if (cvtinfo->frameId - BAYERTNR_STATS_DELAY != sharp_stats->id) {
-                pBtnrInfo->sharp_stats_miss_cnt ++;
-                if ((pBtnrInfo->sharp_stats_miss_cnt > 10) && (pBtnrInfo->sharp_stats_miss_cnt % 30 == 0)) {
-                    LOGE_ANR("Sharp stats miss match! frameId: %d stats [%d %d %d]", cvtinfo->frameId,
-                             pBtnrInfo->mSharpStats[0].id, pBtnrInfo->mSharpStats[1].id, pBtnrInfo->mSharpStats[2].id);
-                    for (i = 0; i < 17; i++) {
-                        noise_curve_ext[i] = pBtnrInfo->sharp_noise_curve_pre[i];
-                    }
-
-                } else {
-                    noiseCurveInterp(sharp_stats->noise_curve, noise_curve_ext, pBtnrInfo->sharp_noise_curve_pre);
+        sharp_stats = sharp_get_stats(pBtnrInfo, cvtinfo->frameId);
+        if (cvtinfo->frameId - pBtnrInfo->stats_delay_cnt != sharp_stats->id) {
+            pBtnrInfo->sharp_stats_miss_cnt ++;
+            if ((pBtnrInfo->sharp_stats_miss_cnt > 10) && (pBtnrInfo->sharp_stats_miss_cnt % 30 == 0)) {
+                LOGE_ANR("Sharp stats miss match! frameId: %d stats [%d %d %d]", cvtinfo->frameId,
+                         pBtnrInfo->mSharpStats[0].id, pBtnrInfo->mSharpStats[1].id, pBtnrInfo->mSharpStats[2].id);
+                for (i = 0; i < 17; i++) {
+                    noise_curve_ext[i] = pBtnrInfo->sharp_noise_curve_pre[i];
                 }
+
             }
+        } else {
+            noiseCurveInterp(sharp_stats->noise_curve, noise_curve_ext, pBtnrInfo->sharp_noise_curve_pre);
         }
-    } else {
+    }
+    for (i = 0; i < 17; i++) {
+        pBtnrInfo->sharp_noise_curve_pre[i] = noise_curve_ext[i];
+    }
+
+    // cal noise curve for gic
+    if (pBtnrInfo->gic_noise_auto_mode && !cvtinfo->isFirstFrame) {
+        struct isp33_gic_cfg* gic_cfg = &isp_params->isp_cfg->others.gic_cfg;
         for (i = 0; i < 17; i++) {
-            noise_curve_ext[i] = pTexDyn->noiseEst.hw_texEstT_nsEstTexManual_thred[i];
+            gic_cfg->bfflt_vsigma_y[i] = CLIP(noise_curve_ext[i], 0, 0x3ff);
         }
     }
 
-    for (i = 0; i < 17; i++) {
-        pBtnrInfo->sharp_noise_curve_pre[i] = noise_curve_ext[i];
+    if (pTexDyn->noiseEst.hw_texEstT_nsEstTexThd_mode != texEst_baseNoiseStats_mode) {
+        for (i = 0; i < 17; i++) {
+            noise_curve_ext[i] = pTexDyn->noiseEst.hw_texEstT_nsEstTexManual_thred[i];
+        }
     }
 
     // REG: NOISE_CURVE0

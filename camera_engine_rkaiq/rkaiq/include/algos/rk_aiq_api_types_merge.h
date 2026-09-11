@@ -18,7 +18,11 @@
 #define _RK_AIQ_API_TYPES_MERGE_H_
 
 #include "common/rk_aiq_comm.h"
+#if ISP_HW_V35
+#include "isp/rk_aiq_isp_merge23.h"
+#else
 #include "isp/rk_aiq_isp_merge22.h"
+#endif
 
 #define MERGE_LINK_NUM 13
 
@@ -80,7 +84,8 @@ typedef struct amge_param_static_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n
+        Freq of use: low))  */
     mge_params_static_t mgeCfg;
     /* M4_GENERIC_DESC(
         M4_ALIAS(paraLinkCfg),
@@ -89,7 +94,8 @@ typedef struct amge_param_static_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n
+        Freq of use: low))  */
     amge_paraLinkCfg_t paraLinkCfg;
     /* M4_GENERIC_DESC(
     M4_ALIAS( sw_mgeT_oeDamp_val),
@@ -131,7 +137,7 @@ typedef struct amge_params_dyn_s {
        M4_ORDER(0),
        M4_NOTES(TODO\n
        Reference enum types.\n
-       Freq of use: low))  */
+       Freq of use: high))  */
     mge_baseFrm_mode_t sw_mgeT_baseFrm_mode;
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_mgeT_baseHdrL_mode),
@@ -146,6 +152,21 @@ typedef struct amge_params_dyn_s {
         Reference enum types.\n
         Freq of use: low))  */
     mge_baseHdrL_mode_t sw_mgeT_baseHdrL_mode;
+#if ISP_HW_V35
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(sw_mgeT_baseHdrS_mode),
+        M4_TYPE(enum),
+        M4_ENUM_DEF(mge_baseHdrS_mode_t),
+        M4_DEFAULT(mge_motionDR_SPrior_mode),
+        M4_GROUP_CTRL(baseHdrS_mode_group),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(0),
+        M4_NOTES(TODO.\n
+        Reference enum types.\n
+        Freq of use: low))  */
+    mge_baseHdrS_mode_t sw_mgeT_baseHdrS_mode;
+#endif
     /* M4_GENERIC_DESC(
         M4_ALIAS(oeWgt),
         M4_TYPE(struct),
@@ -153,7 +174,7 @@ typedef struct amge_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n Freq of use: high))  */
     mge_oeWgt_t oeWgt;
     /* M4_GENERIC_DESC(
         M4_ALIAS(mdWgt_baseHdrL),
@@ -163,7 +184,7 @@ typedef struct amge_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n Freq of use: high))  */
     mge_mdWgt_baseHdrL_t mdWgt_baseHdrL;
     /* M4_GENERIC_DESC(
         M4_ALIAS(mdWgt_baseHdrS),
@@ -173,7 +194,7 @@ typedef struct amge_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n Freq of use: low))  */
     mge_mdWgt_baseHdrS_t mdWgt_baseHdrS;
 } amge_params_dyn_t;
 

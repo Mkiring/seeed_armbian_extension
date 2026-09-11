@@ -1,13 +1,13 @@
 set(CMAKE_C_FLAGS                  "${CMAKE_C_FLAGS} -Wall -Wextra -Werror -fPIC")
 set(CMAKE_C_FLAGS_DEBUG          "-O0 -g -gdwarf -fexceptions -funwind-tables")
 set(CMAKE_C_FLAGS_MINSIZEREL     "-Os -DNDEBUG")
-set(CMAKE_C_FLAGS_RELEASE        "-O3 -DNDEBUG")
+set(CMAKE_C_FLAGS_RELEASE        "-O4 -DNDEBUG")
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -g -gdwarf -fexceptions -funwind-tables")
 
 set(CMAKE_CXX_FLAGS                "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -fPIC")
 set(CMAKE_CXX_FLAGS_DEBUG          "-O0 -g -gdwarf -fexceptions -funwind-tables")
 set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE        "-O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE        "-O4 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -gdwarf -fexceptions -funwind-tables")
 
 set(CMAKE_C_STANDARD 11)
@@ -17,7 +17,6 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "")
 if (ARCH STREQUAL "arm")
     add_compile_options(
         -march=armv7-a
@@ -29,15 +28,16 @@ if (ARCH STREQUAL "aarch64")
         -march=armv8-a
         )
 endif()
-endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     if (ARCH STREQUAL "arm")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mthumb -mthumb-interwork")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mthumb -mthumb-interwork")
+        #if (${CMAKE_C_COMPILER_VERSION} VERSION_LESS "12.4.0")
+            set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mthumb -mthumb-interwork")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mthumb -mthumb-interwork")
+        #endif()
     endif()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
     execute_process(
         COMMAND ${CMAKE_CXX_COMPILER} -dumpversion OUTPUT_VARIABLE GCC_VERSION)
     if (NOT (GCC_VERSION VERSION_GREATER 8.3 OR GCC_VERSION VERSION_EQUAL 8.3))
@@ -48,11 +48,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections -Wl,-Map,librkaiq.map")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/librkaiq.version")
-    # Disable LTO during linking — GCC specs load the LTO plugin by default,
-    # which causes false-positive ODR warnings (-Werror=odr) on SoCs that use
-    # the C++ implementation (rk3588).  The code is compiled without -flto, so
-    # LTO in the link phase is unintentional.
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fno-lto")
 
     # Flags that affects code size
     #if (NOT ARCH STREQUAL "arm")
@@ -89,7 +84,11 @@ elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         add_compile_options(-Wno-unused-but-set-variable
                             -Wno-unused-variable
                             -Wno-unused-label
-                            -Wno-implicit-const-int-float-conversion)
+                            -Wno-implicit-const-int-float-conversion
+                            -Wno-gnu-variable-sized-type-not-at-end
+                            -Wno-unused-value
+                            -Wno-constant-conversion
+                            -Wno-tautological-constant-out-of-range-compare)
 
     endif()
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
@@ -108,23 +107,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
         -Wno-psabi
         -Wno-unused
         -Wno-unused-result
+        -Wno-sign-compare
         )
     if (GCC_VERSION VERSION_GREATER 9 OR GCC_VERSION VERSION_EQUAL 9)
         add_compile_options(
             -Wno-address-of-packed-member
-            )
-    endif()
-    if (GCC_VERSION VERSION_GREATER 12 OR GCC_VERSION VERSION_EQUAL 12)
-        add_compile_options(
-            -Wno-stringop-overflow
-            -Wno-error=stringop-overflow
-            -Wno-stringop-truncation
-            -Wno-error=stringop-truncation
-            -Wno-sign-compare
-            -Wno-error=sign-compare
-            -Wno-error=implicit-function-declaration
-            -Wno-error=int-to-pointer-cast
-            -Wno-error=maybe-uninitialized
             )
     endif()
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")

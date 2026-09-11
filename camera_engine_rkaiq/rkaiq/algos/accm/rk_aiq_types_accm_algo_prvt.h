@@ -65,6 +65,7 @@ typedef struct accm_rest_s {
     int dominateIlluProfileIdx;
     char CcmProf1Name[25];
     char CcmProf2Name[25];
+    float undampedCcmMatrix0[9];
     float undampedCcmMatrix[9];
     float undampedCcOffset[3];
     float fScale;
@@ -113,6 +114,11 @@ typedef struct accm_context_s {
     bool update;
     bool calib_update;
     bool isReCal_;
+#if RKAIQ_HAVE_CCM_V2
+    bool pre_asym_en;
+    bool asym_en_update;
+    uint16_t pre_alp_y[CCM_CURVE_DOT_NUM_V2];
+#endif
 } accm_context_t ;
 
 typedef accm_context_t* accm_handle_t ;

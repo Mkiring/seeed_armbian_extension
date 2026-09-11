@@ -90,6 +90,11 @@ prepare(RkAiqAlgoCom* params)
         }
     }
 
+    pIeCtx->ie_attrib =
+        (ie_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, ie));
+    
+    pIeCtx->isReCal_ = true;
+
     return result;
 }
 
@@ -114,7 +119,11 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
 
     int gray_mode = inparams->u.proc.gray_mode;
 
-    if (inparams->u.proc.is_attrib_update || init) {
+    if (inparams->u.proc.is_attrib_update || init || pIeCtx->isReCal_) {
+        if (pIeCtx->mode && !pIeCtx->ie_attrib->en) {
+            pIeCtx->skip_frame = pIeCtx->pre_params.skip_frame;
+        }
+        
         if (!gray_mode && !pIeCtx->mode) {
             pIeCtx->mode = pIeCtx->ie_attrib->en;
         }
@@ -122,7 +131,7 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
     }
 
     if (gray_mode && !pIeCtx->mode) {
-        pIeCtx->pre_params.mode = gray_mode;
+        pIeCtx->pre_params.mode = pIeCtx->mode;
         pIeCtx->mode = gray_mode;
         pIeCtx->skip_frame = pIeCtx->pre_params.skip_frame;
         pIeCtx->isReCal_ = true;

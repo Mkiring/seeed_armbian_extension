@@ -44,7 +44,7 @@ typedef struct {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
-        M4_NOTES(GAMMA curve y-axis point definition for gamma_out input pixels.\n Freq of use: low))  */
+        M4_NOTES(GAMMA curve y-axis point definition for gamma_out input pixels.\n Freq of use: high))  */
     // reg: sw_gamma_out_y0~sw_gamma_out_y48
     uint16_t hw_gammaT_outCurve_val[CALIBDB_GAMMA_KNOTS_NUM_V11];
 } gamma_params_dyn_t;

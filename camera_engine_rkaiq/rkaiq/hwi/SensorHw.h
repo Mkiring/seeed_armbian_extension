@@ -18,15 +18,17 @@
 #ifndef _SENSOR_HW_BASE_H_
 #define _SENSOR_HW_BASE_H_
 
-#include <map>
-#include <list>
 #include <istream>
-#include "v4l2_device.h"
-#include "rk_aiq_pool.h"
+#include <list>
+#include <map>
+
 #include "common/rk-camera-module.h"
-#include "v4l2_buffer_proxy.h"
-#include "rk_aiq_offline_raw.h"
+#include "common/rkcif-config.h"
 #include "rk_aiq.h"
+#include "rk_aiq_offline_raw.h"
+#include "rk_aiq_pool.h"
+#include "v4l2_buffer_proxy.h"
+#include "v4l2_device.h"
 
 /************ BELOW FROM kernel/include/uapi/linux/rk-preisp.h ************/
 
@@ -77,7 +79,11 @@ public:
     virtual void setCamPhyId(int phyId) {
         mCamPhyId = phyId;
     }
-     virtual XCamReturn setExposureParams(SmartPtr<RkAiqExpParamsProxy>& expPar) { return XCAM_RETURN_NO_ERROR;}
+    virtual void setVicapExpFd(int fd) { mVicapExpFd = fd; }
+    virtual XCamReturn setExposureParams(SmartPtr<RkAiqExpParamsProxy>& expPar)
+    {
+        return XCAM_RETURN_NO_ERROR;
+    }
     virtual XCamReturn getSensorModeData(const char* sns_ent_name,
                                  rk_aiq_exposure_sensor_descriptor& sns_des) { return XCAM_RETURN_NO_ERROR;}
 
@@ -101,6 +107,7 @@ public:
 protected:
     XCAM_DEAD_COPY (BaseSensorHw);
     uint32_t get_v4l2_pixelformat(uint32_t pixelcode);
+    int mVicapExpFd{-1};
     int mCamPhyId{-1};
 };
 
@@ -134,6 +141,7 @@ public:
     bool get_is_single_mode() {
         return mIsSingleMode;
     }
+    rk_aiq_exposure_sensor_descriptor _sensor_desc;
     XCAM_DEAD_COPY (SensorHw);
 protected:
     Mutex _mutex;
@@ -142,7 +150,6 @@ protected:
     std::map<uint32_t, SmartPtr<RkAiqSensorExpParamsProxy>> _effecting_exp_map;
     bool _first;
     uint32_t _frame_sequence;
-    rk_aiq_exposure_sensor_descriptor _sensor_desc;
     std::list<SmartPtr<RkAiqSensorExpParamsProxy>> _delayed_gain_list;
     std::list<SmartPtr<RkAiqSensorExpParamsProxy>> _delayed_dcg_gain_mode_list;
     SmartPtr<RkAiqSensorExpParamsProxy> _last_exp_time;
@@ -204,6 +211,7 @@ protected:
     XCamReturn setI2cDAta(pending_split_exps_t* exps);
     int get_nr_switch(rk_aiq_sensor_nr_switch_t* nr_switch);
     int get_dcg_ratio(rk_aiq_sensor_dcg_ratio_t* dcg_ratio);
+    int get_spd_ratio(rk_aiq_sensor_dcg_ratio_t* spd_ratio);
     XCamReturn _set_mirror_flip();
 
     bool mPauseFlag{false};

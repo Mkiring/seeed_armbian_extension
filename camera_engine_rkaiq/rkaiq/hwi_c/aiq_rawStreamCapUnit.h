@@ -21,6 +21,7 @@
 #include "dumpcam_server/info/include/st_string.h"
 #endif
 #include "hwi_c/aiq_stream.h"
+#include "hwi_c/aiq_AiRmsStreamProcUnit.h"
 #include "xcore_c/aiq_v4l2_device.h"
 
 typedef struct rk_sensor_full_info_s rk_sensor_full_info_t;
@@ -51,12 +52,17 @@ typedef struct AiqRawStreamCapUnit_s {
     AiqMutex_t _mipi_mutex;
     enum RawCapState _state;
     AiqPollCallback_t* _pcb[3];
+    bool _is_split;
 
     // AiqV4l2Buffer_t*
     AiqList_t* buf_list[3];
     AiqCamHwBase_t* _camHw;
     AiqV4l2SubDevice_t* _isp_core_dev;
     AiqRawStreamProcUnit_t* _proc_stream;
+    AiqAiRmsStreamProcUnit_t* _pAirmsStream;
+    void* _sw_stream_ctx;
+    rawStream_send_sync_buf_func _send_sync_buf_func;
+    bool _single_buffer_async_mode;
 
 #if RKAIQ_HAVE_DUMPSYS
     FrameDumpInfo_t fe;
@@ -73,7 +79,7 @@ XCamReturn AiqRawStreamCapUnit_stop(AiqRawStreamCapUnit_t* pRawStrCapUnit);
 void AiqRawStreamCapUnit_set_working_mode(AiqRawStreamCapUnit_t* pRawStrCapUnit, int mode);
 void AiqRawStreamCapUnit_set_devices(AiqRawStreamCapUnit_t* pRawStrCapUnit,
                                      AiqV4l2SubDevice_t* ispdev, AiqCamHwBase_t* handle,
-                                     AiqRawStreamProcUnit_t* proc);
+                                     AiqRawStreamProcUnit_t* proc, AiqAiRmsStreamProcUnit_t* pAirmsStream);
 void AiqRawStreamCapUnit_set_tx_devices(AiqRawStreamCapUnit_t* pRawStrCapUnit,
                                         AiqV4l2Device_t* mipi_tx_devs[3]);
 AiqV4l2Device_t* AiqRawStreamCapUnit_get_tx_device(AiqRawStreamCapUnit_t* pRawStrCapUnit,
@@ -91,9 +97,7 @@ void AiqRawStreamCapUnit_skip_frames(AiqRawStreamCapUnit_t* pRawStrCapUnit, int 
 void AiqRawStreamCapUnit_setCamPhyId(AiqRawStreamCapUnit_t* pRawStrCapUnit, int phyId);
 void AiqRawStreamCapUnit_setSensorCategory(AiqRawStreamCapUnit_t* pRawStrCapUnit, bool sensorState);
 XCamReturn AiqRawStreamCapUnit_reset_hardware(AiqRawStreamCapUnit_t* pRawStrCapUnit);
-XCamReturn AiqRawStreamCapUnit_set_csi_mem_word_big_align(AiqRawStreamCapUnit_t* pRawStrCapUnit,
-                                                          uint32_t width, uint32_t height,
-                                                          uint32_t sns_v4l_pix_fmt, int8_t sns_bpp);
+XCamReturn AiqRawStreamCapUnit_set_csi_mem_word_align_mode(AiqRawStreamCapUnit_t* pRawStrCapUnit, int mode);
 XCamReturn AiqRawStreamCapUnit_setVicapStreamMode(AiqRawStreamCapUnit_t* pRawStrCapUnit, int mode,
                                                   uint32_t* frameId, bool isSingleMode);
 void AiqRawStreamCapUnit_setPollCallback(AiqRawStreamCapUnit_t* pRawStrCapUnit,
@@ -105,6 +109,9 @@ bool check_skip_frame(AiqRawStreamCapUnit_t* pRawStrCapUnit, int32_t buf_seq);
 
 void AiqRawStreamCapUnit_stop_vicap_stream_only(AiqRawStreamCapUnit_t* pRawStrCapUnit);
 void AiqRawStreamCapUnit_skip_frame_and_restart_vicap_stream(AiqRawStreamCapUnit_t* pRawStrCapUnit, int skip_frm_cnt);
+void AiqRawStreamCapUnit_setTxBufferCnt(AiqRawStreamCapUnit_t* pRawStrCapUnit, uint16_t buf_num);
+XCamReturn AiqRawStreamCapUnit_setSwStreamInfo(AiqRawStreamCapUnit_t* pRawStrCapUnit, void* sw_stream_ctx, rawStream_send_sync_buf_func send_sync_buf_func);
+XCamReturn AiqRawStreamCapUnit_setSingleBufAsyncMode(AiqRawStreamCapUnit_t* pRawStrCapUnit, bool async);
 
 #if RKAIQ_HAVE_DUMPSYS
 int AiqRawStreamCapUnit_dump(void* dumper, st_string* result, int argc, void* argv[]);

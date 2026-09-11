@@ -41,10 +41,10 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
 
     // REG: GLOBAL_CTRL
     pCfg->hi_spnr_bypass = !pdyn->hiNr.hw_ynrT_hiNr_en;
-    pCfg->mi_spnr_bypass = !pdyn->midNr.hw_ynrT_midNr_en;
-    pCfg->lo_spnr_bypass = !pdyn->loNr.hw_ynrT_loNr_en;
+    pCfg->mi_spnr_bypass = !pdyn->midLoNr.mf.hw_ynrT_midNr_en;
+    pCfg->lo_spnr_bypass = !pdyn->midLoNr.lf.hw_ynrT_loNr_en;
     pCfg->rnr_en = pdyn->locYnrStrg.radiDist.sw_ynrT_radiDist_en;
-    pCfg->tex2lo_strg_en = pdyn->loNr.locYnrStrg_texRegion.hw_ynrT_tex2NrStrg_en;
+    pCfg->tex2lo_strg_en = pdyn->midLoNr.lf.locYnrStrg_texRegion.hw_ynrT_tex2NrStrg_en;
 
     // REG: GAIN_CTRL
     tmp = (pdyn->locYnrStrg.locSgmStrg.hw_ynrT_glbSgmStrg_val) * (1 << 4);
@@ -57,7 +57,7 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
     {
         int lo_spnr_gain2strg[9];
         for (i = 0; i < 9; i++) {
-            lo_spnr_gain2strg[i] = (int)(pdyn->loNr.locYnrStrg_locSgmStrg.hw_ynrT_locSgmStrg2NrStrg_val[i] * (1 << 4));
+            lo_spnr_gain2strg[i] = (int)(pdyn->midLoNr.locNrStrg.hw_ynrT_locSgmStrg2NrStrg_val[i] * (1 << 4));
         }
         // REG: GAIN_ADJ_0_2
         pCfg->lo_spnr_gain2strg[0] = CLIP(lo_spnr_gain2strg[0], 0, 0x1ff);
@@ -133,7 +133,7 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
     float loFreqLumaNrCurvePoint[6] = {0, 32, 64, 128, 192, 256};
     float loFreqLumaNrCurveRatio[6];
     for (i = 0; i < 6; i++) {
-        loFreqLumaNrCurveRatio[i] = pdyn->loNr.epf.hw_ynrT_luma2RgeSgm_scale[i] ;
+        loFreqLumaNrCurveRatio[i] = pdyn->midLoNr.locNrStrg.hw_ynrT_luma2RgeSgm_scale[i];
         loFreqLumaNrCurvePoint[i] *= 4;
     }
 
@@ -205,7 +205,7 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
     tmp = (pdyn->hiNr.epf.hw_ynrT_rgeWgt_negOff) * (1 << 10);
     pCfg->hi_spnr_filt_wgt_offset = CLIP(tmp, 0, 0x3ff);
     tmp = (pdyn->hiNr.epf.hw_ynrT_centerPix_wgt) * (1 << 12);
-    pCfg->hi_spnr_filt_center_wgt = CLIP(tmp, 0, 0x1fff);
+    pCfg->hi_spnr_filt_center_wgt = CLIP(tmp, 1, 0x1fff);
 
     {
         int coeff[6];
@@ -252,8 +252,8 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
 
     {
         int coeff[3];
-        if (pdyn->midNr.sw_ynrT_filtCfg_mode == ynr_cfgByFiltStrg_mode) {
-            float ynr_mi_gauss_sigma = pdyn->midNr.sw_ynr_filtSpatial_strg;
+        if (pdyn->midLoNr.mf.sw_ynrT_filtCfg_mode == ynr_cfgByFiltStrg_mode) {
+            float ynr_mi_gauss_sigma = pdyn->midLoNr.mf.sw_ynr_filtSpatial_strg;
             float m_w00_f = 1.0f;
             float m_w01_f = exp(-(0 + 4) / (1.0f * ynr_mi_gauss_sigma * ynr_mi_gauss_sigma));
             float m_w11_f = exp(-(4 + 4) / (1.0f * ynr_mi_gauss_sigma * ynr_mi_gauss_sigma));
@@ -265,7 +265,7 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
             coeff[2] = m_w11;
         } else {
             for (i = 0; i < 3; i++)
-                coeff[i] = pdyn->midNr.sw_ynr_filtSpatial_wgt[i] * (1 << 8);
+                coeff[i] = pdyn->midLoNr.mf.sw_ynr_filtSpatial_wgt[i] * (1 << 8);
         }
         // REG: MI_GAUS_COE
         pCfg->mi_spnr_filt_coeff0 = CLIP(coeff[0], 0, 0x1ff);
@@ -273,44 +273,44 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
         pCfg->mi_spnr_filt_coeff2 = CLIP(coeff[2], 0, 0x1ff);
     }
     // REG: MI_STRG_DETAIL
-    tmp = (pdyn->midNr.sw_ynr_rgeSgm_scale) * (1 << 6);
+    tmp = (pdyn->midLoNr.mf.sw_ynr_rgeSgm_scale) * (1 << 6);
     pCfg->mi_spnr_strg = CLIP(tmp, 0, 0x3ff);
-    tmp = (pdyn->midNr.hw_ynrT_softThd_scale) * (1 << 10);
+    tmp = (pdyn->midLoNr.mf.hw_ynrT_softThd_scale) * (1 << 10);
     pCfg->mi_spnr_soft_thred_scale = CLIP(tmp, 0, 0xfff);
     // REG: MI_WEIGHT
-    tmp = (pdyn->midNr.hw_ynrT_midNrOut_alpha) * (1 << 7);
+    tmp = (pdyn->midLoNr.mf.hw_ynrT_midNrOut_alpha) * (1 << 7);
     pCfg->mi_spnr_wgt = CLIP(tmp, 0, 0xff);
-    tmp = (pdyn->midNr.sw_ynr_centerPix_wgt) * (1 << 10);
+    tmp = (pdyn->midLoNr.mf.sw_ynr_centerPix_wgt) * (1 << 10);
     pCfg->mi_spnr_filt_center_wgt = CLIP(tmp, 0, 0x7ff);
-    if (pdyn->midNr.hw_ynrT_alphaMfTex_scale == 1.0f) {
+    if (pdyn->midLoNr.mf.hw_ynrT_alphaMfTex_scale == 1.0f) {
         pCfg->mi_ehance_scale_en = 0;
     } else {
         pCfg->mi_ehance_scale_en = 1;
     }
-    tmp = (pdyn->midNr.hw_ynrT_alphaMfTex_scale) * 8;
+    tmp = (pdyn->midLoNr.mf.hw_ynrT_alphaMfTex_scale) * 8;
     pCfg->mi_ehance_scale = CLIP(tmp, 0, 255);
 
     // REG: LO_STRG_DETAIL
-    tmp = (pdyn->loNr.epf.hw_ynrT_rgeSgm_scale) * (1 << 6);
+    tmp = (pdyn->midLoNr.lf.epf.hw_ynrT_rgeSgm_scale) * (1 << 6);
     pCfg->lo_spnr_strg = CLIP(tmp, 0, 0x3ff);
-    tmp = (pdyn->loNr.epf.hw_ynrT_softThd_scale) * (1 << 10);
+    tmp = (pdyn->midLoNr.lf.epf.hw_ynrT_softThd_scale) * (1 << 10);
     pCfg->lo_spnr_soft_thred_scale = CLIP(tmp, 0, 0xfff);
     // REG: LO_LIMIT_SCALE
-    tmp = (pdyn->loNr.epf.hw_ynrT_guideSoftThd_scale) * (1 << 6);
+    tmp = (pdyn->midLoNr.lf.epf.hw_ynrT_guideSoftThd_scale) * (1 << 6);
     pCfg->lo_spnr_thumb_thred_scale = CLIP(tmp, 0, 0x3ff);
     // REG: LO_WEIGHT
-    tmp = (pdyn->loNr.epf.hw_ynrT_loNrOut_alpha) * (1 << 7);
+    tmp = (pdyn->midLoNr.lf.epf.hw_ynrT_loNrOut_alpha) * (1 << 7);
     pCfg->lo_spnr_wgt = CLIP(tmp, 0, 0x80);
-    tmp = (pdyn->loNr.epf.hw_ynrT_centerPix_wgt) * (1 << 8) * 6;
-    pCfg->lo_spnr_filt_center_wgt = CLIP(tmp, 0, 0x1fff);
+    tmp = (pdyn->midLoNr.lf.epf.hw_ynrT_centerPix_wgt) * (1 << 8) * 6;
+    pCfg->lo_spnr_filt_center_wgt = CLIP(tmp, 1, 0x1fff);
 
     // REG: LO_TEXT_THRED
-    tmp = (pdyn->loNr.locYnrStrg_texRegion.hw_ynrT_flatRegion_maxThred) * (1023);
+    tmp = (pdyn->midLoNr.lf.locYnrStrg_texRegion.hw_ynrT_flatRegion_maxThred) * (1023);
     pCfg->tex2lo_strg_lower_thred = CLIP(tmp, 0, 1024);
-    tmp = (pdyn->loNr.locYnrStrg_texRegion.hw_ynrT_edgeRegion_minThred) * (1023);
+    tmp = (pdyn->midLoNr.lf.locYnrStrg_texRegion.hw_ynrT_edgeRegion_minThred) * (1023);
     pCfg->tex2lo_strg_upper_thred = CLIP(tmp, 0, 1024);
     int tex2strg_step = (1 << 20) / MAX(pCfg->tex2lo_strg_upper_thred - pCfg->tex2lo_strg_lower_thred, 1);
-    int ynr_tex2loStrg_minLimit   = (int)(pdyn->loNr.locYnrStrg_texRegion.sw_ynrT_edgeRegionNr_strg * 1024);     // range : [0, 1024]; 11 bits
+    int ynr_tex2loStrg_minLimit   = (int)(pdyn->midLoNr.lf.locYnrStrg_texRegion.sw_ynrT_edgeRegionNr_strg * 1024);     // range : [0, 1024]; 11 bits
     int tex_lo_strg_slop = 1024 - ynr_tex2loStrg_minLimit; // [0, 1024]
     int pos_idx = find_top_one_pos_v3(tex2strg_step);
     int tex2strg_step_exponent = MAX(pos_idx - 11, 0);                            // [0, 10]
@@ -321,8 +321,8 @@ void rk_aiq_ynr40_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
     pCfg->tex2lo_strg_exponent = tex2strg_step_exponent - 10;  // [0, 10]
 
     for (i = 0; i < 9; i++) {
-        tmp = pdyn->loNr.epf.hw_ynrT_locSgmStrg2NrOut_alpha[i] * (1 << 7);
-        pCfg->lo_gain2wgt[i] = CLIP(tmp, 0, 0x80);
+        tmp = pdyn->midLoNr.locNrStrg.hw_ynrT_locSgmStrg2NrOut_alpha[i] * (1 << 7);
+        pCfg->lo_gain2wgt[i] = CLIP(tmp, 0, 128);
     }
 
     return;

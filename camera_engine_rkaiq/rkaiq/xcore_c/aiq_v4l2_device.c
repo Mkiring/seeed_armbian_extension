@@ -715,13 +715,29 @@ XCamReturn AiqV4l2Device_setFmt(AiqV4l2Device_t* v4l2_dev, uint32_t width, uint3
     struct v4l2_format format;
     xcam_mem_clear(format);
 
-    format.type                = v4l2_dev->_buf_type;
-    format.fmt.pix.width       = width;
-    format.fmt.pix.height      = height;
-    format.fmt.pix.pixelformat = pixelformat;
-    format.fmt.pix.field       = field;
+    if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == v4l2_dev->_buf_type ||
+        V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE == v4l2_dev->_buf_type) {
+       format.type                   = v4l2_dev->_buf_type;
+       format.fmt.pix_mp.width       = width;
+       format.fmt.pix_mp.height      = height;
+       format.fmt.pix_mp.pixelformat = pixelformat;
+       format.fmt.pix_mp.field       = field;
+       format.fmt.pix_mp.num_planes  = v4l2_dev->_mplanes_count;
 
-    if (bytes_perline != 0) format.fmt.pix.bytesperline = bytes_perline;
+       if (bytes_perline != 0) {
+           for (int i = 0; i < v4l2_dev->_mplanes_count; i++) {
+               format.fmt.pix_mp.plane_fmt[i].bytesperline = bytes_perline;
+           }
+       }
+    } else {
+       format.type                = v4l2_dev->_buf_type;
+       format.fmt.pix.width       = width;
+       format.fmt.pix.height      = height;
+       format.fmt.pix.pixelformat = pixelformat;
+       format.fmt.pix.field       = field;
+
+       if (bytes_perline != 0) format.fmt.pix.bytesperline = bytes_perline;
+    }
     return AiqV4l2Device_setV4lFmt(v4l2_dev, &format);
 }
 
@@ -1027,8 +1043,10 @@ XCamReturn AiqV4l2Device_qbuf(AiqV4l2Device_t* v4l2_dev, AiqV4l2Buffer_t* buf, b
     struct v4l2_buffer v4l2_buf_s;
     struct v4l2_buffer* v4l2_buf = &v4l2_buf_s;
     struct v4l2_plane planes[v4l2_dev->_mplanes_count];
+    uint32_t sequence = 0;
 
     if (!locked) aiqMutex_lock(&v4l2_dev->_buf_mutex);
+    if (buf) sequence = AiqV4l2Buffer_getSequence(buf);
 
     XCAM_ASSERT(buf);
     AiqV4l2Buffer_reset(buf);
@@ -1086,6 +1104,8 @@ XCamReturn AiqV4l2Device_qbuf(AiqV4l2Device_t* v4l2_dev, AiqV4l2Buffer_t* buf, b
 
         return XCAM_RETURN_ERROR_IOCTL;
     }
+
+    AiqV4l2Buffer_setSequence(buf, sequence);
 
     return XCAM_RETURN_NO_ERROR;
 }
@@ -1181,6 +1201,42 @@ XCamReturn AiqV4l2Device_unsubscribeEvt(AiqV4l2Device_t* v4l2_dev, int event) {
 
     xcam_mem_clear(sub);
     sub.type = event;
+
+    ret = (*v4l2_dev->io_control)(v4l2_dev, VIDIOC_UNSUBSCRIBE_EVENT, &sub);
+    if (ret < 0) {
+        XCAM_LOG_DEBUG("subdev(%s) unsubscribe event(%d) failed", (v4l2_dev->_name), event);
+        return XCAM_RETURN_ERROR_IOCTL;
+    }
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn AiqV4l2Device_subscribeEvt2(AiqV4l2Device_t* v4l2_dev, int event, int id) {
+    struct v4l2_event_subscription sub;
+    int ret = 0;
+
+    XCAM_ASSERT(AiqV4l2Device_isOpened(v4l2_dev));
+
+    xcam_mem_clear(sub);
+    sub.type = event;
+    sub.id = id;
+
+    ret = (*v4l2_dev->io_control)(v4l2_dev, VIDIOC_SUBSCRIBE_EVENT, &sub);
+    if (ret < 0) {
+        XCAM_LOG_ERROR("subdev(%s) subscribe event(%d) failed", (v4l2_dev->_name), event);
+        return XCAM_RETURN_ERROR_IOCTL;
+    }
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn AiqV4l2Device_unsubscribeEvt2(AiqV4l2Device_t* v4l2_dev, int event, int id) {
+    struct v4l2_event_subscription sub;
+    int ret = 0;
+
+    XCAM_ASSERT(AiqV4l2Device_isOpened(v4l2_dev));
+
+    xcam_mem_clear(sub);
+    sub.type = event;
+    sub.id = id;
 
     ret = (*v4l2_dev->io_control)(v4l2_dev, VIDIOC_UNSUBSCRIBE_EVENT, &sub);
     if (ret < 0) {

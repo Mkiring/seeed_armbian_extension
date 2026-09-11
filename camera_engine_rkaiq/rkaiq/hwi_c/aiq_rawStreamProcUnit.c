@@ -32,6 +32,13 @@
 #include "xcore_c/aiq_v4l2_buffer.h"
 #include "xcore_c/aiq_v4l2_device.h"
 
+#ifdef ANDROID_OS
+#include <cutils/properties.h>
+#ifndef PROPERTY_VALUE_MAX
+#define PROPERTY_VALUE_MAX 32
+#endif
+#endif
+
 static XCamReturn DumpRkRawInFrameEnd(AiqRawStreamProcUnit_t* pRawStrProcUnit,
                                       AiqV4l2Buffer_t* rx_buf) {
     uint32_t sequence = 0;
@@ -82,7 +89,7 @@ static int8_t getDumpRkRawType(AiqRawStreamProcUnit_t* pRawStrProcUnit) {
     char property_value[PROPERTY_VALUE_MAX] = {0};
 
     property_get("persist.vendor.rkisp.rkraw.type", property_value, "1");
-    dumpRkRawType = strtoull(property_value, NULL, 16);
+    pRawStrProcUnit->dumpRkRawType = strtoull(property_value, NULL, 16);
 #else
     char* valueStr = getenv("rkisp_dump_rkraw_type");
     if (valueStr) pRawStrProcUnit->dumpRkRawType = strtoull(valueStr, NULL, 16);
@@ -107,6 +114,7 @@ void trigger_isp_readback(AiqRawStreamProcUnit_t* pRawStrProcUnit) {
         return;
     }
 
+RESTART:
     mapItem  = aiqMap_begin(pRawStrProcUnit->_isp_hdr_fid2ready_map);
     sequence = (intptr_t)mapItem->_key;
 
@@ -223,6 +231,10 @@ void trigger_isp_readback(AiqRawStreamProcUnit_t* pRawStrProcUnit) {
             // CaptureRawData::getInstance().update_capture_raw_status(_first_trigger);
         }
     }
+
+    if (aiqMap_size(pRawStrProcUnit->_isp_hdr_fid2ready_map) > 0) {
+        goto RESTART;
+    }
 out:
     aiqMutex_unlock(&pRawStrProcUnit->_buf_mutex);
     return;
@@ -238,7 +250,9 @@ static bool raw_buffer_proc(void* args) {
         return false;
     }
 
-    int ret = aiqCond_timedWait(&pRawStrProcUnit->_buf_cond, &pRawStrProcUnit->_buf_mutex, -1);
+    int ret = 0;
+    if (aiqMap_size(pRawStrProcUnit->_isp_hdr_fid2ready_map) == 0)
+        ret = aiqCond_timedWait(&pRawStrProcUnit->_buf_cond, &pRawStrProcUnit->_buf_mutex, -1);
     aiqMutex_unlock(&pRawStrProcUnit->_buf_mutex);
 
     if (ret) {
@@ -373,6 +387,8 @@ XCamReturn AiqRawStreamProcUnit_init(AiqRawStreamProcUnit_t* pRawStrProcUnit,
             AiqPollThread_setPollCallback(pRawStrProcUnit->_stream[i]->_base._poll_thread, pcb);
         }
     }
+
+    pRawStrProcUnit->_is_split = s_info->split;
 
     return XCAM_RETURN_NO_ERROR;
 fail:
@@ -535,22 +551,27 @@ XCamReturn AiqRawStreamProcUnit_stop(AiqRawStreamProcUnit_t* pRawStrProcUnit) {
 
         AiqListItem_t* pItem = NULL;
         bool rm              = false;
-        AIQ_LIST_FOREACH(pRawStrProcUnit->buf_list[i], pItem, rm) {
-            AiqV4l2Buffer_unref(*(AiqV4l2Buffer_t**)(pItem->_pData));
-            pItem = aiqList_erase_item_locked(pRawStrProcUnit->buf_list[i], pItem);
-            rm    = true;
+        if (pRawStrProcUnit->buf_list[i]) {
+            AIQ_LIST_FOREACH(pRawStrProcUnit->buf_list[i], pItem, rm) {
+                AiqV4l2Buffer_unref(*(AiqV4l2Buffer_t**)(pItem->_pData));
+                pItem = aiqList_erase_item_locked(pRawStrProcUnit->buf_list[i], pItem);
+                rm    = true;
+            }
+            aiqList_reset(pRawStrProcUnit->buf_list[i]);
         }
-        aiqList_reset(pRawStrProcUnit->buf_list[i]);
 
-        AIQ_LIST_FOREACH(pRawStrProcUnit->cache_list[i], pItem, rm) {
-            AiqV4l2Buffer_unref(*(AiqV4l2Buffer_t**)(pItem->_pData));
-            pItem = aiqList_erase_item_locked(pRawStrProcUnit->cache_list[i], pItem);
-            rm    = true;
+        if (pRawStrProcUnit->cache_list[i]) {
+            AIQ_LIST_FOREACH(pRawStrProcUnit->cache_list[i], pItem, rm) {
+                AiqV4l2Buffer_unref(*(AiqV4l2Buffer_t**)(pItem->_pData));
+                pItem = aiqList_erase_item_locked(pRawStrProcUnit->cache_list[i], pItem);
+                rm    = true;
+            }
+            aiqList_reset(pRawStrProcUnit->cache_list[i]);
         }
-        aiqList_reset(pRawStrProcUnit->cache_list[i]);
     }
 
-    aiqMap_reset(pRawStrProcUnit->_isp_hdr_fid2ready_map);
+    if (pRawStrProcUnit->_isp_hdr_fid2ready_map)
+        aiqMap_reset(pRawStrProcUnit->_isp_hdr_fid2ready_map);
 
     for (int i = 0; i < pRawStrProcUnit->_mipi_dev_max; i++) {
         pRawStrProcUnit->_stream[i]->_base.stopDeviceOnly(&pRawStrProcUnit->_stream[i]->_base);
@@ -636,22 +657,33 @@ XCamReturn AiqRawStreamProcUnit_set_rx_format(AiqRawStreamProcUnit_t* pRawStrPro
                                               const struct v4l2_subdev_format* sns_sd_fmt,
                                               uint32_t sns_v4l_pix_fmt) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    uint32_t bytes_perline = 0;
     int i          = 0;
+
     for (i = 0; i < 3; i++) {
         if (!pRawStrProcUnit->_dev[i]) {
             ret = XCAM_RETURN_ERROR_PARAM;
             break;
         }
 
+        if (pRawStrProcUnit->_camHw->_airms_en) {
+            int mem_mode = CSI_MEM_WORD_BIG_ALIGN;
+            int ret1 = pRawStrProcUnit->_dev[i]->io_control(
+                       pRawStrProcUnit->_dev[i], RKISP_CMD_SET_CSI_MEMORY_MODE, &mem_mode);
+#if RKAIQ_HAVE_AIRMS
+            AiqAiRmsStreamProcUnit_getBytesPerline(pRawStrProcUnit->_camHw->mAiRmsProcUnit, sns_sd_fmt->format.width, &bytes_perline);
+#endif
+        }
+
         ret = AiqV4l2Device_setFmt(pRawStrProcUnit->_dev[i], sns_sd_fmt->format.width,
-                                   sns_sd_fmt->format.height, sns_v4l_pix_fmt, V4L2_FIELD_NONE, 0);
+                                   sns_sd_fmt->format.height, sns_v4l_pix_fmt, V4L2_FIELD_NONE, bytes_perline);
         if (ret < 0) {
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "device(%s) set format failed",
                             AiqV4l2Device_getDevName(pRawStrProcUnit->_dev[i]));
         } else {
-            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "device(%s) set fmt info: fmt 0x%x, %dx%d !",
+            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "device(%s) set fmt info: fmt 0x%x, %dx%d, bytes_perline %d !",
                             AiqV4l2Device_getDevName(pRawStrProcUnit->_dev[i]), sns_v4l_pix_fmt,
-                            sns_sd_fmt->format.width, sns_sd_fmt->format.height);
+                            sns_sd_fmt->format.width, sns_sd_fmt->format.height, bytes_perline);
         }
     }
 
@@ -662,6 +694,7 @@ XCamReturn AiqRawStreamProcUnit_set_rx_format2(AiqRawStreamProcUnit_t* pRawStrPr
                                                const struct v4l2_subdev_selection* sns_sd_sel,
                                                uint32_t sns_v4l_pix_fmt) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    uint32_t bytes_perline = 0;
 
     int i = 0;
     for (i = 0; i < 3; i++) {
@@ -670,15 +703,25 @@ XCamReturn AiqRawStreamProcUnit_set_rx_format2(AiqRawStreamProcUnit_t* pRawStrPr
             break;
         }
 
+        int mem_mode = CSI_MEM_COMPACT;
+        if (pRawStrProcUnit->_camHw->_airms_en) {
+            int mem_mode = CSI_MEM_WORD_BIG_ALIGN;
+            int ret1     = pRawStrProcUnit->_dev[i]->io_control(
+                           pRawStrProcUnit->_dev[i], RKISP_CMD_SET_CSI_MEMORY_MODE, &mem_mode);
+#if RKAIQ_HAVE_AIRMS
+            AiqAiRmsStreamProcUnit_getBytesPerline(pRawStrProcUnit->_camHw->mAiRmsProcUnit, sns_sd_sel->r.width, &bytes_perline);
+#endif
+        }
+
         ret = AiqV4l2Device_setFmt(pRawStrProcUnit->_dev[i], sns_sd_sel->r.width,
-                                   sns_sd_sel->r.height, sns_v4l_pix_fmt, V4L2_FIELD_NONE, 0);
+                                   sns_sd_sel->r.height, sns_v4l_pix_fmt, V4L2_FIELD_NONE, bytes_perline);
         if (ret < 0) {
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "device(%s) set format failed",
                             AiqV4l2Device_getDevName(pRawStrProcUnit->_dev[i]));
         } else {
-            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "device(%s) set fmt info: fmt 0x%x, %dx%d !",
+            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "device(%s) set fmt info: fmt 0x%x, %dx%d, bytes_perline %d !",
                             AiqV4l2Device_getDevName(pRawStrProcUnit->_dev[i]), sns_v4l_pix_fmt,
-                            sns_sd_sel->r.width, sns_sd_sel->r.height);
+                            sns_sd_sel->r.width, sns_sd_sel->r.height, bytes_perline);
         }
     }
 
@@ -728,14 +771,8 @@ void AiqRawStreamProcUnit_send_sync_buf(AiqRawStreamProcUnit_t* pRawStrProcUnit,
     aiqCond_broadcast(&pRawStrProcUnit->_buf_cond);
 }
 
-XCamReturn AiqRawStreamProcUnit_set_csi_mem_word_big_align(AiqRawStreamProcUnit_t* pRawStrProcUnit,
-                                                           uint32_t width, uint32_t height,
-                                                           uint32_t sns_v4l_pix_fmt,
-                                                           int8_t sns_bpp) {
+XCamReturn AiqRawStreamProcUnit_set_csi_mem_word_align_mode(AiqRawStreamProcUnit_t* pRawStrProcUnit, int mode) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
-
-    LOGD_CAMHW_SUBM(ISP20HW_SUBM, "sensor fmt 0x%x, %dx%d, sns_bpp: %d", sns_v4l_pix_fmt, width,
-                    height, sns_bpp);
 
     for (int i = 0; i < 3; i++) {
         if (!pRawStrProcUnit->_dev[i]) {
@@ -743,19 +780,17 @@ XCamReturn AiqRawStreamProcUnit_set_csi_mem_word_big_align(AiqRawStreamProcUnit_
             break;
         }
 
-        if (((width / 2 - RKMOUDLE_UNITE_EXTEND_PIXEL) * sns_bpp / 8) & 0xf) {
-            int mem_mode = CSI_MEM_WORD_BIG_ALIGN;
-            int ret1     = pRawStrProcUnit->_dev[i]->io_control(
-                pRawStrProcUnit->_dev[i], RKISP_CMD_SET_CSI_MEMORY_MODE, &mem_mode);
-            if (ret1) {
-                LOGE_CAMHW_SUBM(ISP20HW_SUBM, "set CSI_MEM_WORD_BIG_ALIGN failed !\n");
-                ret = XCAM_RETURN_ERROR_IOCTL;
-            } else {
-                LOGD_CAMHW_SUBM(ISP20HW_SUBM, "set the memory mode of isp rx to big align");
+        int mem_mode = mode;
+        int ret1     = pRawStrProcUnit->_dev[i]->io_control(
+            pRawStrProcUnit->_dev[i], RKISP_CMD_SET_CSI_MEMORY_MODE, &mem_mode);
+        if (ret1) {
+            LOGE_CAMHW_SUBM(ISP20HW_SUBM, "set CSI_MEM_WORD_BIG_ALIGN failed !\n");
+            ret = XCAM_RETURN_ERROR_IOCTL;
+        } else {
+            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "set the memory mode of isp rx to big align");
 #if RKAIQ_HAVE_DUMPSYS
-                pRawStrProcUnit->data_mode = mem_mode;
+            pRawStrProcUnit->data_mode = mem_mode;
 #endif
-            }
         }
     }
 
@@ -798,6 +833,14 @@ XCamReturn AiqRawStreamProcUnit_notify_capture_raw(AiqRawStreamProcUnit_t* pRawS
 #else
     return aiq_dumpRkRaw_notifyDumpRaw(&pRawStrProcUnit->_rawCap);
 #endif
+}
+
+void AiqRawStreamProcUnit_setRxBufferCnt(AiqRawStreamProcUnit_t* pRawStrProcUnit, uint16_t buf_num) {
+    for (int i = 0; i < 3; i++) {
+        if (pRawStrProcUnit->_dev[i]) {
+            AiqV4l2Device_setBufCnt(pRawStrProcUnit->_dev[i], buf_num);
+        }
+    }
 }
 
 #if RKAIQ_HAVE_DUMPSYS

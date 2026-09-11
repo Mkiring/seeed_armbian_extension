@@ -80,7 +80,10 @@ XCamReturn AiqCifSclStream_init(AiqCifSclStream_t* pCifSclStrm, const rk_sensor_
             pCifSclStrm->_index = 3;
             break;
         default:
-            pCifSclStrm->_index = 0;
+            if (RK_AIQ_HDR_IS_SENSOR_BUILTIN(pCifSclStrm->_working_mode))
+                pCifSclStrm->_index = 1;
+            else
+                pCifSclStrm->_index = 0;
             break;
     }
 
@@ -159,6 +162,16 @@ XCamReturn AiqCifSclStream_start(AiqCifSclStream_t* pCifSclStrm) {
                 pCifSclStrm->_stream[i]->_base.start(&pCifSclStrm->_stream[i]->_base);
         }
         pCifSclStrm->_active = true;
+    }
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn AiqCifSclStream_stopThreadOnly(AiqCifSclStream_t* pCifSclStrm) {
+    if (!pCifSclStrm) return XCAM_RETURN_ERROR_PARAM;
+
+    for (int32_t i = 0; i < pCifSclStrm->_index; i++) {
+        if (pCifSclStrm->_stream[i])
+            pCifSclStrm->_stream[i]->_base.stopThreadOnly(&pCifSclStrm->_stream[i]->_base);
     }
     return XCAM_RETURN_NO_ERROR;
 }

@@ -29,10 +29,10 @@ void hwi_base_dump_mod_param(AiqCamHwBase_t* self, st_string* result) {
 
     aiq_info_dump_title(result, "base module param");
 
-    snprintf(buffer, MAX_LINE_LENGTH, "%-12s%-9s%-8s%-10s%-11s%-11s", "dev", "phy_chn", "mode",
-             "readback", "multi_isp", "use_aiisp");
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    snprintf(buffer, MAX_LINE_LENGTH, "%-12s%-9s%-8s%-10s%-11s%-11s%-7s%-11s%-8s", "dev", "phy_chn",
+             "mode", "readback", "multi_isp", "use_aiisp", "airms", "compr_bit", "fpn_en");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
     memset(buffer, 0, MAX_LINE_LENGTH);
 
     const char* mode = "linear";
@@ -53,12 +53,16 @@ void hwi_base_dump_mod_param(AiqCamHwBase_t* self, st_string* result) {
         if (s_info) driver = s_info->isp_info->driver;
     }
 
-    snprintf(buffer, MAX_LINE_LENGTH, "%-12s%-9d%-8s%-10s%-11s%-11s", driver, self->mCamPhyId, mode,
-             self->mNoReadBack ? "N" : "Y", g_mIsMultiIspMode ? "Y" : "N",
-             self->use_aiisp ? "Y" : "N");
+    bool fpn_en = false;
+    if (self->mFpnStreamUnit) fpn_en = self->mFpnStreamUnit->_fpn_en;
 
-    string_printf(result, buffer);
-    string_printf(result, "\n\n");
+    snprintf(buffer, MAX_LINE_LENGTH, "%-12s%-9d%-8s%-10s%-11s%-11s%-7s%-11d%-8s", driver,
+             self->mCamPhyId, mode, self->mNoReadBack ? "N" : "Y", g_mIsMultiIspMode ? "Y" : "N",
+             self->use_aiisp ? "Y" : "N", self->_airms_en ? "Y" : "N", self->mSnsDes.compr_bit,
+             fpn_en ? "Y" : "N");
+
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n\n");
 }
 
 void hwi_base_dump_chn_status(AiqCamHwBase_t* self, st_string* result) {
@@ -69,8 +73,8 @@ void hwi_base_dump_chn_status(AiqCamHwBase_t* self, st_string* result) {
              "fs_id", "fs_drop", "fs_time(s)", "fs_delay", "stats_id", "stats_drop",
              "stats_time(s)", "stats_delay", "rate");
 
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
 
     aiq_memset(buffer, 0, MAX_LINE_LENGTH);
     snprintf(buffer, MAX_LINE_LENGTH, "%-9d%-10d%-9d%-14.3f%-10d%-10d%-12d%-14.3f%-13d%-8d",
@@ -79,8 +83,8 @@ void hwi_base_dump_chn_status(AiqCamHwBase_t* self, st_string* result) {
              self->stats.frameloss, self->stats.timestamp / 1000000.0f, self->stats.delay,
              self->stats.interval);
 
-    string_printf(result, buffer);
-    string_printf(result, "\n\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n\n");
 }
 
 void hwi_base_dump_chn_status1(AiqCamHwBase_t* self, st_string* result) {
@@ -94,8 +98,8 @@ void hwi_base_dump_chn_status1(AiqCamHwBase_t* self, st_string* result) {
              "tx_drop", "tx_time", "tx_delay", "trig_id", "trig_drop", "trig_time", "trig_delay",
              "rx_id", "rx_drop", "rx_time", "rx_delay");
 
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
 
     aiq_memset(buffer, 0, MAX_LINE_LENGTH);
     snprintf(buffer, MAX_LINE_LENGTH,
@@ -106,8 +110,8 @@ void hwi_base_dump_chn_status1(AiqCamHwBase_t* self, st_string* result) {
              self->mRawProcUnit->trig.timestamp / 1000000.0f, self->mRawProcUnit->trig.delay,
              self->mRawProcUnit->fe.id, self->mRawProcUnit->fe.frameloss,
              self->mRawProcUnit->fe.timestamp / 1000000.0f, self->mRawProcUnit->fe.delay);
-    string_printf(result, buffer);
-    string_printf(result, "\n\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n\n");
 }
 
 void hwi_base_dump_stats_videobuf_status(AiqCamHwBase_t* self, st_string* result) {
@@ -117,8 +121,8 @@ void hwi_base_dump_stats_videobuf_status(AiqCamHwBase_t* self, st_string* result
 
     snprintf(buffer, MAX_LINE_LENGTH, "%-14s%-10s%-9s%-7s%-8s%-11s%-6s%-10s%-10s", "dev_node",
              "seq", "buf_idx", "fd", "queued", "sizeimage", "refs", "mem_type", "buf_type");
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
 
     memset(buffer, 0, MAX_LINE_LENGTH);
 
@@ -126,16 +130,16 @@ void hwi_base_dump_stats_videobuf_status(AiqCamHwBase_t* self, st_string* result
     for (int32_t i = 0; i < cnt; i++) {
         AiqV4l2Buffer_t* buf = AiqV4l2Device_getBufByIndex(self->mIspStatsDev, i);
         snprintf(buffer, MAX_LINE_LENGTH, "%-14s%-10d%-9d%-7d%-8d%-11d%-6d%-10d%-10d",
-                 AiqV4l2Device_getDevName(self->mIspStatsDev), self->stats.id,
+                 AiqV4l2Device_getDevName(self->mIspStatsDev), AiqV4l2Buffer_getSequence(buf),
                  AiqV4l2Buffer_getV4lBufIndex(buf), AiqV4l2Buffer_getExpbufFd(buf),
                  AiqV4l2Buffer_getQueued(buf), AiqV4l2Buffer_getV4lBufLength(buf), buf->_ref_cnts,
                  AiqV4l2Device_getMemType(self->mIspStatsDev),
                  AiqV4l2Device_getBufType(self->mIspStatsDev));
-        string_printf(result, buffer);
-        string_printf(result, "\n");
+        aiq_string_printf(result, buffer);
+        aiq_string_printf(result, "\n");
     }
 
-    string_printf(result, "\n");
+    aiq_string_printf(result, "\n");
 }
 
 void hwi_base_dump_params_videobuf_status(AiqCamHwBase_t* self, st_string* result) {
@@ -145,8 +149,8 @@ void hwi_base_dump_params_videobuf_status(AiqCamHwBase_t* self, st_string* resul
 
     snprintf(buffer, MAX_LINE_LENGTH, "%-14s%-10s%-9s%-7s%-8s%-11s%-6s%-10s%-10s", "dev_node",
              "seq", "buf_idx", "fd", "queued", "sizeimage", "refs", "mem_type", "buf_type");
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
 
     memset(buffer, 0, MAX_LINE_LENGTH);
 
@@ -154,16 +158,16 @@ void hwi_base_dump_params_videobuf_status(AiqCamHwBase_t* self, st_string* resul
     for (int32_t i = 0; i < cnt; i++) {
         AiqV4l2Buffer_t* buf = AiqV4l2Device_getBufByIndex(self->mIspParamsDev, i);
         snprintf(buffer, MAX_LINE_LENGTH, "%-14s%-10d%-9d%-7d%-8d%-11d%-6d%-10d%-10d",
-                 AiqV4l2Device_getDevName(self->mIspParamsDev), self->stats.id,
+                 AiqV4l2Device_getDevName(self->mIspParamsDev), AiqV4l2Buffer_getSequence(buf),
                  AiqV4l2Buffer_getV4lBufIndex(buf), AiqV4l2Buffer_getExpbufFd(buf),
                  AiqV4l2Buffer_getQueued(buf), AiqV4l2Buffer_getV4lBufLength(buf), buf->_ref_cnts,
                  AiqV4l2Device_getMemType(self->mIspParamsDev),
                  AiqV4l2Device_getBufType(self->mIspParamsDev));
-        string_printf(result, buffer);
-        string_printf(result, "\n");
+        aiq_string_printf(result, buffer);
+        aiq_string_printf(result, "\n");
     }
 
-    string_printf(result, "\n");
+    aiq_string_printf(result, "\n");
 }
 
 void hwi_base_dump_params_configure_status(AiqCamHwBase_t* self, st_string* result) {
@@ -173,11 +177,11 @@ void hwi_base_dump_params_configure_status(AiqCamHwBase_t* self, st_string* resu
 
     snprintf(buffer, MAX_LINE_LENGTH, "%-14s%-10s%-9s%-7s%-8s%-11s%-6s%-10s%-10s", "dev_node",
              "seq", "buf_idx", "fd", "queued", "sizeimage", "refs", "mem_type", "buf_type");
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
 
     memset(buffer, 0, MAX_LINE_LENGTH);
 
-    string_printf(result, buffer);
-    string_printf(result, "\n");
+    aiq_string_printf(result, buffer);
+    aiq_string_printf(result, "\n");
 }

@@ -86,6 +86,9 @@ void rk_aiq_ynr34_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
 
     // YNR_2700_LOWNR_CTRL3 (0x001c)
     pFix->lospnr_center_wgt = ynrClipFloatValueV24(pdyn->loNr_bifilt.hw_ynrT_centerPix_wgt, 2, 10);
+    if(pFix->lospnr_center_wgt < 1) {
+        pFix->lospnr_center_wgt = 1;
+    }
     pFix->lospnr_strg       = ynrClipFloatValueV24(pdyn->loNr_bifilt.hw_ynrT_rgeSgm_scale, 5, 7);
 
     // YNR_2700_LOWNR_CTRL4 (0x002c)
@@ -157,6 +160,9 @@ void rk_aiq_ynr34_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_in
         ynrClipFloatValueV24(pdyn->hiNr_filtProc.hw_ynrT_nlmRgeWgt_negOff, 0, 10);
     pFix->hispnr_filt_center_wgt =
         LIMIT_VALUE(pdyn->hiNr_filtProc.hw_ynrT_centerPix_wgt * 1024.0f, BIT_17_MAX + 1, BIT_MIN);
+    if(pFix->hispnr_filt_center_wgt < 1) {
+        pFix->hispnr_filt_center_wgt = 1;
+    }
 
     // YNR_2700_NLM_NR_WEIGHT (0x00fc)
     pFix->hispnr_filt_wgt =

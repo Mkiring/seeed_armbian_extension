@@ -45,6 +45,12 @@ static struct
     {"blc",          (uintptr_t)(&((CamCalibDbV2ContextIsp33_t*)0)->blc)},
     {"btnr",         (uintptr_t)(&((CamCalibDbV2ContextIsp33_t*)0)->bayertnr)},
 #endif
+#if defined(ISP_HW_V35)
+    {"ae",           (uintptr_t)(&((CamCalibDbV2ContextIsp35_t*)0)->ae_calib)},
+    {"awb_gain",     (uintptr_t)(&((CamCalibDbV2ContextIsp35_t*)0)->wb.awbGnCalcOth.fstFrm_wbgain[0])},
+    {"blc",          (uintptr_t)(&((CamCalibDbV2ContextIsp35_t*)0)->blc)},
+    {"btnr",         (uintptr_t)(&((CamCalibDbV2ContextIsp35_t*)0)->bayertnr)},
+#endif
     {NULL, 0},
 };
 
@@ -213,6 +219,9 @@ static int j2s_struct_to_rtt_bin(j2s_ctx *ctx, int struct_index, void *ptr, void
                             snprintf(smp_list[calib_sub_scene_len].name, 64, "%s-%s", main_list[curr_main_scene].name, sub_list[curr_sub_scene].name);
 #if defined(ISP_HW_V33)
                             j2s_struct_to_rtt_bin(ctx, child->struct_index, &sub_list[curr_sub_scene].scene_isp33, &smp_list[calib_sub_scene_len]);
+#endif
+#if defined(ISP_HW_V35)
+                            j2s_struct_to_rtt_bin(ctx, child->struct_index, &sub_list[curr_sub_scene].scene_isp35, &smp_list[calib_sub_scene_len]);
 #endif
                             calib_sub_scene_len++;
                         } else {

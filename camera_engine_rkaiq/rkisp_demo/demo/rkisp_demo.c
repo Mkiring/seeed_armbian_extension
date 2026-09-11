@@ -71,6 +71,7 @@
 //#define CUSTOM_AWB_DEMO_TEST
 // #define TEST_MEMS_SENSOR_INTF
 // #define CUSTOM_AF_DEMO_TEST
+// #define CUSTOM_PDAF_DEMO_TEST
 // #define CUSTOM_GROUP_AWB_DEMO_TEST
 // #define OTP_API_TEST
 //#define COLOR_CONSISTENCY_TEST
@@ -80,6 +81,104 @@
 #define SOC_SLEEP_STR "mem"
 #define SOC_SLEEP_PATH "/sys/power/state"
 #define SUSPEND_TIME_REG 0xff300048
+
+#ifdef OTP_API_TEST
+static u16 lsc_r_table0[]={
+    6167, 5236, 4644, 4030, 3399, 2928, 2638, 2484, 2433, 2482, 2642, 2912, 3391, 4021, 4676, 5324, 6154,
+    5718, 4991, 4314, 3578, 2968, 2583, 2336, 2192, 2143, 2193, 2336, 2571, 2967, 3575, 4334, 4989, 5817,
+    5156, 4635, 3819, 3058, 2542, 2215, 1985, 1844, 1797, 1844, 1983, 2211, 2540, 3050, 3834, 4650, 5224,
+    4774, 4283, 3366, 2681, 2235, 1919, 1697, 1569, 1529, 1569, 1696, 1916, 2227, 2678, 3379, 4317, 4875,
+    4578, 3914, 3015, 2416, 1994, 1684, 1482, 1368, 1331, 1368, 1483, 1681, 1993, 2417, 3038, 3967, 4683,
+    4334, 3630, 2771, 2226, 1809, 1517, 1328, 1215, 1178, 1217, 1328, 1516, 1813, 2230, 2795, 3679, 4473,
+    4157, 3409, 2605, 2087, 1680, 1406, 1218, 1110, 1078, 1109, 1217, 1403, 1684, 2096, 2638, 3467, 4288,
+    4053, 3278, 2515, 2002, 1606, 1341, 1155, 1057, 1031, 1056, 1152, 1335, 1609, 2013, 2547, 3333, 4174,
+    3998, 3229, 2480, 1973, 1579, 1317, 1133, 1039, 1024, 1040, 1130, 1314, 1586, 1983, 2515, 3290, 4121,
+    4037, 3267, 2509, 1996, 1602, 1336, 1151, 1051, 1031, 1054, 1149, 1336, 1612, 2011, 2543, 3333, 4171,
+    4143, 3392, 2597, 2079, 1675, 1401, 1213, 1106, 1075, 1105, 1214, 1393, 1670, 2093, 2635, 3469, 4290,
+    4301, 3602, 2757, 2215, 1801, 1511, 1323, 1210, 1173, 1211, 1324, 1505, 1789, 2230, 2791, 3673, 4501,
+    4538, 3874, 2989, 2402, 1979, 1673, 1474, 1360, 1325, 1364, 1479, 1680, 1997, 2422, 3031, 3956, 4700,
+    4719, 4218, 3315, 2653, 2216, 1902, 1682, 1559, 1520, 1561, 1687, 1913, 2236, 2678, 3363, 4320, 4855,
+    5007, 4560, 3754, 3008, 2516, 2197, 1961, 1824, 1779, 1827, 1968, 2206, 2537, 3034, 3803, 4635, 5155,
+    5501, 4864, 4236, 3504, 2916, 2546, 2305, 2167, 2121, 2169, 2316, 2557, 2937, 3535, 4305, 4943, 5748,
+    5954, 5144, 4550, 3930, 3308, 2871, 2598, 2451, 2406, 2462, 2610, 2886, 3337, 3971, 4646, 5325, 5905};
+
+static u16 lsc_b_table0[]={
+    5949, 5298, 4628, 4005, 3356, 2878, 2593, 2444, 2393, 2436, 2581, 2834, 3301, 3943, 4587, 5301, 5912,
+    5590, 4940, 4298, 3547, 2939, 2545, 2301, 2166, 2120, 2162, 2291, 2512, 2896, 3491, 4245, 4892, 5677,
+    5111, 4584, 3783, 3030, 2519, 2193, 1971, 1840, 1793, 1835, 1958, 2174, 2489, 2981, 3744, 4523, 5093,
+    4657, 4224, 3336, 2655, 2220, 1912, 1699, 1575, 1536, 1573, 1687, 1894, 2189, 2619, 3290, 4178, 4705,
+    4485, 3852, 2984, 2397, 1990, 1689, 1494, 1383, 1344, 1380, 1485, 1671, 1965, 2367, 2954, 3824, 4507,
+    4232, 3570, 2743, 2212, 1811, 1529, 1344, 1230, 1193, 1229, 1337, 1515, 1796, 2189, 2721, 3542, 4262,
+    4044, 3367, 2583, 2081, 1689, 1421, 1233, 1122, 1087, 1120, 1227, 1408, 1678, 2066, 2575, 3353, 4104,
+    3943, 3243, 2501, 2005, 1619, 1356, 1167, 1064, 1035, 1063, 1161, 1343, 1609, 1994, 2498, 3233, 4004,
+    3915, 3196, 2469, 1977, 1593, 1332, 1145, 1044, 1024, 1044, 1138, 1323, 1589, 1967, 2468, 3196, 3958,
+    3938, 3229, 2492, 2000, 1617, 1352, 1163, 1058, 1033, 1059, 1159, 1344, 1612, 1991, 2493, 3229, 3999,
+    4041, 3349, 2572, 2075, 1686, 1415, 1227, 1116, 1080, 1114, 1222, 1399, 1664, 2069, 2578, 3355, 4106,
+    4217, 3550, 2729, 2202, 1804, 1523, 1336, 1222, 1183, 1221, 1332, 1504, 1777, 2192, 2723, 3545, 4282,
+    4464, 3811, 2955, 2381, 1975, 1678, 1485, 1373, 1335, 1373, 1482, 1670, 1971, 2376, 2949, 3811, 4513,
+    4621, 4169, 3283, 2631, 2207, 1898, 1685, 1567, 1530, 1567, 1684, 1893, 2205, 2626, 3273, 4159, 4681,
+    4970, 4500, 3715, 2986, 2498, 2176, 1954, 1824, 1782, 1824, 1951, 2169, 2488, 2967, 3704, 4495, 5032,
+    5506, 4850, 4228, 3481, 2889, 2516, 2281, 2150, 2110, 2152, 2281, 2508, 2877, 3451, 4200, 4835, 5585,
+    5891, 5222, 4541, 3908, 3270, 2828, 2566, 2430, 2388, 2429, 2565, 2819, 3259, 3870, 4536, 5274, 5746};
+
+static u16 lsc_gr_table0[]={
+    6101, 5408, 4698, 4130, 3467, 2989, 2699, 2556, 2504, 2551, 2692, 2969, 3446, 4120, 4735, 5415, 6134,
+    5591, 5123, 4414, 3671, 3048, 2636, 2387, 2252, 2204, 2248, 2380, 2623, 3027, 3647, 4427, 5130, 5659,
+    5321, 4695, 3915, 3138, 2611, 2264, 2023, 1887, 1840, 1883, 2018, 2252, 2598, 3121, 3909, 4694, 5397,
+    4845, 4335, 3453, 2757, 2295, 1958, 1723, 1596, 1556, 1594, 1719, 1947, 2275, 2742, 3450, 4351, 4926,
+    4558, 4002, 3100, 2487, 2045, 1713, 1504, 1387, 1349, 1385, 1499, 1703, 2031, 2478, 3098, 4013, 4644,
+    4403, 3703, 2857, 2298, 1855, 1544, 1346, 1229, 1191, 1228, 1341, 1533, 1845, 2286, 2858, 3722, 4466,
+    4250, 3505, 2702, 2158, 1723, 1430, 1233, 1119, 1084, 1116, 1226, 1418, 1716, 2152, 2710, 3518, 4314,
+    4139, 3394, 2618, 2079, 1650, 1364, 1167, 1064, 1034, 1059, 1160, 1350, 1645, 2079, 2631, 3412, 4198,
+    4100, 3351, 2586, 2052, 1626, 1341, 1145, 1044, 1024, 1042, 1137, 1330, 1622, 2049, 2599, 3371, 4154,
+    4132, 3388, 2611, 2075, 1648, 1361, 1163, 1058, 1034, 1058, 1158, 1353, 1648, 2074, 2626, 3406, 4198,
+    4231, 3493, 2695, 2152, 1720, 1427, 1229, 1117, 1081, 1113, 1223, 1412, 1704, 2154, 2713, 3517, 4305,
+    4405, 3683, 2846, 2290, 1849, 1540, 1343, 1226, 1187, 1223, 1338, 1524, 1826, 2288, 2860, 3717, 4456,
+    4550, 3964, 3077, 2477, 2033, 1708, 1499, 1384, 1346, 1383, 1498, 1704, 2037, 2481, 3097, 4002, 4654,
+    4769, 4285, 3407, 2735, 2282, 1946, 1714, 1591, 1554, 1592, 1716, 1949, 2292, 2743, 3428, 4331, 4911,
+    5196, 4611, 3841, 3095, 2588, 2248, 2007, 1871, 1830, 1873, 2013, 2249, 2594, 3100, 3869, 4678, 5294,
+    5548, 4992, 4331, 3583, 2987, 2604, 2360, 2227, 2185, 2228, 2362, 2603, 2991, 3592, 4366, 5060, 5567,
+    5963, 5327, 4617, 4016, 3366, 2926, 2658, 2525, 2483, 2525, 2660, 2926, 3377, 4032, 4668, 5422, 5923};
+
+static u16 lsc_gb_table0[]={
+    6092, 5336, 4693, 4135, 3480, 3007, 2722, 2576, 2529, 2571, 2715, 2993, 3463, 4119, 4731, 5377, 6112,
+    5545, 5071, 4390, 3668, 3051, 2650, 2403, 2265, 2217, 2262, 2396, 2634, 3035, 3644, 4401, 5106, 5640,
+    5217, 4641, 3892, 3130, 2611, 2270, 2031, 1893, 1845, 1889, 2025, 2254, 2595, 3108, 3881, 4662, 5352,
+    4792, 4289, 3422, 2742, 2293, 1960, 1728, 1598, 1557, 1596, 1721, 1944, 2267, 2722, 3417, 4312, 4896,
+    4490, 3955, 3069, 2470, 2037, 1712, 1505, 1387, 1348, 1384, 1499, 1698, 2019, 2455, 3069, 3976, 4611,
+    4351, 3662, 2828, 2279, 1847, 1543, 1346, 1229, 1190, 1226, 1338, 1527, 1832, 2263, 2830, 3685, 4440,
+    4205, 3461, 2678, 2143, 1717, 1428, 1233, 1118, 1082, 1114, 1224, 1413, 1703, 2131, 2680, 3489, 4287,
+    4099, 3356, 2594, 2066, 1648, 1365, 1168, 1064, 1033, 1058, 1158, 1346, 1634, 2058, 2602, 3382, 4169,
+    4051, 3322, 2567, 2042, 1625, 1343, 1147, 1045, 1024, 1041, 1136, 1326, 1612, 2029, 2572, 3346, 4135,
+    4092, 3353, 2592, 2065, 1645, 1363, 1166, 1058, 1033, 1057, 1156, 1350, 1637, 2056, 2599, 3382, 4168,
+    4190, 3450, 2672, 2139, 1716, 1427, 1230, 1117, 1081, 1111, 1222, 1407, 1692, 2133, 2683, 3484, 4275,
+    4338, 3639, 2816, 2272, 1842, 1539, 1343, 1225, 1184, 1221, 1335, 1518, 1813, 2266, 2826, 3677, 4437,
+    4472, 3917, 3044, 2459, 2026, 1705, 1500, 1383, 1344, 1381, 1496, 1699, 2024, 2457, 3059, 3957, 4595,
+    4727, 4233, 3374, 2719, 2275, 1948, 1718, 1594, 1555, 1593, 1717, 1946, 2279, 2720, 3394, 4287, 4851,
+    5116, 4566, 3811, 3079, 2586, 2255, 2016, 1879, 1835, 1879, 2017, 2253, 2589, 3083, 3835, 4627, 5229,
+    5480, 4943, 4289, 3571, 2989, 2615, 2376, 2241, 2198, 2243, 2378, 2614, 2994, 3583, 4337, 5020, 5555,
+    5921, 5252, 4589, 4005, 3376, 2943, 2675, 2541, 2502, 2545, 2677, 2948, 3388, 4035, 4654, 5390, 5904};
+
+static u16 lsc_table1[]={
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120,
+    5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120, 5120};
+
+#endif
 
 #ifdef ISPFEC_API
 #include "IspFec/rk_ispfec_api.h"
@@ -118,6 +217,7 @@ enum TEST_CTL_TYPE {
     TEST_CTL_TYPE_REPEAT_INIT_PREPARE_START_STOP_DEINIT,
     TEST_CTL_TYPE_REPEAT_START_STOP,
     TEST_CTL_TYPE_REPEAT_PREPARE_START_STOP,
+    TEST_CTL_TYPE_REPEAT_SWITCHSCENE_PREPARE_START_STOP,
 };
 
 static struct termios oldt;
@@ -293,6 +393,132 @@ void disable_terminal_return(void)
 
     //make sure settings will be restored when program ends
     atexit(restore_terminal_settings);
+}
+
+int getsubopt(char** opt, char* const* keys, char** val) {
+    char* s = *opt;
+    int i;
+
+    *val = NULL;
+    *opt = strchr(s, ',');
+    if (*opt)
+        *(*opt)++ = 0;
+    else
+        *opt = s + strlen(s);
+
+    for (i = 0; keys[i]; i++) {
+        size_t l = strlen(keys[i]);
+        if (strncmp(keys[i], s, l)) continue;
+        if (s[l] == '=')
+            *val = s + l + 1;
+        else if (s[l])
+            continue;
+        return i;
+    }
+    return -1;
+}
+
+int parse_subopt(char** subs, const char* const* subopts, char** value) {
+    int opt = getsubopt(subs, (char* const*)(subopts), value);
+
+    if (opt == -1) {
+        fprintf(stderr, "Invalid suboptions specified\n");
+        return -1;
+    }
+    if (*value == NULL) {
+        fprintf(stderr, "No value given to suboption <%s>\n", subopts[opt]);
+        return -1;
+    }
+    return opt;
+}
+
+int parse_iq_scene_val(char* optarg, char main_scene[32], char sub_scene[32]) {
+    char *value, *subs;
+
+    subs = optarg;
+    while (*subs != '\0') {
+        static const char* subopts[] = {"main_scene", "sub_scene", NULL};
+        size_t len;
+
+        switch (parse_subopt(&subs, subopts, &value)) {
+            case 0:
+                len = strlen(value);
+                if (len == 0 || len > 32) {
+                    ERR("Invalid main_scene value: %s", value);
+                    return -1;
+                }
+                memcpy(main_scene, value, len);
+                main_scene[len] = '\0';
+                break;
+            case 1:
+                len = strlen(value);
+                if (len == 0 || len > 32) {
+                    ERR("Invalid sub_scene value: %s", value);
+                    return -1;
+                }
+                memcpy(sub_scene, value, len);
+                sub_scene[len] = '\0';
+                break;
+            default:
+                ERR("Invalid scene option: %s", value);
+                return -1;
+        }
+    }
+    return 0;
+}
+
+int parse_switch_scene_val(char* optarg, char main_scene[32], char sub_scene[32],
+                           char main_scene1[32], char sub_scene1[32]) {
+    char *value, *subs;
+
+    subs = optarg;
+    while (*subs != '\0') {
+        static const char* subopts[] = {"main_scene", "sub_scene", "main_scene1", "sub_scene1", NULL};
+        size_t len;
+
+        switch (parse_subopt(&subs, subopts, &value)) {
+            case 0:
+                len = strlen(value);
+                if (len == 0 || len > 32) {
+                    ERR("Invalid main_scene value: %s", value);
+                    return -1;
+                }
+                memcpy(main_scene, value, len);
+                main_scene[len] = '\0';
+                break;
+            case 1:
+                len = strlen(value);
+                if (len == 0 || len > 32) {
+                    ERR("Invalid sub_scene value: %s", value);
+                    return -1;
+                }
+                memcpy(sub_scene, value, len);
+                sub_scene[len] = '\0';
+                break;
+            case 2:
+                len = strlen(value);
+                if (len == 0 || len > 32) {
+                    ERR("Invalid main_scene1 value: %s", value);
+                    return -1;
+                }
+                memcpy(main_scene1, value, len);
+                main_scene1[len] = '\0';
+                break;
+            case 3:
+                len = strlen(value);
+                if (len == 0 || len > 32) {
+                    ERR("Invalid sub_scene1 value: %s", value);
+                    return -1;
+                }
+                memcpy(sub_scene1, value, len);
+                sub_scene1[len] = '\0';
+                break;
+            default:
+                ERR("Invalid scene option: %s", value);
+                return -1;
+        }
+    }
+    return 0;
 }
 
 char* get_dev_name(demo_context_t* ctx)
@@ -1410,6 +1636,7 @@ static int read_frame_pp_oneframe(demo_context_t *ctx)
     return 1;
 }
 
+static bool g_allow_enter_sleep = false;
 static int aov_read_frame(demo_context_t *ctx) {
     int ret = read_frame(ctx);
     if (ret == 1) {
@@ -1421,16 +1648,20 @@ static int aov_read_frame(demo_context_t *ctx) {
                 ctx->aovLoopRunCnt = 0;
             }
         } else {
-            ctx->aovLoopRunCnt++;
             if (ctx->aovLoopRunCnt < ctx->aovLoopCnt) {
-                ctx->aovEnterSleep = true;
+                if (g_allow_enter_sleep) {
+                    ctx->aovLoopRunCnt++;
+                    ctx->aovEnterSleep = true;
+                }
             } else {
                 ctx->aovContinueRunCnt = 0;
                 rk_aiq_uapi2_sysctl_resume(ctx->aiq_ctx);
                 ctx->aovPauseAiq = false;
+                g_allow_enter_sleep = false;
             }
         }
     } else if (ctx->aovPauseAiq) {
+        g_allow_enter_sleep = true;
         ctx->aovEnterSleep = true;
     }
     return ret;
@@ -1869,11 +2100,13 @@ static void parse_args(int argc, char **argv, demo_context_t *ctx)
             {"aov",   no_argument,       0, '5' },
             {"aov-loop",   required_argument, 0, '6' },
             {"aov-continue",   required_argument, 0, '7' },
+            {"set-scene",   required_argument, 0, '8' },
+            {"switch-scene-loop", required_argument, 0, '9' },
             {0,          0,                 0,  0  }
         };
 
         //c = getopt_long(argc, argv, "w:h:f:i:d:o:c:ps",
-        c = getopt_long(argc, argv, "w:h:f:i:g:j:y:d:o:c:n:k:a:t:1:2:v::3456:7:mpserl",
+        c = getopt_long(argc, argv, "w:h:f:i:g:j:y:d:o:c:n:k:a:t:1:2:v::3456:7:8:9:mpserl",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -1978,11 +2211,25 @@ static void parse_args(int argc, char **argv, demo_context_t *ctx)
             ctx->orpRawH = raw_height;
 
             char* raw_fmt_pix_start = strstr(raw_fmt_h_start, ":") + 1;
-            strcpy(ctx->orpRawFmt, raw_fmt_pix_start);
+            char* raw_fmt_pix_end = strstr(raw_fmt_pix_start, ",");
+            char* rawbuf_type = NULL;
+            if (raw_fmt_pix_end) {
+                size_t fmt_len = raw_fmt_pix_end - raw_fmt_pix_start;
+                size_t max_fmt_len = sizeof(ctx->orpRawFmt) - 1;
+                if (fmt_len > max_fmt_len) {
+                    printf("WARNING: orpRawFmt truncated from %zu to %zu\n", fmt_len, max_fmt_len);
+                    fmt_len = max_fmt_len;
+                }
+                strncpy(ctx->orpRawFmt, raw_fmt_pix_start, fmt_len);
+                ctx->orpRawFmt[fmt_len] = '\0';
+                rawbuf_type = raw_fmt_pix_end + 1;
+            }  else {
+                strncpy(ctx->orpRawFmt, raw_fmt_pix_start, sizeof(ctx->orpRawFmt)-1);
+                ctx->orpRawFmt[sizeof(ctx->orpRawFmt)-1] = '\0';
+                rawbuf_type = NULL;
+            }
 
-            char* rawbuf_type = strstr(raw_fmt_pix_start, ",");
             if (rawbuf_type) {
-                rawbuf_type += 1;
                 if (!strcmp(rawbuf_type, "RAW_ADDR"))
                     ctx->orpRawBufType = RK_AIQ_RAW_ADDR;
                 else if (!strcmp(rawbuf_type, "RAW_FD"))
@@ -2017,6 +2264,25 @@ static void parse_args(int argc, char **argv, demo_context_t *ctx)
         case '7':
             ctx->aovContinueCnt = atoi(optarg);
             break;
+        case '8':
+            if (parse_iq_scene_val(optarg, ctx->main_scene[0], ctx->sub_scene[0]) < 0) {
+                ERR("Invalid iq scene value: %s\n", optarg);
+                exit(-1);
+            } else {
+                DBG("Set iq scene, main: %s, sub: %s\n", ctx->main_scene[0], ctx->sub_scene[0]);
+            }
+            break;
+        case '9':
+            if (parse_switch_scene_val(optarg, ctx->main_scene[0], ctx->sub_scene[0],
+                                   ctx->main_scene[1], ctx->sub_scene[1]) < 0) {
+                ERR("Invalid iq scene value: %s\n", optarg);
+                exit(-1);
+            } else {
+                DBG("Set switch scene %s:%s to %s:%s\n", ctx->main_scene[0], ctx->sub_scene[0],
+                    ctx->main_scene[1], ctx->sub_scene[1]);
+                ctx->ctl_type = TEST_CTL_TYPE_REPEAT_SWITCHSCENE_PREPARE_START_STOP;
+            }
+            break;
         case '?':
         case 'p':
             ERR("Usage: %s to capture rkisp1 frames\n"
@@ -2049,6 +2315,11 @@ static void parse_args(int argc, char **argv, demo_context_t *ctx)
                 "         --aov                              optional, use aov mode.\n"
                 "         --aov-continue, default 30         optional, sequential frame mode run count\n"
                 "         --aov-loop, default 30             optional, one frame mode run count\n"
+                "         --set-scene                        optional, main_scene=<val>,sub_scene=<val>\n"
+                "                                            main_scene and sub_scene is the name of scene in iq file\n"
+                "         --switch-scene-loop                optional, main_scene=<val>,sub_scene=<val>,main_scene1=<val>,sub_scene1=<val>"
+                "                                            main_scene and sub_scene is the name of scene in iq file\n"
+                "                                            loop switch between scene and scene1 every --count frames\n"
                 "         --sensor,  default os04a10,        optional, optional, sensor names\n",
                 argv[0]);
             exit(-1);
@@ -2201,6 +2472,43 @@ static long long findLastDigits(std::string & str)
     }
 
     return 0;
+}
+#endif
+
+#if defined(ANDROID)
+#include <ctype.h>
+
+int strverscmp(const char *s1, const char *s2) {
+    while (*s1 && *s2) {
+        int diff = 0;
+        while (*s1 && *s2 && !diff) {
+            char c1 = tolower((unsigned char)*s1);
+            char c2 = tolower((unsigned char)*s2);
+            if (isdigit(c1) && isdigit(c2)) {
+                int num1 = 0;
+                int num2 = 0;
+                while (c1 && isdigit(c1)) {
+                    num1 = num1 * 10 + (c1 - '0');
+                    c1 = tolower((unsigned char)*++s1);
+                }
+                while (c2 && isdigit(c2)) {
+                    num2 = num2 * 10 + (c2 - '0');
+                    c2 = tolower((unsigned char)*++s2);
+                }
+                if (num1 != num2) {
+                    return num1 - num2;
+                }
+            } else {
+                diff = c1 - c2;
+                s1++;
+                s2++;
+            }
+        }
+        if (diff) {
+            return diff;
+        }
+    }
+    return *s1 - *s2;
 }
 #endif
 
@@ -2398,7 +2706,7 @@ static int query_ae_state(const rk_aiq_sys_ctx_t* ctx)
 {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
 
-#if defined(ISP_HW_V39) || defined(ISP_HW_V33)
+#if defined(ISP_HW_V39) || defined(ISP_HW_V33) || defined(ISP_HW_V35)
     ae_api_queryInfo_t queryInfo;
     ret = rk_aiq_user_api2_ae_queryExpResInfo(ctx, &queryInfo);
     printf("ae IsConverged: %d\n", queryInfo.isConverged);
@@ -2411,112 +2719,12 @@ static int query_ae_state(const rk_aiq_sys_ctx_t* ctx)
     return 0;
 }
 
-static void set_af_manual_meascfg(const rk_aiq_sys_ctx_t* ctx)
-{
-    rk_aiq_af_attrib_t attr;
-    uint16_t gamma_y[RKAIQ_RAWAF_GAMMA_NUM] =
-    {0, 45, 108, 179, 245, 344, 409, 459, 500, 567, 622, 676, 759, 833, 896, 962, 1023};
-#ifndef ISP_HW_V33
-    rk_aiq_user_api2_af_GetAttrib(ctx, &attr);
-    attr.AfMode = RKAIQ_AF_MODE_FIXED;
-
-    attr.manual_meascfg.contrast_af_en = 1;
-    attr.manual_meascfg.rawaf_sel = 0; // normal = 0; hdr = 1
-
-    attr.manual_meascfg.window_num = 2;
-    attr.manual_meascfg.wina_h_offs = 2;
-    attr.manual_meascfg.wina_v_offs = 2;
-    attr.manual_meascfg.wina_h_size = 2580;
-    attr.manual_meascfg.wina_v_size = 1935;
-
-    attr.manual_meascfg.winb_h_offs = 1146;
-    attr.manual_meascfg.winb_v_offs = 972;
-    attr.manual_meascfg.winb_h_size = 300;
-    attr.manual_meascfg.winb_v_size = 300;
-
-    attr.manual_meascfg.gamma_flt_en = 1;
-    memcpy(attr.manual_meascfg.gamma_y, gamma_y, RKAIQ_RAWAF_GAMMA_NUM * sizeof(uint16_t));
-
-    attr.manual_meascfg.gaus_flt_en = 1;
-    attr.manual_meascfg.gaus_h0 = 0x20;
-    attr.manual_meascfg.gaus_h1 = 0x10;
-    attr.manual_meascfg.gaus_h2 = 0x08;
-
-    attr.manual_meascfg.afm_thres = 4;
-
-    attr.manual_meascfg.lum_var_shift[0] = 0;
-    attr.manual_meascfg.afm_var_shift[0] = 0;
-    attr.manual_meascfg.lum_var_shift[1] = 4;
-    attr.manual_meascfg.afm_var_shift[1] = 4;
-
-    attr.manual_meascfg.sp_meas.enable = true;
-    attr.manual_meascfg.sp_meas.ldg_xl = 10;
-    attr.manual_meascfg.sp_meas.ldg_yl = 28;
-    attr.manual_meascfg.sp_meas.ldg_kl = (255 - 28) * 256 / 45;
-    attr.manual_meascfg.sp_meas.ldg_xh = 118;
-    attr.manual_meascfg.sp_meas.ldg_yh = 8;
-    attr.manual_meascfg.sp_meas.ldg_kh = (255 - 8) * 256 / 15;
-    attr.manual_meascfg.sp_meas.highlight_th = 245;
-    attr.manual_meascfg.sp_meas.highlight2_th = 200;
-    rk_aiq_user_api2_af_SetAttrib(ctx, &attr);
-#endif
-}
-
-static void print_af_stats(rk_aiq_isp_stats_t *stats_ref)
-{
-    if (stats_ref->frame_id % 30 != 0)
-        return;
-
-    printf("sharpness roia: 0x%llx-0x%08x roib: 0x%x-0x%08x\n",
-           stats_ref->af_stats.roia_sharpness,
-           stats_ref->af_stats.roia_luminance,
-           stats_ref->af_stats.roib_sharpness,
-           stats_ref->af_stats.roib_luminance);
-
-    printf("global_sharpness\n");
-    for (int i = 0; i < 15; i++) {
-        for (int j = 0; j < 15; j++) {
-            printf("0x%08x, ", stats_ref->af_stats.global_sharpness[15 * i + j]);
-        }
-        printf("\n");
-    }
-    printf("lowpass_fv4_4\n");
-    for (int i = 0; i < 15; i++) {
-        for (int j = 0; j < 15; j++) {
-            printf("0x%08x, ", stats_ref->af_stats.lowpass_fv4_4[15 * i + j]);
-        }
-        printf("\n");
-    }
-    printf("lowpass_fv8_8\n");
-    for (int i = 0; i < 15; i++) {
-        for (int j = 0; j < 15; j++) {
-            printf("0x%08x, ", stats_ref->af_stats.lowpass_fv8_8[15 * i + j]);
-        }
-        printf("\n");
-    }
-    printf("lowpass_highlht\n");
-    for (int i = 0; i < 15; i++) {
-        for (int j = 0; j < 15; j++) {
-            printf("0x%08x, ", stats_ref->af_stats.lowpass_highlht[15 * i + j]);
-        }
-        printf("\n");
-    }
-    printf("lowpass_highlht2\n");
-    for (int i = 0; i < 15; i++) {
-        for (int j = 0; j < 15; j++) {
-            printf("0x%08x, ", stats_ref->af_stats.lowpass_highlht2[15 * i + j]);
-        }
-        printf("\n");
-    }
-}
-
 static void* stats_thread(void* args) {
     demo_context_t* ctx =  (demo_context_t*)args;
     XCamReturn ret;
     pthread_detach (pthread_self());
     printf("begin stats thread\n");
 
-    set_af_manual_meascfg(ctx->aiq_ctx);
     while(!_if_quit) {
 #if (USE_NEWSTRUCT == 0)
         rk_aiq_isp_stats_t *stats_ref = NULL;
@@ -2524,7 +2732,6 @@ static void* stats_thread(void* args) {
         if (ret == XCAM_RETURN_NO_ERROR && stats_ref != NULL) {
             printf("get one stats frame id %d \n", stats_ref->frame_id);
             query_ae_state(ctx->aiq_ctx);
-            print_af_stats(stats_ref);
             rk_aiq_uapi2_sysctl_release3AStatsRef(ctx->aiq_ctx, stats_ref);
 #else
         rk_aiq_isp_statistics_t stats_ref;
@@ -2669,10 +2876,12 @@ static void rkisp_routine(demo_context_t *ctx)
                 // TODO, should decide the resolution firstly,
                 // then check if the mode is supported on this
                 // resolution
-                if ((sns_info->support_fmt[i].hdr_mode == 5/*HDR_X2*/ &&
-                        work_mode == RK_AIQ_WORKING_MODE_ISP_HDR2) ||
-                        (sns_info->support_fmt[i].hdr_mode == 6/*HDR_X3*/ &&
-                        work_mode == RK_AIQ_WORKING_MODE_ISP_HDR3)) {
+                if (((sns_info->support_fmt[i].hdr_mode == 5/*HDR_X2*/ ||
+                      sns_info->support_fmt[i].hdr_mode == 7/*HDR_COMPR*/) &&
+                      work_mode == RK_AIQ_WORKING_MODE_ISP_HDR2) ||
+                    ((sns_info->support_fmt[i].hdr_mode == 6/*HDR_X3*/ ||
+                      sns_info->support_fmt[i].hdr_mode == 7/*HDR_COMPR*/) &&
+                      work_mode == RK_AIQ_WORKING_MODE_ISP_HDR3)) {
                     b_work_mode_supported = true;
                     break;
                 }
@@ -2700,10 +2909,18 @@ static void rkisp_routine(demo_context_t *ctx)
 
     if (ctx->rkaiq) {
         XCamReturn ret = XCAM_RETURN_NO_ERROR;
-        if (work_mode == RK_AIQ_WORKING_MODE_NORMAL)
-            ret = rk_aiq_uapi2_sysctl_preInit_scene(sns_entity_name, "normal", "day");
-        else
-            ret = rk_aiq_uapi2_sysctl_preInit_scene(sns_entity_name, "hdr", "day");
+        if (strlen(ctx->main_scene[0]) > 0 && strlen(ctx->sub_scene[0]) > 0) {
+            DBG("%s: set scene %s, %s\n", get_sensor_name(ctx), ctx->main_scene[0],
+                ctx->sub_scene[0]);
+            ret = rk_aiq_uapi2_sysctl_preInit_scene(sns_entity_name, ctx->main_scene[0],
+                                               ctx->sub_scene[0]);
+        } else {
+            if (work_mode == RK_AIQ_WORKING_MODE_NORMAL) {
+                ret = rk_aiq_uapi2_sysctl_preInit_scene(sns_entity_name, "normal", "day");
+            } else {
+                ret = rk_aiq_uapi2_sysctl_preInit_scene(sns_entity_name, "hdr", "day");
+            }
+        }
         if (ret < 0)
             ERR("%s: failed to set %s scene\n",
                 get_sensor_name(ctx),
@@ -2920,14 +3137,30 @@ static void rkisp_routine(demo_context_t *ctx)
             otp_info.otp_awb.golden_gr_value = 1020;
             otp_info.otp_awb.golden_gb_value = -1;
 
+            otp_info.otp_lsc.flag = true;
+            otp_info.otp_lsc.decimal_bits = 10;
+            otp_info.otp_lsc.width = 4080;
+            otp_info.otp_lsc.height = 3072;
+            otp_info.otp_lsc.table_size = 2312;
+            otp_info.otp_lsc.lsc_h = 0;
+            otp_info.otp_lsc.lsc_w = 0;
+            memcpy(otp_info.otp_lsc.lsc_r, lsc_r_table0, sizeof(lsc_r_table0));
+            memcpy(otp_info.otp_lsc.lsc_gr, lsc_gr_table0, sizeof(lsc_gr_table0));
+            memcpy(otp_info.otp_lsc.lsc_gb, lsc_gb_table0, sizeof(lsc_gb_table0));
+            memcpy(otp_info.otp_lsc.lsc_b, lsc_b_table0, sizeof(lsc_b_table0));
+
             if (rk_aiq_uapi2_sysctl_setUserOtpInfo(ctx->aiq_ctx, otp_info) != 0) {
                 ERR("Failed to set User Otp\n");
             } else {
-                ERR("whm set User Otp: flag = %d, value = [%d, %d, %d, %d], golden = [%d, %d, %d, %d]\n",
+                printf("set User Otp: flag = %d, value = [%d, %d, %d, %d], golden = [%d, %d, %d, %d];\
+                        lsc flag: %d, r[0]= %d, gr[0] = %d, gb[0] = %d, b[0] = %d\n",
                     otp_info.otp_awb.flag, otp_info.otp_awb.r_value, otp_info.otp_awb.b_value,
                     otp_info.otp_awb.gr_value, otp_info.otp_awb.gb_value,
                     otp_info.otp_awb.golden_r_value, otp_info.otp_awb.golden_b_value,
-                    otp_info.otp_awb.golden_gr_value, otp_info.otp_awb.golden_gb_value);
+                    otp_info.otp_awb.golden_gr_value, otp_info.otp_awb.golden_gb_value,
+                    otp_info.otp_lsc.flag, otp_info.otp_lsc.lsc_r[0],
+                    otp_info.otp_lsc.lsc_gr[0], otp_info.otp_lsc.lsc_gb[0],
+                    otp_info.otp_lsc.lsc_b[0]);
             }
 #endif
 #ifdef COLOR_CONSISTENCY_TEST
@@ -2973,10 +3206,11 @@ static void rkisp_routine(demo_context_t *ctx)
 
                 if (ctx->ctl_type != TEST_CTL_TYPE_DEFAULT) {
                     static int test_ctl_cnts = 0;
+                    int frame_count = 0;
 restart:
-                    ctx->frame_count = 60;
+                    frame_count = ctx->frame_count;
                     start_capturing(ctx);
-                    while ((ctx->frame_count-- > 0))
+                    while ((frame_count-- > 0))
                         read_frame(ctx);
                     stop_capturing(ctx);
                     printf("+++++++ TEST SYSCTL COUNTS %d ++++++++++++ \n", test_ctl_cnts++);
@@ -3001,7 +3235,7 @@ restart:
                         if (ret < 0)
                             ERR("%s: failed to set %s scene\n",
                                 get_sensor_name(ctx),
-                                work_mode == RK_AIQ_WORKING_MODE_NORMAL ? "normal" : "hdr");
+                                work_mode == RK_AIQ_WORKING_MODE_NORMAL? "normal" : "hdr");
                         ctx->aiq_ctx = rk_aiq_uapi2_sysctl_init(sns_entity_name, ctx->iqpath, NULL, NULL);
                         printf("aiq prepare .....\n");
                         XCamReturn ret = rk_aiq_uapi2_sysctl_prepare(ctx->aiq_ctx, ctx->width, ctx->height, work_mode);
@@ -3010,9 +3244,41 @@ restart:
                         XCamReturn ret = rk_aiq_uapi2_sysctl_prepare(ctx->aiq_ctx, ctx->width, ctx->height, work_mode);
                     } else if (ctx->ctl_type == TEST_CTL_TYPE_REPEAT_START_STOP) {
                         // do nothing
+                    } else if (ctx->ctl_type == TEST_CTL_TYPE_REPEAT_SWITCHSCENE_PREPARE_START_STOP) {
+                        const char* main_scene[2] = {"normal", "hdr"};
+                        const char* sub_scene[2] = {"day", "day_dcgVs"};
+                        static int scene_index = 0;  /* Track current scene index */
+                        int custom_scenes_valid;
+
+                        /* Use custom scenes if all are configured */
+                        custom_scenes_valid = (strlen(ctx->main_scene[0]) > 0 && strlen(ctx->sub_scene[0]) > 0 &&
+                                             strlen(ctx->main_scene[1]) > 0 && strlen(ctx->sub_scene[1]) > 0);
+                        if (custom_scenes_valid) {
+                            main_scene[0] = ctx->main_scene[0];
+                            sub_scene[0] = ctx->sub_scene[0];
+                            main_scene[1] = ctx->main_scene[1];
+                            sub_scene[1] = ctx->sub_scene[1];
+                        }
+
+                        /* Toggle between scenes (0 and 1) */
+                        scene_index = (scene_index + 1) % 2;
+
+                        int ret = rk_aiq_uapi2_sysctl_switch_scene(ctx->aiq_ctx, main_scene[scene_index], sub_scene[scene_index]);
+                        if (ret < 0) {
+                            ERR("Failed to switch scene to %s:%s\n", main_scene[scene_index], sub_scene[scene_index]);
+                        } else {
+                            DBG("Switch scene to %s:%s (index: %d)\n", main_scene[scene_index], sub_scene[scene_index], scene_index);
+
+                            DBG("aiq prepare .....\n");
+                            int ret = rk_aiq_uapi2_sysctl_prepare(ctx->aiq_ctx, ctx->width,
+                                                                         ctx->height, work_mode);
+                            if (ret < 0)
+                                ERR("Failed to prepare after switch scene\n");
+                        }
                     }
+
                     printf("aiq start .....\n");
-                    ret = rk_aiq_uapi2_sysctl_start(ctx->aiq_ctx );
+                    ret = rk_aiq_uapi2_sysctl_start(ctx->aiq_ctx);
                     printf("aiq restart .....\n");
                     goto restart;
                 }
@@ -3024,6 +3290,7 @@ restart:
                 rk_aiq_camgroup_camInfos_t camInfos;
                 memset(&camInfos, 0, sizeof(camInfos));
                 if (rk_aiq_uapi2_camgroup_getCamInfos((rk_aiq_camgroup_ctx_t *)ctx->camgroup_ctx, &camInfos) == XCAM_RETURN_NO_ERROR) {
+#ifdef OTP_API_TEST
                     for (int i = 0; i < camInfos.valid_sns_num; i++) {
                         rk_aiq_sys_ctx_t* aiq_ctx = NULL;
                         aiq_ctx = rk_aiq_uapi2_camgroup_getAiqCtxBySnsNm((rk_aiq_camgroup_ctx_t *)ctx->camgroup_ctx, camInfos.sns_ent_nm[i]);
@@ -3034,6 +3301,13 @@ restart:
                                camInfos.sns_ent_nm[i], camInfos.sns_camPhyId[i]);
                         rk_aiq_user_otp_info_t otp_info = {};
                         otp_info.otp_awb.flag = true;
+                        otp_info.otp_lsc.flag = true;
+                        otp_info.otp_lsc.decimal_bits = 10;
+                        otp_info.otp_lsc.width = 4080;
+                        otp_info.otp_lsc.height = 3072;
+                        otp_info.otp_lsc.table_size = 2312;
+                        otp_info.otp_lsc.lsc_h = 0;
+                        otp_info.otp_lsc.lsc_w = 0;
                         if (i == 0) {
                             otp_info.otp_awb.r_value = 548;
                             otp_info.otp_awb.b_value = 521;
@@ -3043,6 +3317,10 @@ restart:
                             otp_info.otp_awb.golden_b_value = 529;
                             otp_info.otp_awb.golden_gr_value = 1020;
                             otp_info.otp_awb.golden_gb_value = -1;
+                            memcpy(otp_info.otp_lsc.lsc_r, lsc_r_table0, sizeof(lsc_r_table0));
+                            memcpy(otp_info.otp_lsc.lsc_gr, lsc_gr_table0, sizeof(lsc_gr_table0));
+                            memcpy(otp_info.otp_lsc.lsc_gb, lsc_gb_table0, sizeof(lsc_gb_table0));
+                            memcpy(otp_info.otp_lsc.lsc_b, lsc_b_table0, sizeof(lsc_b_table0));
                         } else {
                             otp_info.otp_awb.r_value = 1;
                             otp_info.otp_awb.b_value = 1;
@@ -3052,12 +3330,17 @@ restart:
                             otp_info.otp_awb.golden_b_value = 1;
                             otp_info.otp_awb.golden_gr_value = 1;
                             otp_info.otp_awb.golden_gb_value = -1;
+                            memcpy(otp_info.otp_lsc.lsc_r, lsc_table1, sizeof(lsc_table1));
+                            memcpy(otp_info.otp_lsc.lsc_gr, lsc_table1, sizeof(lsc_table1));
+                            memcpy(otp_info.otp_lsc.lsc_gb, lsc_table1, sizeof(lsc_table1));
+                            memcpy(otp_info.otp_lsc.lsc_b, lsc_table1, sizeof(lsc_table1));
                         }
 
                         if (rk_aiq_uapi2_sysctl_setUserOtpInfo(aiq_ctx, otp_info) != 0) {
                             printf("Failed to set User Otp\n");
                         }
                     }
+#endif
 
                     if (ctx->isOrp) {
                         rk_aiq_raw_prop_t prop;
@@ -3242,10 +3525,10 @@ static void* aov_enter_sleep_thread(void* args) {
     demo_context_t *ctx = (demo_context_t *)args;
     while (1) {
         if (ctx->aovEnterSleep) {
-            aov_test_enter_sleep(args);
             ctx->aovEnterSleep = false;
+            aov_test_enter_sleep(args);
         }
-        usleep(10 * 1000);
+        usleep(1 * 1000);
     }
     return 0;
 }
@@ -3344,6 +3627,8 @@ int main(int argc, char **argv)
         .aovContinueCnt = 30,
         .aovLoopRunCnt = 0,
         .aovContinueRunCnt = 0,
+        .main_scene = {{0}, {0}},
+        .sub_scene = {{0}, {0}},
     };
     demo_context_t second_ctx;
     demo_context_t third_ctx;
@@ -3355,6 +3640,8 @@ int main(int argc, char **argv)
         main_ctx.rawBufs[i].vaddr = NULL;
 
     parse_args(argc, argv, &main_ctx);
+    pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
+
 #if ISPDEMO_ENABLE_DRM
     if (main_ctx.vop) {
 
@@ -3438,6 +3725,9 @@ int main(int argc, char **argv)
 #ifdef CUSTOM_AF_DEMO_TEST
     custom_af_run(main_ctx.aiq_ctx);
 #endif
+#ifdef CUSTOM_PDAF_DEMO_TEST
+    custom_pdaf_run(main_ctx.aiq_ctx);
+#endif
 
 #ifdef ISPFEC_API
     g_ispfec_cfg.in_width     = main_ctx.width;
@@ -3468,8 +3758,6 @@ int main(int argc, char **argv)
     init_ispfec_bufs(&g_ispfec_cfg);
     g_ispfec_ctx = rk_ispfec_api_init(&g_ispfec_cfg);
 #endif
-
-    pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
 
     mainloop(&main_ctx);
     if (main_ctx.isOrp) {

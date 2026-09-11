@@ -194,12 +194,13 @@ XCamReturn Aenh_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
 
     outparams->cfg_update = false;
 
+#if 0
     if (inparams->u.proc.is_bw_sensor) {
         enh_attrib->en        = false;
         outparams->cfg_update = init ? true : false;
         return XCAM_RETURN_NO_ERROR;
     }
-
+#endif
     if (enh_attrib->opMode != RK_AIQ_OP_MODE_AUTO) {
         LOGE_ADEHAZE("mode is %d, not auto mode, ignore", enh_attrib->opMode);
         return XCAM_RETURN_NO_ERROR;

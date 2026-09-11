@@ -17,8 +17,9 @@
 
 #include "sample_comm.h"
 #include "iq_parser_v2/af_head.h"
+#include "isp/rk_aiq_isp_af33.h"
 
-#ifndef ISP_HW_V33
+#if !defined(ISP_HW_V33)
 static void sample_af_usage()
 {
     printf("\n\nUsage : \n");
@@ -272,6 +273,9 @@ void sample_get_af_calib(const rk_aiq_sys_ctx_t* ctx)
     } else if (CHECK_ISP_HW_V39()) {
         CalibDbV2_AFV33_t af_calib_cfg_v33;
         rk_aiq_user_api2_af_GetCalib(ctx, (void *)&af_calib_cfg_v33);
+    } else if (CHECK_ISP_HW_V35()) {
+        af_param_t af_calib;
+        rk_aiq_user_api2_af_GetCalib(ctx, (void *)&af_calib);
     }
 }
 
@@ -307,6 +311,12 @@ void sample_set_af_calib(const rk_aiq_sys_ctx_t* ctx)
         rk_aiq_user_api2_af_GetCalib(ctx, (void *)&af_calib_cfg_v33);
         af_calib_cfg_v33.Common.AfMode = CalibDbV2_AFMODE_AUTO;
         rk_aiq_user_api2_af_SetCalib(ctx, (void *)&af_calib_cfg_v33);
+    } else if (CHECK_ISP_HW_V35()) {
+        af_param_t af_calib;
+        memset(&af_calib, 0, sizeof(af_calib));
+        rk_aiq_user_api2_af_GetCalib(ctx, (void *)&af_calib);
+        af_calib.common.sw_afT_af_mode = af_mode_auto;
+        rk_aiq_user_api2_af_SetCalib(ctx, (void *)&af_calib);
     }
 }
 #endif
@@ -314,7 +324,7 @@ void sample_print_af_info(const void *arg)
 {
     printf ("enter AF modult test!\n");
 }
-#ifndef ISP_HW_V33
+#if !defined(ISP_HW_V33)
 void sample_af_case(const rk_aiq_sys_ctx_t* ctx) {
     
     sample_set_focus_automode(ctx);
@@ -344,7 +354,7 @@ void sample_af_case(const rk_aiq_sys_ctx_t* ctx) {
 #endif
 XCamReturn sample_af_module(const void *arg)
 {
-#ifndef ISP_HW_V33
+#if !defined(ISP_HW_V33)
     int key = -1;
     CLEAR();
     rk_aiq_wb_scene_t scene;

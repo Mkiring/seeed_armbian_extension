@@ -25,7 +25,7 @@
 #define st_string_oom() exit(-1)
 #endif
 
-typedef struct {
+typedef struct st_string_s {
     char *d;  /* pointer to allocated buffer */
     size_t n; /* allocated capacity */
     size_t i; /* index of first unused byte */
@@ -107,8 +107,8 @@ do {                                                             \
 
 #define string_body(s) ((s)->d)
 
-ST_STRING_UNUSED void string_printf_va(st_string *s, const char *fmt, va_list ap);
+ST_STRING_UNUSED void aiq_string_printf_va(st_string *s, const char *fmt, va_list ap);
 
-ST_STRING_UNUSED void string_printf(st_string *s, const char *fmt, ...);
+ST_STRING_UNUSED void aiq_string_printf(st_string *s, const char *fmt, ...);
 
 #endif /* ST_STRING_H */
