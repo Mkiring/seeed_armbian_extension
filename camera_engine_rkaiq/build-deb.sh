@@ -23,8 +23,8 @@ set -euo pipefail
 
 SOC="${1:?Usage: $0 <rk3576|rk3588>}"
 case "${SOC}" in
-    rk3576) IQDIR="isp39"; ISPVER="-DISP_HW_V39"; EXTRA_DEPENDS="" ;;
-    rk3588) IQDIR="isp3x"; ISPVER="-DISP_HW_V30"; EXTRA_DEPENDS="libstdc++6," ;;
+    rk3576) IQDIR="isp39"; ISPVER="-DISP_HW_V39"; MINKVER="6.1.172"; EXTRA_DEPENDS="" ;;
+    rk3588) IQDIR="isp3x"; ISPVER="-DISP_HW_V30"; MINKVER="6.1.172"; EXTRA_DEPENDS="libstdc++6," ;;
     *) echo "ERROR: Unsupported SoC: ${SOC}. Use rk3576 or rk3588."; exit 1 ;;
 esac
 
@@ -154,6 +154,7 @@ sed -e "s/@SOC@/${SOC}/g" \
     -e "s/@EXTRA_DEPENDS@/${EXTRA_DEPENDS}/g" \
     "${SCRIPT_DIR}/debian/control.in" > "${STAGING}/DEBIAN/control"
 sed -e "s/@SOC@/${SOC}/g" \
+    -e "s/@MINKVER@/${MINKVER}/g" \
     "${SCRIPT_DIR}/debian/camera-engine-rkaiq-@SOC@.postinst.in" > "${STAGING}/DEBIAN/postinst"
 sed -e "s/@SOC@/${SOC}/g" \
     "${SCRIPT_DIR}/debian/camera-engine-rkaiq-@SOC@.prerm.in" > "${STAGING}/DEBIAN/prerm"
