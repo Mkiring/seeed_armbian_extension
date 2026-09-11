@@ -134,13 +134,14 @@ DESTDIR="${STAGING}" ninja -C "${BUILD_DIR}" install
 # headers are intentionally not shipped yet (prebuilt ships 600 of them)
 rm -rf "${STAGING}/usr/include"
 
-# cmake installs the init script via an absolute DESTINATION which lands
-# under usr/etc when CMAKE_INSTALL_PREFIX=/usr — relocate to match prebuilt
-if [ -e "${STAGING}/usr/etc/init.d/S40rkaiq_3A" ]; then
-    mkdir -p "${STAGING}/etc/init.d"
-    mv "${STAGING}/usr/etc/init.d/S40rkaiq_3A" "${STAGING}/etc/init.d/"
-    rmdir -p "${STAGING}/usr/etc/init.d" 2>/dev/null || true
-fi
+# drop the SysV init script installed by cmake — the deb ships a native
+# systemd unit only (sysv compat triggers deprecation warnings on systemd
+# >= 255 and duplicate auto-start paths via systemd-sysv-generator)
+rm -f "${STAGING}/etc/init.d/S40rkaiq_3A" \
+      "${STAGING}/usr/etc/init.d/S40rkaiq_3A" \
+      "${STAGING}/usr/etc/init.d/rkaiq_3A.sh"
+rmdir -p "${STAGING}/usr/etc/init.d" 2>/dev/null || true
+rmdir -p "${STAGING}/etc/init.d" 2>/dev/null || true
 
 mkdir -p "${STAGING}/etc/iqfiles" "${STAGING}/lib/systemd/system" "${STAGING}/DEBIAN"
 cp "${SCRIPT_DIR}"/rkaiq/iqfiles/"${IQDIR}"/*.json "${STAGING}/etc/iqfiles/"
