@@ -40,10 +40,19 @@ detect_device_encryption() {
             [ "$(blkid -o value -s TYPE "${dev}" 2>/dev/null || true)" = "crypto_LUKS" ] && { echo "yes"; return 0; }
         done
         echo "no"
-    elif blkid -t TYPE=crypto_LUKS >/dev/null 2>&1 || [ -e /dev/mapper/armbian-root ]; then
-        echo "yes"
     else
-        echo "no"
+        # Recovery: answer from the root filesystem this system actually runs
+        # from. A system-wide crypto_LUKS scan would let a LUKS partition on an
+        # attached second disk answer for the boot device and reject valid
+        # plain packages (and vice versa).
+        local root_src
+        root_src="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+        [ -n "${root_src}" ] || root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+        [ -n "${root_src}" ] || root_src="$(df / | awk 'NR==2 {print $1}')"
+        case "${root_src}" in
+            /dev/mapper/*|/dev/dm-*) echo "yes" ;;
+            *) [ "$(blkid -o value -s TYPE "${root_src}" 2>/dev/null || true)" = "crypto_LUKS" ] && echo "yes" || echo "no" ;;
+        esac
     fi
 }
 
