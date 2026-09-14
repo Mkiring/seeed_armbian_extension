@@ -245,20 +245,38 @@ resolve_tool() {
     fi
 }
 
+mkimage_supports_signing() {
+    local help
+    help="$("$1" -h 2>&1 || true)"
+    [[ "${help}" != *"Signing / verified boot not supported"* ]]
+}
+
 resolve_signing_mkimage() {
-    # Auto-discover the Rockchip prebuilt mkimage from the armbian-build tree
-    # the u-boot worktree lives in. It bundles its own RSA code and always
-    # signs PSS with the maximum salt length this U-Boot's verifier
-    # (rsa-verify.c) hard-codes, independent of the host's OpenSSL. A
+    # Auto-discover a signing-capable Rockchip prebuilt mkimage from the
+    # armbian-build tree the u-boot worktree lives in. It bundles its own RSA
+    # code and always signs PSS with the maximum salt length this U-Boot's
+    # verifier (rsa-verify.c) hard-codes, independent of the host's OpenSSL. A
     # tree-built mkimage linked against OpenSSL >= 3.5 signs PSS with
-    # digest-length salt, which the device rejects. Mirrors
-    # rk_secure_boot_resolve_mkimage in secure-boot-image.sh.
+    # digest-length salt, which the device rejects.
+    # NB: not every rkbin build can sign (rk3588_rkbin's mkimage is compiled
+    # without CONFIG_FIT_SIGNATURE and silently emits unsigned FITs); mkimage
+    # is SoC-agnostic, so fall through to a sibling build that can.
     local armbian_root candidate
     armbian_root="${UBOOT_DIR%%/cache/sources/*}"
-    candidate="${armbian_root}/cache/sources/rockchip_sdk_tools/rkbin/${BOOT_SOC}_rkbin/tools/mkimage"
-    [[ -x "${candidate}" ]] || return 1
-    printf '%s' "${candidate}"
-    return 0
+    local rkbin_root="${armbian_root}/cache/sources/rockchip_sdk_tools/rkbin"
+    local candidates=(
+        "${rkbin_root}/${BOOT_SOC}_rkbin/tools/mkimage"
+        "${rkbin_root}/rk3576_rkbin/tools/mkimage"
+        "${rkbin_root}/rk3588_rkbin/tools/mkimage"
+        "${rkbin_root}/tools/mkimage"
+    )
+    for candidate in "${candidates[@]}"; do
+        [[ -x "${candidate}" ]] || continue
+        mkimage_supports_signing "${candidate}" || continue
+        printf '%s' "${candidate}"
+        return 0
+    done
+    return 1
 }
 
 extract_source_artifacts() {

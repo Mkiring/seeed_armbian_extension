@@ -76,19 +76,38 @@ function rk_secure_boot_find_kernel_image() {
     display_alert "fit-post-initrd" "Using installed kernel image: ${RK_SECURE_BOOT_KERNEL_IMAGE_PATH}" "info"
 }
 
+function rk_secure_boot_mkimage_supports_signing() {
+    local help
+    help="$("$1" -h 2>&1 || true)"
+    [[ "${help}" != *"Signing / verified boot not supported"* ]]
+}
+
 function rk_secure_boot_resolve_mkimage() {
-    local rkbin_dir
+    local rkbin_dir candidate
 
     RK_SECURE_BOOT_MKIMAGE=""
+
+    # The per-platform rkbin dirs ship different mkimage builds: rk3576_rkbin's
+    # is statically linked with FIT signature support, while rk3588_rkbin's is
+    # built without CONFIG_FIT_SIGNATURE and silently emits unsigned FITs.
+    # mkimage is a host tool and FIT signing is SoC-agnostic, so any
+    # signing-capable prebuilt serves both platforms.
     rkbin_dir="$(resolve_platform_rkbin_dir)"
-    if [[ -x "${rkbin_dir}/tools/mkimage" ]]; then
-        RK_SECURE_BOOT_MKIMAGE="${rkbin_dir}/tools/mkimage"
-    elif [[ -x "$(rk_sdk_rkbin_root)/tools/mkimage" ]]; then
-        RK_SECURE_BOOT_MKIMAGE="$(rk_sdk_rkbin_root)/tools/mkimage"
-    fi
+    local candidates=(
+        "${rkbin_dir}/tools/mkimage"
+        "$(rk_sdk_rkbin_root)/rk3576_rkbin/tools/mkimage"
+        "$(rk_sdk_rkbin_root)/rk3588_rkbin/tools/mkimage"
+        "$(rk_sdk_rkbin_root)/tools/mkimage"
+    )
+    for candidate in "${candidates[@]}"; do
+        [[ -x "${candidate}" ]] || continue
+        rk_secure_boot_mkimage_supports_signing "${candidate}" || continue
+        RK_SECURE_BOOT_MKIMAGE="${candidate}"
+        break
+    done
 
     [[ -x "${RK_SECURE_BOOT_MKIMAGE}" ]] ||
-        exit_with_error "FIT packaging failed: mkimage missing" "${RK_SECURE_BOOT_MKIMAGE}"
+        exit_with_error "FIT signing failed: no signing-capable mkimage under" "$(rk_sdk_rkbin_root)"
 }
 
 function rk_secure_boot_prepare_fit_workdir() {
