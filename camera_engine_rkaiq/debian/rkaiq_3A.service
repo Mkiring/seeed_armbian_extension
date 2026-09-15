@@ -1,10 +1,16 @@
 [Unit]
-Description=Rockchip 3A Image Quality Server
-After=dev-media0.device
+Description=Rockchip rkaiq 3A Image Quality Server
+After=systemd-modules-load.service dev-media0.device
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/rkaiq_3A_server
+# rkaiq's isp_3a_stats_poll thread requires SCHED_RR (priority 20). With the
+# cgroup v2 cpu controller attached to the hierarchy, creating RT threads in
+# non-root cgroups fails with EPERM regardless of capabilities, which leaves
+# AEC without stats and the sensor stuck at minimum exposure (black frames).
+# Migrate the daemon into the root cgroup where RT scheduling is allowed.
+ExecStartPost=/bin/sh -c 'echo $MAINPID > /sys/fs/cgroup/cgroup.procs 2>/dev/null || true'
 Restart=on-failure
 RestartSec=2
 
