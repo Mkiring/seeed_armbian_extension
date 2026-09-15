@@ -5,10 +5,10 @@ documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — secure boot, OTA overhaul, build wrapper
+## [Unreleased] — secure boot, OTA overhaul, boot-disk anchoring, CI
 
-Covers the work on `fix/secure_boot` against `main`
-(merge base `9980aee`, 2026-07-02 → 2026-07-27, 105 commits).
+Covers the work against the initial import (merge base `9980aee`,
+2026-07-02 → 2026-09-15).
 
 ### Added
 
@@ -45,17 +45,72 @@ Covers the work on `fix/secure_boot` against `main`
   - `fit-kernel/rk3576_fit_kernel.its`, `rk3588_fit_kernel.its` — final kernel
     FIT ITS templates, split per SoC
   - `fragments/rk3576-secure-autodecrypt.config`,
-    `fragments/rk3588-secure-autodecrypt.config` — secure U-Boot Kconfig fragments
+    `rk3588-secure-autodecrypt.config` — secure U-Boot Kconfig fragments
 - **Secure A/B FIT OTA.** The A/B backend verifies `boot.itb` and writes it
   directly to the inactive raw `boot_a`/`boot_b` partition. It never mounts a
   FIT boot partition or treats the FIT image as `boot.tar.gz`.
 - **Caller-supplied FIT key directory.** Secure boot can sign with a key
   directory provided by the caller, and verifies the embedded SPL FIT key
   material during build.
+- **`DEFAULT_OVERLAYS` baked into the FIT DTB.** Raw-FIT images have no
+  `/boot` filesystem, so runtime dtbo loading is impossible; the build now
+  applies the overlay list to the device tree copy before FIT packaging.
 - **Encrypted A/B and Recovery OTA.** Both A/B modes create a shared `security`
   partition and format both rootfs slots as LUKS-backed ext4 when automatic
   decryption is enabled. Encrypted images use the initramfs-unlocked
   `/dev/mapper/armbian-userdata` mapper as the overlayroot backing device.
+
+#### OTA payload security
+
+- **Encrypted and signed OTA payloads.** On encrypted-rootfs images the OTA
+  packaging encrypts `rootfs.tar.gz` (AES-256-CBC, key derived from the
+  LUKS passphrase via HKDF-SHA256) and signs `payload.manifest` (IV, plaintext
+  digest, metadata) with the secure-boot RSA key (RSA-PSS/SHA256). The
+  matching public key is installed into the firmware at build time; the device
+  verifies the signature, decrypts, and re-checks digests before applying.
+  Packages carry `OTA_ENCRYPTED` in `package.env` and the CLI refuses a
+  package whose encryption state disagrees with the device.
+
+#### Boot-disk anchoring
+
+- **Pre-filled persistent U-Boot environment in built images.** The final
+  environment (compiled defaults merged with the OTA template) is written as
+  an env blob at the raw offset `0x3f8000` during image build, with overlap
+  checks against the loader and first partition plus a CRC read-back. A/B
+  images get the full slot state (`boot_slot`, `boot_success`,
+  `ota_in_progress`, `slot_retry_max/left`, `ab_preboot`) and
+  `ab_boot_mode=raw-fit` is injected for secure-boot FIT boot.
+- **Bootdev-anchored root selection.** The initramfs resolves the root by
+  the `armbian.bootdev`/`bootdevnum` cmdline tokens — carried by every
+  `bootcmd` branch and exported through `/conf/param.conf` — instead of
+  first-match, so with several disks (or a cloned image) attached, root,
+  userdata, and key material are only ever taken from the disk U-Boot
+  actually booted from.
+
+#### Robustness & tooling
+
+- **SSH power-loss recovery (`ssh-protect`).** Power loss during first boot
+  can zero-fill or truncate `/etc/ssh` files, leaving sshd unable to start
+  and the board unreachable. Every image now ships a repair script running
+  as `ExecStartPre` of `ssh.service`: broken host keys are regenerated, a
+  corrupted `sshd_config` is restored atomically from the distro default
+  (NUL-byte corruption is detected explicitly — `sshd -t` alone treats it
+  as whitespace). No-op on healthy systems.
+- **Offline FIT re-signing (`scripts/repack-fit.sh`).** Re-packs an existing
+  signed `boot.itb` with a new dtbo list and re-signs it with the same RSA
+  key — no Armbian rebuild needed. Includes a sample-FIT builder mode for
+  testing the re-sign path and refuses to re-sign the build-time staging
+  artifact in place.
+- **`seeed-build` CI workflow.** A matrix image builder on GitHub Actions:
+  preflight validates secrets before the multi-hour build (FIT key pair,
+  64-char passphrase, live rclone probe), the matrix is planned from dispatch
+  checkboxes (board × release × tier × OTA × security; plain and secure-boot
+  coexist), images upload to OneDrive pre-release storage with per-run
+  cleanup, and an optional single GitHub Release covers all boards with
+  per-board IMAGE|OTA tables. Board dkms packages (`maxio-phy`,
+  `wq9201s-wifi-bt`, `pcie-rkep`) joined the userspace build matrix.
+- **Board support.** `fcs960k-aic-bluez` installed with the common package
+  set.
 
 #### OTA
 
@@ -91,13 +146,10 @@ Covers the work on `fix/secure_boot` against `main`
   profiles (`recovery`, `ab`, `secure-rootfs`, `secure-boot`) with board,
   release, desktop, and tier options, replacing raw `export`-then-`compile.sh`
   invocations.
-- **Self-applying patch bundles.** The extension entry now stages its own
-  patches into the Armbian build tree:
-  - `patches/armbian-build/0001-rk3588-enable-panthor-gpu-stack.patch`
-  - `patches/u-boot/000{1,2,3}-u-boot-*.patch` (FIT env partition fallback,
-    OS-boot-device scan after SPI boot, recomputer defconfig normalization)
-  - `patches/firstlogin/0001-firstlogin-restart-ssh-on-failure.patch`
-  Each is applied idempotently with reverse-check guarding.
+- **Step-by-step documentation** under `docs/` (getting started, build
+  reference with per-variable source links, per-feature OTA/encryption/
+  secure-boot guides, tools & CI), with a rewritten top-level `README.md`
+  as the quick-entry point.
 - **Seeed SDK tools fork.** `rockchip_sdk_tools` defaults to the Seeed fork
   (`github.com/Seeed-Studio/rockchip_sdk_tools.git`), overridable via
   `RKSDK_TOOLS_GIT_URL` / `RKSDK_TOOLS_BRANCH`.
@@ -106,9 +158,27 @@ Covers the work on `fix/secure_boot` against `main`
 
 ### Changed
 
+- **FIT signing switched to the Rockchip rkbin prebuilt `mkimage`.** The
+  board-side verifier only accepts maximum-salt RSA-PSS signatures, while
+  the in-tree `mkimage` links against the build container's OpenSSL and
+  OpenSSL ≥ 3.5 defaults PSS to digest-length salt — producing signatures
+  that verify at build time and fail on the board. The prebuilt static
+  binary pins the max-salt behavior; the resolver requires a signing-capable
+  `mkimage` (the per-SoC rkbin builds differ — the RK3588 one silently emits
+  unsigned FITs — so any signing-capable prebuilt serves both platforms) and
+  the result is overridable via `RK_SECURE_BOOT_MKIMAGE`. The tree-built
+  `fit_check_sign` remains the build-time verifier so any future salt drift
+  fails the build instead of the boot. Applies to secure-boot image/U-Boot
+  signing and to `repack-fit.sh`.
+- **Default boot partition size raised to 512 MiB** — both the OTA layout
+  default and the secure-boot raw FIT boot partition.
+- **Extension-carried patch bundles dropped** once armbian-build merged the
+  content upstream (firstlogin SSH restart, RK3576 Panfrost / RK3588 Panthor
+  GPU stacks, remaining U-Boot/armbian-build patches); board defconfigs stay
+  in the Armbian build tree.
 - **OTA entry script slimmed down.** `ota-support.sh` is now a thin Armbian
   hook entry point (was a ~1130-line monolith); implementation moved into
-  `armbian-ota/build-hooks/`.
+  `armbian-ota/{common,recovery,ab}/build-hooks/`.
 - **Secure boot / auto-decrypt hooks modularized.** `rk-secure-boot.sh` and
   `rk-auto-decryption-disk.sh` are now Armbian hook wrappers that load
   implementation from `rk_secure-disk-encryption/build-hooks/{common,
@@ -132,11 +202,8 @@ Covers the work on `fix/secure_boot` against `main`
 ### Removed
 
 - **`firstlogin-protection/` extension dropped** (upstreamed). The hardened
-  firstlogin logic and its atomic-write / hardening patches
-  (`armbian-common-atomic-write.patch`,
-  `armbian-firstlogin-hardening.patch`, `armbian-firstrun-atomic-write.patch`)
-  are removed; a small `0001-firstlogin-restart-ssh-on-failure.patch` replaces
-  the SSH-restart behavior.
+  firstlogin logic and its atomic-write / hardening patches are removed; the
+  SSH-restart behavior moved upstream.
 - **Offline `ota_tools/` bundle** removed from OTA packages — the OTA runtime
   is now installed into the firmware at image build time.
 - **Old OTA directory structure** removed: `runtime/` (monolithic CLI +
@@ -150,6 +217,36 @@ Covers the work on `fix/secure_boot` against `main`
 
 ### Fixed
 
+- **Multi-disk boot anchoring.** With several disks attached (or a cloned
+  image as a second device), every lookup now binds to the disk U-Boot
+  actually booted from, so foreign or cloned disks can no longer capture
+  root selection, updates, or key material:
+  - A/B boot and rootfs selection anchored to U-Boot's actual boot disk;
+    userdata anchored to the boot disk across initramfs and runtime.
+  - Recovery userdata lookup anchored to the rootfs disk; recovery
+    initramfs writes and security-partition key lookup anchored to the boot
+    disk; the device-encryption probe anchored likewise, and the recovery
+    probe answers from the running root filesystem (a LUKS volume on an
+    attached second disk no longer answers for the boot device).
+  - LUKS `PARTLABEL` lookups iterate all candidates and stay anchored to the
+    root disk, so a plain image on a second disk can no longer make the
+    userdata unlock silently fail and drop runtime state onto the lower
+    layer (the "OTA reflashed my device" data-loss class).
+- **Raw-FIT A/B first boot without the distro scan.** Initial images without
+  `ab_boot_mode` fell into `distro_bootcmd`, where each scanned device ran
+  `boot_android` and repointed the FIT boot device pointer (observed as
+  `No boot partition` on RK3588 SD boot). The scan hooks no longer call
+  `boot_android`, the dead `bootrkp` tail is gone, and `raw-fit` is
+  pre-filled at build time.
+- **init-top ROOT export.** initramfs-tools runs init-top scripts as child
+  processes, so inline `ROOT=` assignments never propagated; the anchored
+  root is now exported through `/conf/param.conf`.
+- **`armbian-ota switch-slot`** previously reported success while U-Boot
+  kept booting the old slot; the slot switch now persists.
+- **User device-tree overlays are preserved** in `armbianEnv.txt` across OTA
+  updates, and `armbianEnv.txt.dist` is kept in sync on both OTA paths.
+- **Recovery OTA debug/verbosity settings** (printk level, xtrace) no longer
+  leak into normal boots.
 - `fix(build)`: keep the cryptroot passphrase out of `argv` (pass via env/stdin
   instead of command line).
 - `fix(autodecrypt)`: apply the defconfig fragment *after* patching; retain
@@ -162,7 +259,8 @@ Covers the work on `fix/secure_boot` against `main`
 - `fix(recovery)`: use BusyBox-compatible `tar` extraction in the initramfs.
 - `fix(secure-boot)`: isolate the U-Boot package name; verify the embedded SPL
   FIT key; sign the final secure boot FIT directly.
-- `fix(firstlogin)`: restart SSH without aborting first-login setup.
+- `fix(u-boot)`: RK3576 `fdt-fixup` NULL-bootdev fallback staged for boards
+  that boot without a bootdev token.
 - `build`: close a stale cryptroot mapper before image build.
 
 ## [1.0.0] — 2026-04-14
@@ -171,5 +269,5 @@ Initial import of the Seeed Armbian extension: OTA updates (Recovery + A/B),
 LUKS disk encryption with OP-TEE auto-decrypt, firstlogin hardening, and
 security hardening.
 
-[Unreleased]: https://github.com/Seeed-Studio/seeed_armbian_extension/compare/v1.0...fix/secure_boot
+[Unreleased]: https://github.com/Seeed-Studio/seeed_armbian_extension/compare/v1.0...main
 [1.0.0]: https://github.com/Seeed-Studio/seeed_armbian_extension/releases/tag/v1.0
