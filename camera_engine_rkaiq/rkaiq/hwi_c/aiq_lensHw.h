@@ -85,11 +85,13 @@ struct rk_cam_set_focus {
 
 struct rk_cam_zoom_pos {
     s32 zoom_pos;
+    s32 zoom1_pos;
     s32 focus_pos;
 };
 
 struct rk_cam_set_zoom {
     bool is_need_zoom_reback;
+    bool is_need_zoom1_reback;
     bool is_need_focus_reback;
     u32 setzoom_cnt;
     struct rk_cam_zoom_pos zoom_pos[VCMDRV_SETZOOM_MAXCNT];
@@ -118,6 +120,14 @@ struct rk_cam_vcm_cfg {
     int step_mode;
 };
 
+struct rk_cam_otp_info {
+    bool otp_valid;
+    float posture;
+    float hysteresis;
+    float startCurrent;
+    float endCurrent;
+};
+
 #define LENSHW_RECORD_SOF_NUM 256
 
 #define LENS_SUBM (0x10)
@@ -141,13 +151,16 @@ struct AiqLensHw_s {
     struct v4l2_queryctrl _iris_query;
     struct v4l2_queryctrl _focus_query;
     struct v4l2_queryctrl _zoom_query;
+    struct v4l2_queryctrl _zoom1_query;
     struct rk_cam_motor_tim _dciris_tim;
     struct rk_cam_motor_tim _piris_tim;
     struct rk_cam_vcm_tim _focus_tim;
     struct rk_cam_vcm_tim _zoom_tim;
+    struct rk_cam_vcm_tim _zoom1_tim;
     bool _iris_enable;
     bool _focus_enable;
     bool _zoom_enable;
+    bool _zoom1_enable;
     bool _zoom_correction;
     bool _focus_correction;
     int _piris_step;
@@ -158,8 +171,10 @@ struct AiqLensHw_s {
     int _last_hdciris_target;
     int _focus_pos;
     int _zoom_pos;
+    int _zoom1_pos;
     int _last_zoomchg_focus;
     int _last_zoomchg_zoom;
+    int _last_zoomchg_zoom1;
     int64_t _frame_time[LENSHW_RECORD_SOF_NUM];
     uint32_t _frame_sequence[LENSHW_RECORD_SOF_NUM];
     int _rec_sof_idx;
@@ -187,7 +202,7 @@ struct AiqLensHw_s {
 };
 
 XCamReturn AiqLensHw_queryLensSupport(AiqLensHw_t* pLensHw);
-XCamReturn AiqLensHw_getOTPData(AiqLensHw_t* pLensHw);
+XCamReturn AiqLensHw_setOTPData(AiqLensHw_t* pLensHw, struct rk_cam_otp_info *otp_info);
 XCamReturn AiqLensHw_getLensModeData(AiqLensHw_t* pLensHw, rk_aiq_lens_descriptor* lens_des);
 XCamReturn AiqLensHw_getLensVcmCfg(AiqLensHw_t* pLensHw, rk_aiq_lens_vcmcfg* lens_cfg);
 XCamReturn AiqLensHw_setLensVcmCfg(AiqLensHw_t* pLensHw, rk_aiq_lens_vcmcfg* lens_cfg);

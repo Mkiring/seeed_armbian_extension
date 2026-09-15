@@ -238,7 +238,7 @@ rk_aiq_uapi2_camgroup_create(rk_aiq_camgroup_instance_cfg_t* cfg)
         goto error;
     }
 
-#if defined(ISP_HW_V39) || defined(ISP_HW_V33)
+#if defined(ISP_HW_V39) || defined(ISP_HW_V33) || defined(ISP_HW_V35)
     rk_aiq_uapi2_awb_register((rk_aiq_sys_ctx_t*)camgroup_ctx, NULL);
     rk_aiq_uapi2_ae_register((rk_aiq_sys_ctx_t*)camgroup_ctx, NULL);
 #endif
@@ -510,6 +510,11 @@ rk_aiq_uapi2_camgroup_destroy(rk_aiq_camgroup_ctx_t* camgroup_ctx)
 #ifdef RKAIQ_ENABLE_CAMGROUP
     ENTER_XCORE_FUNCTION();
 
+#if RKAIQ_HAVE_DUMPSYS
+    aiq_ipcs_exit();
+    RKAIQRegistry_deinit();
+#endif
+
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
     {
         RKAIQ_API_SMART_LOCK(camgroup_ctx);
@@ -534,7 +539,7 @@ rk_aiq_uapi2_camgroup_destroy(rk_aiq_camgroup_ctx_t* camgroup_ctx)
             LOGE("%s: deinit failed !", __func__);
             return ret;
         }
-#if defined(ISP_HW_V39) || defined(ISP_HW_V33)
+#if defined(ISP_HW_V39) || defined(ISP_HW_V33) || defined(ISP_HW_V35)
         rk_aiq_uapi2_awb_unRegister((rk_aiq_sys_ctx_t*)camgroup_ctx);
         rk_aiq_uapi2_ae_unRegister((rk_aiq_sys_ctx_t*)camgroup_ctx);
 #endif
@@ -547,11 +552,6 @@ rk_aiq_uapi2_camgroup_destroy(rk_aiq_camgroup_ctx_t* camgroup_ctx)
         aiq_free(camgroup_ctx->_srcOverlapMap_s);
     aiqMutex_deInit(&camgroup_ctx->_apiMutex);
     aiq_free(camgroup_ctx);
-
-#if RKAIQ_HAVE_DUMPSYS
-    aiq_ipcs_exit();
-    RKAIQRegistry_deinit();
-#endif
 
     LOGD("%s: destroy camgroup success !", __func__);
 

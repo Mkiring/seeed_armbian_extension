@@ -329,6 +329,7 @@ void LdcAlgoAdaptor_onFrameEvent(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* 
     if (adp->enable_) adp->started_ = true;
 
     if (outparams->cfg_update) {
+        adp->correct_level_ = LdchAdaptee_getCorrectLevel(adp->ldch_adaptee_);
         LOGD_ALDC("LDC result: cfg upd %d, ldch en %d, ldcv en%d", outparams->cfg_update,
                   adp->ldch_en_, adp->ldcv_en_);
     }

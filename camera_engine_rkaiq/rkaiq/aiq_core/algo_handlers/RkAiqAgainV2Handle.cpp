@@ -195,8 +195,14 @@ XCamReturn RkAiqAgainV2HandleInt::prepare() {
     RkAiqAlgoConfigAgainV2* again_config_int = (RkAiqAlgoConfigAgainV2*)mConfig;
     again_config_int->mem_ops_ptr = mAiqCore->mShareMemOps;
 
+#ifdef DISABLE_HANDLE_ATTRIB
+    mCfgMutex.lock();
+#endif
     RkAiqAlgoDescription* des = (RkAiqAlgoDescription*)mDes;
     ret                       = des->prepare(mConfig);
+#ifdef DISABLE_HANDLE_ATTRIB
+    mCfgMutex.unlock();
+#endif
     RKAIQCORE_CHECK_RET(ret, "again algo prepare failed");
 
     EXIT_ANALYZER_FUNCTION();

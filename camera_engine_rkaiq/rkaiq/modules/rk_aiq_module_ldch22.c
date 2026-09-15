@@ -55,10 +55,10 @@ void rk_aiq_ldch22_params_cvt(const common_cvt_info_t* cvtinfo, void* attr,
 #endif
 
     if (is_multi_isp) {
-#if defined(ISP_HW_V33)
-        struct isp32_ldch_cfg* cfg_right = &(isp_params->isp_cfg + 1)->others.ldch_cfg;
-#else
+#if defined(ISP_HW_V39)
         struct isp39_ldch_cfg* cfg_right = &(isp_params->isp_cfg + 1)->others.ldch_cfg;
+#else
+        struct isp32_ldch_cfg* cfg_right = &(isp_params->isp_cfg + 1)->others.ldch_cfg;
 #endif
         memcpy(cfg_right, phwcfg, sizeof(*cfg_right));
         cfg_right->buf_fd = psta->lutMapCfg.sw_ldcT_lutMapBuf_fd[1];

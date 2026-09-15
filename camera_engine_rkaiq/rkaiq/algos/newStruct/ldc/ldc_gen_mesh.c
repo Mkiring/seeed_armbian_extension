@@ -28,6 +28,10 @@
 #include "c_base/aiq_thread.h"
 #include "xcore/xcam_obj_debug.h"
 
+#ifdef ANDROID_OS
+#include <cutils/properties.h>
+#endif
+
 #define LDC_HELP_THREAD_MSG_MAX (3)
 
 /*

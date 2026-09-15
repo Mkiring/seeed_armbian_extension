@@ -86,4 +86,29 @@ XCamReturn rk_aiq_user_api2_gamma_QueryStatus(const rk_aiq_sys_ctx_t* sys_ctx,
     return ret;
 }
 
+XCamReturn rk_aiq_user_api2_gamma_SetGammaStrength(const rk_aiq_sys_ctx_t* sys_ctx,
+                                            int strg) {
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    CHECK_USER_API_ENABLE2(sys_ctx);
+    CHECK_USER_API_ENABLE(RK_AIQ_ALGO_TYPE_AGAMMA);
+    RKAIQ_API_SMART_LOCK(sys_ctx);
+    rk_aiq_sys_ctx_array_t ctx_array = rk_aiq_user_api2_common_getSysCtxArray(sys_ctx);
+
+    int type           = RESULT_TYPE_AGAMMA_PARAM;
+    int man_param_size = sizeof(gamma_param_t);
+    int aut_param_size = sizeof(agamma_param_auto_t);
+
+    for (int i = 0; i < ctx_array.num; i++) {
+        if (ctx_array.ctx[i] ==  NULL)
+            continue;
+
+        AiqAlgoHandler_t *algo_handle =
+            (AiqAlgoHandler_t*)ctx_array.ctx[i]->_analyzer->mAlgoHandleMaps[RK_AIQ_ALGO_TYPE_AGAMMA];
+
+        AiqGammaHandler_setStrength(algo_handle, strg);
+    }
+
+    return ret;
+}
+
 RKAIQ_END_DECLARE

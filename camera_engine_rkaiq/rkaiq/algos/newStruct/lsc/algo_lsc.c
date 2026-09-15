@@ -28,6 +28,11 @@
 //#include "lsc_common.h"
 //#include "lsc_convert_otp.h"
 
+#if RKAIQ_HAVE_DUMPSYS
+#include "include/algo_lsc_info.h"
+#include "rk_info_utils.h"
+#endif
+
 //RKAIQ_BEGIN_DECLARE
 
 
@@ -75,7 +80,7 @@ static int get_all_mesh_by_name(LscContext_t *pLscCtx, char *name) {
     for (i=0; i<table_len; i++) {
         alsc_tableAll_t *pTable = &calibdb->tableAll[i];
         if (strncmp(name, pTable->sw_lscC_illu_name, ALSC_ILLUM_NAME_LEN) == 0) {
-            LOGI_ALSC("%s: pTable name %s, sw_lscC_vignetting_val %f i %d\n", 
+            LOGI_ALSC("%s: pTable name %s, sw_lscC_vignetting_val %f i %d\n",
                     __func__, pTable->sw_lscC_illu_name, pTable->sw_lscC_vignetting_val, i);
             mesh_all[cnt] = i;
             cnt ++;
@@ -279,9 +284,8 @@ XCamReturn Alsc_prepare(RkAiqAlgoCom* params)
     pLscCtx->lsc_attrib =
         (lsc_calib_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, lsc));
 
-    pLscCtx->pre_illu_idx = INVALID_ILLU_IDX;
-    pLscCtx->pre_vignetting = 0.0;
-    pLscCtx->is_calib_update = false;
+    pLscCtx->isReCal_ = true;
+    pLscCtx->is_calib_update = true;
     pLscCtx->lsc_tableAll_use_len = pLscCtx->lsc_attrib->calibdb.tableAll_len;
 
     return XCAM_RETURN_NO_ERROR;
@@ -292,29 +296,37 @@ XCamReturn Alsc_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
     LscContext_t* pLscCtx = (LscContext_t *)inparams->ctx;
     lsc_api_attrib_t* tunning = &pLscCtx->lsc_attrib->tunning;
     alsc_lscCalib_t* calibdb = &pLscCtx->lsc_attrib->calibdb;
+    alsc_param_dyn_t* pdyn = &tunning->stAuto.dyn;
 
-    bool need_recal = false;
+    bool need_recal = pLscCtx->isReCal_;
 
     if (inparams->u.proc.is_attrib_update || inparams->u.proc.init) {
         need_recal = true;
     }
 
-    int illu_idx = illu_estm_once(&tunning->stAuto.dyn, swinfo->awbGain);
+    if (pLscCtx->lsc_selector.frame_num == 0 || inparams->u.proc.is_attrib_update) {
+        for (int i = 0; i < pdyn->sw_lscT_illuLink_len; i++) {
+            selector_add_source(&pLscCtx->lsc_selector, i,
+                                pdyn->illuLink[i].sw_lscC_illu_name,
+                                pdyn->illuLink[i].sw_lscC_wbGainR_val,
+                                pdyn->illuLink[i].sw_lscC_wbGainB_val);
+        }
+        pLscCtx->lsc_selector.source_count = MIN(pdyn->sw_lscT_illuLink_len, ILLUM_MAX_NUM);
+    }
+
+    LOGD_ALSC("awbGain= (%f, %f)", swinfo->awbGain[0], swinfo->awbGain[1]);
+    int illu_idx = -1;
+    selector_process_frame(&pLscCtx->lsc_selector, swinfo->awbGain, &illu_idx);
     if (illu_idx < 0) {
         LOGE_ALSC("illu_estm_once failed!");
         return XCAM_RETURN_ERROR_PARAM;
     }
 
     alsc_param_illuLink_t *pIlluCase = &tunning->stAuto.dyn.illuLink[illu_idx];
-
     if (illu_idx != pLscCtx->pre_illu_idx || pLscCtx->is_calib_update) {
-        if (illu_idx != pLscCtx->pre_illu_idx) {
-            pLscCtx->pre_illu_idx  = illu_idx;
-            need_recal = true;
-        }
-
         pLscCtx->illu_mesh_len =
             get_all_mesh_by_name(pLscCtx, pIlluCase->sw_lscC_illu_name);
+        need_recal = true;
     }
 
     float vig = get_vign_by_gain(pIlluCase->gain2VigCurve.sw_lscT_isoIdx_val, pIlluCase->gain2VigCurve.sw_lscT_vignetting_val, swinfo->sensorGain);
@@ -357,10 +369,11 @@ XCamReturn Alsc_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
             lscRes->dyn.meshGain = pLscCtx->damped_matrix;
         else
             lscRes->dyn.meshGain  = pLscCtx->undamped_matrix;
-
+        pLscCtx->pre_illu_idx = illu_idx;
         outparams->cfg_update = true;
         outparams->en = tunning ->en;
         outparams->bypass = tunning ->bypass;
+        pLscCtx->isReCal_ = false;
         LOGD_ALSC("lsc en:%d, bypass:%d", outparams->en, outparams->bypass);
     }
     return XCAM_RETURN_NO_ERROR;
@@ -373,6 +386,8 @@ create_context(RkAiqAlgoContext** context, const AlgoCtxInstanceCfg* cfg)
 
     LscContext_t *ctx = aiq_mallocz(sizeof(LscContext_t));
     *context = (RkAiqAlgoContext*)ctx;
+    selector_init(&ctx->lsc_selector);
+    ctx->pre_illu_idx = INVALID_ILLU_IDX;
 
     LOGV_ALSC("%s: (exit)\n", __FUNCTION__ );
     return result;
@@ -419,9 +434,20 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
     return XCAM_RETURN_NO_ERROR;
 }
 
+#if RKAIQ_HAVE_DUMPSYS
+static int dump(const RkAiqAlgoCom* config, st_string* result)
+{
+    // lsc_dump_mod_param(config, result);
+    lsc_dump_mod_attr(config, result);
+    lsc_dump_mod_status(config, result);
+
+    return 0;
+}
+#endif
+
 XCamReturn algo_lsc_queryalscStatus
 (
-    RkAiqAlgoContext* ctx, 
+    RkAiqAlgoContext* ctx,
     alsc_status_t* status
 )
 {
@@ -433,10 +459,10 @@ XCamReturn algo_lsc_queryalscStatus
     LscContext_t* pLscCtx = (LscContext_t*)ctx;
     lsc_param_auto_t* stAuto = &pLscCtx->lsc_attrib->tunning.stAuto;
 
-    strncpy(status->sw_lscC_illuUsed_name, 
-            stAuto->dyn.illuLink[pLscCtx->pre_illu_idx].sw_lscC_illu_name, 
+    strncpy(status->sw_lscC_illuUsed_name,
+            stAuto->dyn.illuLink[pLscCtx->pre_illu_idx].sw_lscC_illu_name,
             ALSC_ILLUM_NAME_LEN - 1);
-    
+
     status->sw_lscC_vignetting_val = pLscCtx->pre_vignetting;
 
     return XCAM_RETURN_NO_ERROR;
@@ -505,6 +531,9 @@ RkAiqAlgoDescription g_RkIspAlgoDescLsc = {
     .pre_process = NULL,
     .processing = processing,
     .post_process = NULL,
+#if RKAIQ_HAVE_DUMPSYS
+    .dump = dump,
+#endif
 };
 
 //RKAIQ_END_DECLARE

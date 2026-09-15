@@ -20,10 +20,10 @@ dec_algo(af rk_aiq_algo_af_itf.c ${AF_SRC})
 if(RKAIQ_HAVE_PDAF)
     if (${CMAKE_SYSTEM_NAME} STREQUAL "Android")
     if("${ARCH}" STREQUAL "arm")
-        set(_PDAF_SRC ${CMAKE_CURRENT_SOURCE_DIR}/android/arm/librkaiq_pdaf.a)
+        file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/android/arm/librkaiq_pdaf.a	DESTINATION ${LIBRARY_OUTPUT_PATH})
     endif()
     if("${ARCH}" STREQUAL "aarch64")
-        set(_PDAF_SRC ${CMAKE_CURRENT_SOURCE_DIR}/android/arm64/librkaiq_pdaf.a)
+        file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/android/arm64/librkaiq_pdaf.a  DESTINATION ${LIBRARY_OUTPUT_PATH})
     endif()
     else ()
     if("${ARCH}" STREQUAL "arm")
@@ -38,6 +38,7 @@ if(RKAIQ_HAVE_PDAF)
     add_custom_target(copy_pdaf ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBRARY_OUTPUT_PATH}
         COMMAND ${CMAKE_COMMAND} -E copy ${_PDAF_SRC} ${LIBRARY_OUTPUT_PATH}/librkaiq_pdaf.a
+        BYPRODUCTS ${LIBRARY_OUTPUT_PATH}/librkaiq_pdaf.a
         COMMENT "Copying librkaiq_pdaf.a to ${LIBRARY_OUTPUT_PATH}"
     )
 

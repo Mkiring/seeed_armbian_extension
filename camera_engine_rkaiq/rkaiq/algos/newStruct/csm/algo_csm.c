@@ -101,6 +101,10 @@ prepare(RkAiqAlgoCom* params)
         }
     }
 
+    pCsmCtx->csm_attrib =
+        (csm_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, csm));
+    pCsmCtx->isReCal_ = true;
+
     LOG1_ACSM("%s: (exit)\n", __FUNCTION__ );
     return result;
 }

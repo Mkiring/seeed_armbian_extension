@@ -11,11 +11,19 @@
 #include "uAPI2/rk_aiq_user_api2_stats.h"
 #include "uAPI2/rk_aiq_user_api2_awb.h"
 #include "uAPI2/rk_aiq_user_api2_sysctl.h"
+#if defined(USE_NEWSTRUCT)
+#include "hwi_c/aiq_CamHwBase.h"
+#include "uAPI2_c/rk_aiq_api_private_c.h"
+#endif
 
 #define USE_IPC_SERVER
 
 #ifdef USE_IPC_SERVER
-#define LOCALSOCKET_NAME "/tmp/UNIX.domain0"
+#ifdef __ANDROID__
+#define LOCALSOCKET_NAME "/dev/socket/camera_tool"
+#else
+#define LOCALSOCKET_NAME "/tmp/UNIX.domain"
+#endif
 #else
 #ifdef __ANDROID__
 #define LOCALSOCKET_NAME "/dev/socket/camera_tool"
@@ -137,15 +145,16 @@ static void *ClientThreadFunc(void *p)
     memset (&addr, 0, sizeof (addr));
 
     /* unix_path_max appears to be missing on linux */
-    namelen = strlen(LOCALSOCKET_NAME);
     addr.sun_family = AF_LOCAL;
-    strcpy(addr.sun_path, LOCALSOCKET_NAME);
+    sprintf(addr.sun_path, "%s%d", LOCALSOCKET_NAME, cid);
+    namelen = strlen(addr.sun_path);
     alen = namelen + offsetof(struct sockaddr_un, sun_path) + 1;
     LOGD_IPC("%s[%d]: local client sun_path %s, len %d", __func__, cid, addr.sun_path, namelen);
 
     ctx->sockfd = socket(AF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (ctx->sockfd <= 0) {
         LOGE_IPC("%s[%d]: create socket error: %s", strerror(errno), __func__, cid);
+        ctx->sockfd = 0;
         return NULL;
     }
     LOGI_IPC("%s[%d]: create sockfd %d...", __func__, cid, ctx->sockfd);
@@ -157,12 +166,12 @@ static void *ClientThreadFunc(void *p)
     setsockopt(ctx->sockfd, SOL_SOCKET, SO_REUSEADDR, &n, sizeof(n));
 
     if (bind(ctx->sockfd, (struct sockaddr *) &addr, alen) != 0) {
-        LOGE_IPC("bind local server socket error!");
+        LOGE_IPC("bind local server socket error: %s", strerror(errno));
         return NULL;
     }
     LOGD_IPC("bind local server socket ok ...");
     if (listen(ctx->sockfd, 2) != 0) {
-        LOGE_IPC("listen local server socket error!");
+        LOGE_IPC("listen local server socket error: %s", strerror(errno));
         return NULL;
     }
     LOGD_IPC("listen local server socket ok ...");
@@ -210,7 +219,12 @@ int socket_client_start(void *aiqctx, SocketClientCtx_t *ctx, int cid) {
         return -1;
     }
 
-    ret = pthread_create(&ctx->client_thread, NULL, ClientThreadFunc, ctx);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    ret = pthread_create(&ctx->client_thread, &attr, ClientThreadFunc, ctx);
+    pthread_attr_destroy(&attr);
     if (ret != 0) {
         LOGE_IPC("%s[%d]: create ipc thread error: %s", __func__, cid, strerror(ret));
         return -1;
@@ -229,6 +243,12 @@ void socket_client_exit(SocketClientCtx_t *ctx) {
         ctx->quit = true;
         ssize_t size = write(ctx->stopfd[1], &c, sizeof(c));
         pthread_join(ctx->client_thread, NULL);
+        int try_times = 300;
+        while (ctx->thread_running && try_times--) {
+            usleep(3*1000);
+        }
+        if (ctx->thread_running || try_times == 0)
+            LOGE_IPC("%s[%d]: quit timeout ", __func__, cid);
     }
 
     if (ctx->recvbuf)
@@ -255,8 +275,12 @@ void socket_client_setNote(SocketClientCtx_t *ctx, uint32_t ret, char *str)
         rec->ret = ret;
 
     if (rec->note[0] == 0) {
-        if (str)
-            strncpy(rec->note, str, 128);
+        if (str) {
+            strncpy(rec->note, str, 127);
+            if (strlen(str) > 127) {
+                LOGW_IPC("note info more len 127 byte, cut of 127 char");
+            }
+        }
     }
 }
 
@@ -294,6 +318,53 @@ static void copyRkAiqExpParamComb_t2RkToolExpParam_t(RkAiqExpParamComb_t *in, Rk
     out->exp_sensor_params.isp_digital_gain        = in->exp_sensor_params.isp_digital_gain;
 }
 
+static void _getEffWbGain(void* aiqctx, uint32_t fid, RkToolAwbParam_t* out)
+{
+#if defined(USE_NEWSTRUCT)
+    aiq_isp_effect_params_t* ispParams = NULL;
+
+    AiqCamHw_getEffectiveIspParams(((rk_aiq_sys_ctx_t*)aiqctx)->_camHw, &ispParams, fid);
+    if (ispParams) {
+        struct isp32_awb_gain_cfg* in = &ispParams->awb_gain_cfg;
+        out->awb_gain_gb = (in->awb1_gain_gb >> 8) + (in->awb1_gain_gb & 0xFF) / 256.0f;
+        out->awb_gain_gr = (in->awb1_gain_gr >> 8) + (in->awb1_gain_gr & 0xFF) / 256.0f;
+        out->awb_gain_b = (in->awb1_gain_b >> 8) + (in->awb1_gain_b & 0xFF) / 256.0f;
+        out->awb_gain_r = (in->awb1_gain_r >> 8) + (in->awb1_gain_r & 0xFF) / 256.0f;
+        AIQ_REF_BASE_UNREF(&ispParams->_ref_base);
+    }
+#endif
+}
+
+rk_aiq_isp_tool_hdr_compr_curve_t* socket_client_get_hdrComprCurve(void* aiqctx) {
+    rk_aiq_isp_tool_hdr_compr_curve_t* tool_compr_curve =
+        aiq_mallocz(sizeof(rk_aiq_isp_tool_hdr_compr_curve_t));
+    if (tool_compr_curve == NULL) {
+        LOGE_IPC("malloc tool_compr_curve failed");
+        return NULL;
+    }
+
+    XCamReturn ret        = XCAM_RETURN_NO_ERROR;
+    RkAiqHdrCompr_t compr = {0};
+    ret                   = rk_aiq_uapi2_sysctl_getHdrComprCurve((rk_aiq_sys_ctx_t*)aiqctx, &compr);
+    if (ret != XCAM_RETURN_NO_ERROR) {
+        LOGE_IPC("get hdr compr curve failed, ret: %d\n", ret);
+        if (tool_compr_curve) {
+            aiq_free(tool_compr_curve);
+        }
+        return NULL;
+    } else {
+        tool_compr_curve->version = 0x0100;
+        tool_compr_curve->point   = compr.point;
+        tool_compr_curve->src_bit = compr.src_bit;
+        tool_compr_curve->k_shift = compr.k_shift;
+        memcpy(tool_compr_curve->data_compr, compr.data_compr, sizeof(compr.data_compr));
+        memcpy(tool_compr_curve->data_src, compr.data_src, sizeof(compr.data_src));
+        memcpy(tool_compr_curve->slope_k, compr.slope_k, sizeof(compr.slope_k));
+    }
+
+    return tool_compr_curve;
+}
+
 rk_aiq_isp_tool_stats_t *socket_client_get_isp_statics(void* aiqctx)
 {
     rk_aiq_isp_statistics_t aiq_stats;
@@ -302,7 +373,7 @@ rk_aiq_isp_tool_stats_t *socket_client_get_isp_statics(void* aiqctx)
     XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(aiqctx, &aiq_stats, 300);
     LOGI_IPC("%s: frameId: %d\n",__func__, tool_stats->frameID);
     if (ret == XCAM_RETURN_NO_ERROR) {
-        tool_stats->version = 0x0100;
+        tool_stats->version = 0x0101;
         tool_stats->frameID = aiq_stats.frame_id;
         copyRkAiqExpParamComb_t2RkToolExpParam_t(&aiq_stats.aec_stats.ae_exp.LinearExp, &tool_stats->linearExp);
         copyRkAiqExpParamComb_t2RkToolExpParam_t(&aiq_stats.aec_stats.ae_exp.HdrExp[0], &tool_stats->hdrExp[0]);
@@ -311,6 +382,8 @@ rk_aiq_isp_tool_stats_t *socket_client_get_isp_statics(void* aiqctx)
     } else {
         LOGE_IPC("%s: call rk_aiq_uapi2_stats_getIspStats error",  __func__);
     }
+
+    _getEffWbGain(aiqctx, aiq_stats.frame_id, &tool_stats->awbGain);
 
     return tool_stats;
 }

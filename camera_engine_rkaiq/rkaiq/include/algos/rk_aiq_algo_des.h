@@ -23,6 +23,8 @@
 #include "xcore/base/xcam_common.h"
 #include "common/rk_aiq_comm.h"
 
+#define RK_AIQ_ISO_STEP_MAX  13
+
 /*
  * This file is used to define all the algos interfaces, eg. including ae, awb
  * af, anr and etc. . The typical call routine by user is as follow:
@@ -63,6 +65,7 @@ typedef void CamCalibDbContext_t;
 #endif
 typedef struct CamCalibDbV2Context_s CamCalibDbV2Context_t;
 typedef struct _RkAiqResComb RkAiqResComb;
+typedef struct st_string_s st_string;
 
 typedef enum RkAiqAlgoType_e {
     RK_AIQ_ALGO_TYPE_NONE = -1,
@@ -108,6 +111,11 @@ typedef enum RkAiqAlgoType_e {
     RK_AIQ_ALGO_TYPE_AENH,
     RK_AIQ_ALGO_TYPE_ALDC,
     RK_AIQ_ALGO_TYPE_AHSV,
+    RK_AIQ_ALGO_TYPE_AIBNR,
+    RK_AIQ_ALGO_TYPE_AMTD,
+    RK_AIQ_ALGO_TYPE_AIRMS,
+    RK_AIQ_ALGO_TYPE_AIYNR,
+    RK_AIQ_ALGO_TYPE_BAYERTNR2,
     RK_AIQ_ALGO_TYPE_MAX
 } RkAiqAlgoType_t;
 
@@ -158,10 +166,13 @@ typedef struct prepare_s {
 typedef struct proc_s {
     bool init;
     int iso;
+    int aibnr_fixIndex;
     bool fill_light_on;
     bool gray_mode;
     bool is_bw_sensor;
     bool is_attrib_update;
+    bool is_aibnr_autorun;
+    bool is_aibnr_force_update;
     RKAiqAecExpInfo_t *preExp;
     RKAiqAecExpInfo_t *curExp;
     RKAiqAecExpInfo_t *nxtExp;
@@ -195,6 +206,7 @@ typedef struct _RkAiqAlgoDescription {
     XCamReturn (*pre_process)(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams);
     XCamReturn (*processing)(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams);
     XCamReturn (*post_process)(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams);
+    int (*dump)(const RkAiqAlgoCom* config, st_string* result);
 } RkAiqAlgoDescription;
 
 RKAIQ_END_DECLARE

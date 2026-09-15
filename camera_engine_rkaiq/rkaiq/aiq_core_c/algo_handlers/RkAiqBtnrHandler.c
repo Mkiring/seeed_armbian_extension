@@ -41,8 +41,10 @@ static XCamReturn _handlerBtnr_prepare(AiqAlgoHandler_t* pAlgoHandler) {
     ret = AiqAlgoHandler_prepare(pAlgoHandler);
     RKAIQCORE_CHECK_RET(ret, "btnr handle prepare failed");
 
+    GlobalParamsManager_lockAlgoParam(pAlgoHandler->mAiqCore->mGlobalParamsManger, pAlgoHandler->mResultType);
     RkAiqAlgoDescription* des = (RkAiqAlgoDescription*)pAlgoHandler->mDes;
     ret                       = des->prepare(pAlgoHandler->mConfig);
+    GlobalParamsManager_unlockAlgoParam(pAlgoHandler->mAiqCore->mGlobalParamsManger, pAlgoHandler->mResultType);
     RKAIQCORE_CHECK_RET(ret, "btnr algo prepare failed");
 
     EXIT_ANALYZER_FUNCTION();
@@ -63,7 +65,7 @@ static XCamReturn _handlerBtnr_processing(AiqAlgoHandler_t* pAlgoHandler) {
         RKAIQCORE_CHECK_RET(ret, "btnr handle processing failed");
     }
 
-#if defined(ISP_HW_V39) || defined(ISP_HW_V33)
+#if defined(ISP_HW_V39) || defined(ISP_HW_V33) || defined(ISP_HW_V35)
     RkAiqAlgoProcBtnr* btnr_proc_param = (RkAiqAlgoProcBtnr*)pAlgoHandler->mProcInParam;
     btnr_proc_param->blc_ob_predgain = 1.0;
 #else
@@ -88,13 +90,13 @@ static XCamReturn _handlerBtnr_processing(AiqAlgoHandler_t* pAlgoHandler) {
 AiqAlgoHandler_t* AiqAlgoHandlerBtnr_constructor(RkAiqAlgoDesComm* des, AiqCore_t* aiqCore) {
     AiqAlgoHandler_t* pHdl = (AiqAlgoHandler_t*)aiq_mallocz(sizeof(AiqAlgoHandler_t));
     if (!pHdl)
-		return NULL;
-	AiqAlgoHandler_constructor(pHdl, des, aiqCore);
+        return NULL;
+    AiqAlgoHandler_constructor(pHdl, des, aiqCore);
     pHdl->processing   = _handlerBtnr_processing;
     pHdl->genIspResult = AiqAlgoHandler_genIspResult_common;
     pHdl->prepare      = _handlerBtnr_prepare;
     pHdl->init         = _handlerBtnr_init;
-	return pHdl;
+    return pHdl;
 }
 
 #if 0
@@ -106,7 +108,7 @@ XCamReturn AiqBtnrHandler_setAttrib(AiqBtnrHandler_t* pHdlBtnr, btnr_api_attrib_
     aiqMutex_unlock(&pHdlBtnr->mCfgMutex);
 
     EXIT_ANALYZER_FUNCTION();
-	return ret;
+    return ret;
 }
 
 XCamReturn AiqBtnrHandler_getAttrib(AiqBtnrHandler_t* pHdlBtnr, btnr_api_attrib_t* attr)

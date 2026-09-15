@@ -29,7 +29,7 @@ typedef struct drc_loBifiltLP_LP_s {
         M4_RO(0),
         M4_ORDER(1),
         M4_NOTES(Disable part of none-local means.
-        Freq of use: high))  */
+        Freq of use: low))  */
     // reg: sw_adrc_bf_lp_en
     bool hw_drcT_lp_en;
 } drc_loBifiltLP_LP_t;
@@ -42,7 +42,7 @@ typedef struct drc_drcLP_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO. Freq of use: low))  */
     drc_loBifiltLP_LP_t loBifiltLP;
 } drc_drcLP_t;
 
@@ -54,7 +54,7 @@ typedef struct {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO. Freq of use: low))  */
     drc_drcLP_t lowPowerCfg;
 } drc_params_static_t;
 
@@ -134,7 +134,7 @@ typedef struct drc_preProc_dyn_s {
         M4_ORDER(0),
         M4_NOTES(Users can
        directly configure the tone curve through luma2DrcGain_val when toneCurve_mode ==
-       drc_cfgCurveDirect_mode. Freq of use: low))  */
+       drc_cfgCurveDirect_mode. Freq of use: high))  */
     // @reg: hw_adrc_luma2drcGain_val0~16
     float hw_drcT_luma2ToneGain_val[DRC_CURVE_LEN];
     /* M4_GENERIC_DESC(
@@ -146,7 +146,7 @@ typedef struct drc_preProc_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n Freq of use: high))  */
     drc_toneCurveCtrl_t toneCurveCtrl;
     /* M4_GENERIC_DESC(
         M4_ALIAS(hw_adrc_filtLuma_softThred),
@@ -176,7 +176,7 @@ typedef struct drc_gdDiffMaxCurveCtrl_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Users can directly configure the guide diff maxLimit LUT  through maxCurveCreate_xxx when guideDiffMaxLmt_mode == drc_cfgCurveCtrlCoeff_mode.
-        Freq of use: high))  */
+        Freq of use: low))  */
     float sw_drcT_maxLutCreate_minLimit;
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_adrc_thumbThred_maxLimit),
@@ -189,7 +189,7 @@ typedef struct drc_gdDiffMaxCurveCtrl_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Users can directly configure the guide diff maxLimit LUT  through maxCurveCreate_xxx when guideDiffMaxLmt_mode == drc_cfgCurveCtrlCoeff_mode.
-        Freq of use: high))  */
+        Freq of use: low))  */
     float sw_drcT_maxLutCreate_maxLimit;
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_adrc_thumbThred_slope),
@@ -202,7 +202,7 @@ typedef struct drc_gdDiffMaxCurveCtrl_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Users can directly configure the guide diff maxLimit LUT  through maxCurveCreate_xxx when guideDiffMaxLmt_mode == drc_cfgCurveCtrlCoeff_mode.
-        Freq of use: high))  */
+        Freq of use: low))  */
     float sw_drcT_maxLutCreate_slope;
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_adrc_thumbThred_offset),
@@ -215,7 +215,7 @@ typedef struct drc_gdDiffMaxCurveCtrl_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Users can directly configure the guide diff maxLimit LUT  through maxCurveCreate_xxx when guideDiffMaxLmt_mode == drc_cfgCurveCtrlCoeff_mode.
-        Freq of use: high))  */
+        Freq of use: low))  */
     float sw_drcT_maxLutCreate_offset;
 } drc_gdDiffMaxCurveCtrl_t;
 
@@ -259,7 +259,7 @@ typedef struct drc_bifilt_guideDiff_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(The negative thread of thumb.\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     // @reg: hw_adrc_thumbThred_neg
     float hw_drcT_guideDiff_minLimit;
     /* M4_GENERIC_DESC(
@@ -319,7 +319,7 @@ typedef struct drc_bifilt_guideDiff_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.\n Freq of use: low))  */
     drc_gdDiffMaxCurveCtrl_t gdDiffMaxCurveCtrl;
 } drc_bifilt_guideDiff_t;
 
@@ -393,7 +393,7 @@ typedef struct drc_bifilt_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(The spatial weight of center pixel in filter.\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     // reg: hw_adrc_bifilt_curPixelWgt
     float hw_drcT_centerPixel_wgt;
     /* M4_GENERIC_DESC(
@@ -611,7 +611,7 @@ typedef struct drc_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(All preProc params corresponded with iso array))  */
+        M4_NOTES(All preProc params corresponded with iso array.\n Freq of use: high))  */
     drc_preProc_dyn_t preProc;
     /* M4_GENERIC_DESC(
         M4_ALIAS(bifilt_guideDiff),
@@ -620,7 +620,7 @@ typedef struct drc_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(All bifilt_guideDiff params corresponded with iso array))  */
+        M4_NOTES(All bifilt_guideDiff params corresponded with iso array.\n Freq of use: low))  */
     drc_bifilt_guideDiff_t bifilt_guideDiff;
     /* M4_GENERIC_DESC(
         M4_ALIAS(bifilt),
@@ -629,7 +629,7 @@ typedef struct drc_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(All bifilt_filter params corresponded with iso array))  */
+        M4_NOTES(All bifilt_filter params corresponded with iso array.\n Freq of use: high))  */
     drc_bifilt_t bifilt_filter;
     /* M4_GENERIC_DESC(
         M4_ALIAS(drcProc),
@@ -638,14 +638,14 @@ typedef struct drc_params_dyn_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(All drcProc params corresponded with iso array))  */
+        M4_NOTES(All drcProc params corresponded with iso array.\n Freq of use: high))  */
     drc_drcProc_t drcProc;
 } drc_params_dyn_t;
 
 typedef struct drc_param_s {
-#if ISP_HW_V33
+#if defined(ISP_HW_V33)
     /* M4_GENERIC_DESC(
-    M4_ALIAS(sta),
+    M4_ALIAS(static_param),
     M4_TYPE(struct),
     M4_UI_MODULE(static_ui),
     M4_HIDE_EX(0),
@@ -655,7 +655,7 @@ typedef struct drc_param_s {
     drc_params_static_t sta;
 #endif
     /* M4_GENERIC_DESC(
-        M4_ALIAS(dynamic_param),
+        M4_ALIAS(dyn),
         M4_TYPE(struct),
         M4_UI_MODULE(dynamic_ui),
         M4_HIDE_EX(0),

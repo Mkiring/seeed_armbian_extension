@@ -484,6 +484,18 @@ RkAiqCore::stop()
 #endif
 #endif
 
+    std::vector<SmartPtr<RkAiqHandle>>& algo_list = mRkAiqCoreGroupManager->getGroupAlgoList(RK_AIQ_CORE_ANALYZE_ALL);
+    for (auto& algoHdl : algo_list) {
+        RkAiqHandle* curHdl = algoHdl.ptr();
+
+        while (curHdl) {
+            if (curHdl->getEnable()) {
+                    curHdl->stop();
+            }
+            curHdl = curHdl->getNextHdl();
+        }
+    }
+
     EXIT_ANALYZER_FUNCTION();
 
     return XCAM_RETURN_NO_ERROR;
@@ -531,6 +543,9 @@ RkAiqCore::prepare(const rk_aiq_exposure_sensor_descriptor* sensor_des,
     if (mUserOtpInfo.otp_awb.flag) {
         memcpy(&mAlogsComSharedParams.snsDes.otp_awb, &mUserOtpInfo.otp_awb, sizeof(mUserOtpInfo.otp_awb));
     }
+    if (mUserOtpInfo.otp_lsc.flag) {
+        mAlogsComSharedParams.snsDes.otp_lsc = &mUserOtpInfo.otp_lsc;
+    }
     mAlogsComSharedParams.working_mode = mode;
     mAlogsComSharedParams.spWidth = mSpWidth;
     mAlogsComSharedParams.spHeight = mSpHeight;
@@ -574,9 +589,9 @@ RkAiqCore::prepare(const rk_aiq_exposure_sensor_descriptor* sensor_des,
         uint32_t extended_pixel = mHwInfo.multi_isp_extended_pixel;
         RkAiqResourceTranslatorV3x* translator = static_cast<RkAiqResourceTranslatorV3x*>(mTranslator.ptr());
         uint32_t size = sensor_des->isp_acq_width * sensor_des->isp_acq_height;
-        if (size > 2 * RK_AIQ_ISP_CIF_INPUT_MAX_SIZE) {
+        int isp_unite_mode = translator->GetIspUniteMode();
+        if (isp_unite_mode == RK_AIQ_ISP_UNITE_MODE_FOUR_GRID) {
             translator->SetMultiIspMode(true)
-            .SetIspUnitedMode(RK_AIQ_ISP_UNITED_MODE_FOUR_GRID)
             .SetPicInfo({0, 0, sensor_des->isp_acq_width, sensor_des->isp_acq_height})
             .SetLeftIspRect(
             {0, 0, sensor_des->isp_acq_width / 2 + extended_pixel, sensor_des->isp_acq_height / 2 + extended_pixel})
@@ -590,9 +605,8 @@ RkAiqCore::prepare(const rk_aiq_exposure_sensor_descriptor* sensor_des,
                                     sensor_des->isp_acq_height / 2 - extended_pixel,
                                     sensor_des->isp_acq_width / 2 + extended_pixel,
                                     sensor_des->isp_acq_height / 2 + extended_pixel});
-        } else if (size > RK_AIQ_ISP_CIF_INPUT_MAX_SIZE) {
+        } else if (isp_unite_mode == RK_AIQ_ISP_UNITE_MODE_TWO_GRID) {
             translator->SetMultiIspMode(true)
-            .SetIspUnitedMode(RK_AIQ_ISP_UNITED_MODE_TWO_GRID)
             .SetPicInfo({0, 0, sensor_des->isp_acq_width, sensor_des->isp_acq_height})
             .SetLeftIspRect(
             {0, 0, sensor_des->isp_acq_width / 2 + extended_pixel, sensor_des->isp_acq_height})
@@ -601,7 +615,6 @@ RkAiqCore::prepare(const rk_aiq_exposure_sensor_descriptor* sensor_des,
                               sensor_des->isp_acq_height});
         } else {
             translator->SetMultiIspMode(true)
-            .SetIspUnitedMode(RK_AIQ_ISP_UNITED_MODE_NORMAL)
             .SetPicInfo({0, 0, sensor_des->isp_acq_width, sensor_des->isp_acq_height})
             .SetLeftIspRect({0, 0, sensor_des->isp_acq_width, sensor_des->isp_acq_height})
             .SetRightIspRect({0, 0, sensor_des->isp_acq_width, sensor_des->isp_acq_height});
@@ -609,7 +622,7 @@ RkAiqCore::prepare(const rk_aiq_exposure_sensor_descriptor* sensor_des,
         RkAiqResourceTranslatorV3x::Rectangle f = translator->GetPicInfo();
         RkAiqResourceTranslatorV3x::Rectangle l = translator->GetLeftIspRect();
         RkAiqResourceTranslatorV3x::Rectangle r = translator->GetRightIspRect();
-        LOGD_ANALYZER(
+        LOGK_ANALYZER(
             "Set Multi-ISP mode Translator info :"
             " F: { %u, %u, %u, %u }"
             " L: { %u, %u, %u, %u }"
@@ -2639,7 +2652,7 @@ XCamReturn RkAiqCore::calibTuning(const CamCalibDbV2Context_t* aiqCalib,
     }
 
     notifyUpdate(grpMask);
-    if (mState != RK_AIQ_CORE_STATE_RUNNING)
+    if (mState != RK_AIQ_CORE_STATE_RUNNING || mIsAovMode)
         updateCalib(RK_AIQ_CORE_ANALYZE_ALL);
     else {
         waitUpdateDone();
@@ -2699,6 +2712,17 @@ XCamReturn RkAiqCore::groupAnalyze(uint64_t grpId, const RkAiqAlgosGroupShared_t
                     fullParam->data()->mFrmId = item->first;
                     item = mFullParamsPendingMap.erase(item);
                     mLatestParamsDoneId = fullParam->data()->mFrmId;
+                    if (fullParam->data()->mFrmId < shared->frameId) {
+#ifdef RKAIQ_ENABLE_CAMGROUP
+                        if (!mCamGroupCoreManager && mCb)
+#else
+                        if (mCb)
+#endif
+                            mCb->rkAiqCalcExpDone(fullParam->data().ptr()->mExposureParams);
+
+                        LOGD_ANALYZER("[%d]:%p fullParam discard, shared->frame %d, just set exp param",
+                                      fullParam->data()->mFrmId, fullParam->data().ptr(), shared->frameId);
+                    }
                     LOGD_ANALYZER("[%d]:%p fullParams done !", fullParam->data()->mFrmId, fullParam->data().ptr());
                 } else
                     break;
@@ -3806,12 +3830,16 @@ XCamReturn RkAiqCore::setUserOtpInfo(rk_aiq_user_otp_info_t otp_info)
         return XCAM_RETURN_ERROR_ANALYZER;
     }
 
-    LOGD_ANALYZER("user awb otp: flag: %d, r:%d,b:%d,gr:%d,gb:%d, golden r:%d,b:%d,gr:%d,gb:%d\n",
+    LOGD_ANALYZER("user awb otp: flag: %d, r:%d,b:%d,gr:%d,gb:%d, golden r:%d,b:%d,gr:%d,gb:%d;\
+                   user lsc otp: flag: %d, r[0]:%d,b[0]:%d,gr[0]:%d,gb[0]:%d\n",
                   otp_info.otp_awb.flag,
                   otp_info.otp_awb.r_value, otp_info.otp_awb.b_value,
                   otp_info.otp_awb.gr_value, otp_info.otp_awb.gb_value,
                   otp_info.otp_awb.golden_r_value, otp_info.otp_awb.golden_b_value,
-                  otp_info.otp_awb.golden_gr_value, otp_info.otp_awb.golden_gb_value);
+                  otp_info.otp_awb.golden_gr_value, otp_info.otp_awb.golden_gb_value,
+                  otp_info.otp_lsc.flag,
+                  otp_info.otp_lsc.lsc_r[0], otp_info.otp_lsc.lsc_gr[0],
+                  otp_info.otp_lsc.lsc_gb[0], otp_info.otp_lsc.lsc_b[0]);
 
     memcpy(&mUserOtpInfo, &otp_info, sizeof(otp_info));
 
@@ -3990,6 +4018,18 @@ RkAiqCore::unregister3Aalgo(int algoType)
     mRkAiqCoreGroupManager->rmAlgoHandle(algoType);
 
     EXIT_ANALYZER_FUNCTION();
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
+XCamReturn
+RkAiqCore::setTranslaterIspUniteMode(RkAiqIspUniteMode mode) {
+
+    if (mTranslator.ptr()) {
+        RkAiqResourceTranslatorV3x* translator =
+            static_cast<RkAiqResourceTranslatorV3x*>(mTranslator.ptr());
+        translator->SetIspUniteMode(mode);
+    }
 
     return XCAM_RETURN_NO_ERROR;
 }

@@ -149,7 +149,7 @@ static XCamReturn DmSelectParam
                 paut->dyn[ilow].gInterp.hw_dmT_gInterpSharpStrg_offset, paut->dyn[ihigh].gInterp.hw_dmT_gInterpSharpStrg_offset, uratio);
     out->dyn.gInterp.hw_dmT_gInterpSharpStrg_maxLim = interpolation_u8(
                 paut->dyn[ilow].gInterp.hw_dmT_gInterpSharpStrg_maxLim, paut->dyn[ihigh].gInterp.hw_dmT_gInterpSharpStrg_maxLim, uratio);
-#if RKAIQ_HAVE_DEBAYER_V3
+#if ISP_HW_V39
     out->dyn.gInterp.hw_dmT_gInterpWgtFlt_alpha = interpolation_f32(
                 paut->dyn[ilow].gInterp.hw_dmT_gInterpWgtFlt_alpha, paut->dyn[ihigh].gInterp.hw_dmT_gInterpWgtFlt_alpha, ratio);
 #endif

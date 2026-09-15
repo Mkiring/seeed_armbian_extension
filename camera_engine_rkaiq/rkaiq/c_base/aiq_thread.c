@@ -190,6 +190,7 @@ bool aiqThread_start(AiqThread_t* thread) {
     if (pthread_create(&thread->_thread_id, &attr, (void* (*)(void*))thread_func, thread) != 0) {
         pthread_attr_destroy(&attr);
         aiqMutex_unlock(&thread->_mutex);
+        XCAM_LOG_ERROR("Thread(%s) create fail !", XCAM_STR(thread->_name));
         return false;
     }
 

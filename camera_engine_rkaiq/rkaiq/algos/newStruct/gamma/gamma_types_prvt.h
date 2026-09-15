@@ -51,6 +51,7 @@ typedef struct GammaContext_s {
     gamma_api_attrib_t* gamma_attrib;
     bool isReCal_;
     int iso;
+    float gamma_strg;
 } GammaContext_t;
 #define DEFAULT_RECALCULATE_DELTA_ISO (0.01)
 

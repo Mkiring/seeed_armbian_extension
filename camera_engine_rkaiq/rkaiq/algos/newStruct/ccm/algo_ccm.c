@@ -27,6 +27,11 @@
 #include "interpolation.h"
 #include "c_base/aiq_base.h"
 
+#if RKAIQ_HAVE_DUMPSYS
+#include "include/algo_ccm_info.h"
+#include "rk_info_utils.h"
+#endif
+
 // RKAIQ_BEGIN_DECLARE
 
 static int illu_estm_once(accm_param_illuLink_t *illuLinks, uint8_t illuLink_len, float awbGain[2]) {
@@ -71,7 +76,7 @@ static int get_all_mesh_by_name(CcmContext_t *pCcmCtx, char *name) {
     for (i=0; i<table_len; i++) {
         accm_matrixAll_t *pTable = &calibdb->matrixAll[i];
         if (strncmp(name, pTable->sw_ccmC_illu_name, ACCM_ILLUM_NAME_LEN) == 0) {
-            LOGI_ACCM("%s: pTable name %s, sw_ccmC_ccmSat_val %f i %d", 
+            LOGI_ACCM("%s: pTable name %s, sw_ccmC_ccmSat_val %f i %d",
                     __func__, pTable->sw_ccmC_illu_name, pTable->sw_ccmC_ccmSat_val, i);
             mesh_all[cnt] = i;
             cnt ++;
@@ -356,14 +361,10 @@ XCamReturn Accm_prepare(RkAiqAlgoCom* params)
         (ccm_calib_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, ccm));
     pCcmCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
 
-    pCcmCtx->pre_illu_idx = INVALID_ILLU_IDX;
-    pCcmCtx->pre_saturation = 0.0;
-    pCcmCtx->pre_scale = 0.0;
-    pCcmCtx->pre_iso = 0;
-
     pCcmCtx->fScale = 0.0;
     pCcmCtx->damp_converged = false;
-    pCcmCtx->is_calib_update = false;
+    pCcmCtx->is_calib_update = true;
+    pCcmCtx->isReCal_ = true;
     return XCAM_RETURN_NO_ERROR;
 }
 
@@ -377,18 +378,28 @@ XCamReturn Accm_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
 
     int iso = inparams->u.proc.iso;
 
-    bool need_recal = false;
+    bool need_recal = pCcmCtx->isReCal_;
 
     bool isReCal_ = inparams->u.proc.is_attrib_update || inparams->u.proc.init;
+
+    if (pCcmCtx->ccm_selector.frame_num == 0 || inparams->u.proc.is_attrib_update) {
+        for (int i = 0; i < pdyn->sw_ccmT_illuLink_len; i++) {
+            selector_add_source(&pCcmCtx->ccm_selector, i,
+                                pdyn->illuLink[i].sw_ccmC_illu_name,
+                                pdyn->illuLink[i].sw_ccmC_wbGainR_val,
+                                pdyn->illuLink[i].sw_ccmC_wbGainB_val);
+        }
+        pCcmCtx->ccm_selector.source_count = MIN(pdyn->sw_ccmT_illuLink_len, ILLUM_MAX_NUM);
+    }
+
     if (isReCal_) {
         need_recal = true;
     }
+    LOGD_ACCM("awbGain= (%f, %f)", swinfo->awbGain[0], swinfo->awbGain[1]);
+    int illu_idx = -1;
 
-    int illu_idx = illu_estm_once(pdyn->illuLink, pdyn->sw_ccmT_illuLink_len, swinfo->awbGain);
-    if (illu_idx < 0) {
-        LOGE_ACCM("illu_estm_once failed!");
-        return XCAM_RETURN_ERROR_PARAM;
-    }
+    selector_process_frame(&pCcmCtx->ccm_selector, swinfo->awbGain, &illu_idx);
+
     accm_param_illuLink_t *pIlluCase = &pdyn->illuLink[illu_idx];
 
     if (illu_idx != pCcmCtx->pre_illu_idx || pCcmCtx->is_calib_update) {
@@ -423,7 +434,7 @@ XCamReturn Accm_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
         need_recal = true;
     }
 
-    // TODO 
+    // TODO
     bool damp_en = tunning->stAuto.sta.sw_ccmT_damp_en;
     if (damp_en) {
         if (need_recal || !pCcmCtx->damp_converged) {
@@ -468,7 +479,7 @@ XCamReturn Accm_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
     } else {
         outparams->cfg_update = false;
     }
-
+    pCcmCtx->isReCal_ = false;
     return XCAM_RETURN_NO_ERROR;
 }
 
@@ -481,6 +492,12 @@ create_context(RkAiqAlgoContext **context, const AlgoCtxInstanceCfg* cfg)
 
     CcmContext_t* ctx = aiq_mallocz(sizeof(CcmContext_t));
     *context = (RkAiqAlgoContext *)(ctx);
+    ctx->pre_illu_idx = INVALID_ILLU_IDX;
+    ctx->pre_saturation = 0.0;
+    ctx->pre_scale = 0.0;
+    ctx->pre_iso = 0;
+
+    selector_init(&ctx->ccm_selector);
 
     LOG1_ACCM("%s: (exit)\n", __FUNCTION__ );
     return result;
@@ -530,6 +547,17 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
     return XCAM_RETURN_NO_ERROR;
 }
 
+#if RKAIQ_HAVE_DUMPSYS
+static int dump(const RkAiqAlgoCom* config, st_string* result)
+{
+    // ccm_dump_mod_param(config, result);
+    // ccm_dump_mod_attr(config, result);
+    ccm_dump_mod_status(config, result);
+
+    return 0;
+}
+#endif
+
 XCamReturn
 algo_ccm_queryaccmStatus
 (
@@ -545,10 +573,10 @@ algo_ccm_queryaccmStatus
     CcmContext_t* pCcmCtx = (CcmContext_t*)ctx;
     ccm_param_auto_t* stAuto = &pCcmCtx->ccm_attrib->tunning.stAuto;
 
-    strncpy(status->sw_ccmC_illuUsed_name, 
-            stAuto->dyn.illuLink[pCcmCtx->pre_illu_idx].sw_ccmC_illu_name, 
+    strncpy(status->sw_ccmC_illuUsed_name,
+            stAuto->dyn.illuLink[pCcmCtx->pre_illu_idx].sw_ccmC_illu_name,
             ACCM_ILLUM_NAME_LEN - 1);
-    
+
     status->sw_ccmC_ccmSat_val = pCcmCtx->pre_saturation;
     status->sw_ccmT_glbCcm_scale = pCcmCtx->pre_scale;
 
@@ -619,6 +647,9 @@ RkAiqAlgoDescription g_RkIspAlgoDescCcm = {
     .pre_process = NULL,
     .processing = processing,
     .post_process = NULL,
+#if RKAIQ_HAVE_DUMPSYS
+    .dump = dump,
+#endif
 };
 
 // RKAIQ_END_DECLARE

@@ -523,6 +523,7 @@ typedef struct {
     bool lens_pos_valid;
     bool zoom_pos_valid;
     bool send_zoom_reback;
+    bool send_zoom1_reback;
     bool send_focus_reback;
     bool end_zoom_chg;
     bool focus_noreback;
@@ -530,11 +531,14 @@ typedef struct {
     int next_pos_num;
     int next_lens_pos[RKAIQ_RAWAF_NEXT_ZOOMFOCUS_NUM];
     int next_zoom_pos[RKAIQ_RAWAF_NEXT_ZOOMFOCUS_NUM];
+    int next_zoom1_pos[RKAIQ_RAWAF_NEXT_ZOOMFOCUS_NUM];
     int use_manual;
     int auto_focpos;
     int auto_zoompos;
+    int auto_zoom1pos;
     int manual_focpos;
     int manual_zoompos;
+    int manual_zoom1pos;
     int vcm_start_ma;
     int vcm_end_ma;
 } rk_aiq_af_algo_focus_pos_t;
@@ -556,6 +560,7 @@ typedef struct rk_aiq_pdaf_algo_meas_s {
     unsigned char pdLRInDiffLine;
     unsigned short pdWidth;
     unsigned short pdHeight;
+    unsigned int bytesperline;
     struct rkmodule_pdaf_inf *otp_pdaf;
 } rk_aiq_pdaf_algo_meas_t;
 
@@ -568,6 +573,7 @@ typedef struct {
     float pdConfdThresh;
     float stablePdRatio;
     float stableCntRatio;
+    float badPdRatio;
     unsigned short convergedInfPdThresh;
     unsigned short convergedMacPdThresh;
     unsigned short defocusInfPdThresh;
@@ -584,12 +590,16 @@ typedef struct {
 } rk_aiq_pdaf_algo_isopara_t;
 
 typedef struct rk_aiq_pdaf_resolution_s {
+    unsigned short imageWidth;
+    unsigned short imageHeight;
     unsigned short pdOutWidth;
     unsigned short pdOutHeight;
     unsigned short pdCropX;
     unsigned short pdCropY;
     unsigned short pdBaseWidth;
     unsigned short pdBaseHeight;
+    unsigned short pdHBinMode;
+    unsigned short pdVBinMode;
 } rk_aiq_pdaf_resolution_t;
 
 typedef struct {
@@ -625,6 +635,13 @@ typedef struct {
     float pdSatCntRatio;
     float pdLessTextureRatio;
     short pdTargetOffset;
+    unsigned short pdNumJobs;
+    bool pdUseFvTrigger;
+    unsigned short pdUnStableCnt_thred;
+    unsigned short pdSearchCnt_thred;
+    unsigned short pdChgDirCnt_thred;
+    bool pdFocusNearObject;
+    float pdNearObjectRatio;
     rk_aiq_pdaf_resolution_t pdResoInf;
 } rk_aiq_pdaf_algo_config_t;
 

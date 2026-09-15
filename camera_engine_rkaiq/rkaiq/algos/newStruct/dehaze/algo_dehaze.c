@@ -125,12 +125,13 @@ XCamReturn Adehaze_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* out
 
     outparams->cfg_update = false;
 
+#if 0
     if (inparams->u.proc.is_bw_sensor) {
         dehaze_attrib->en     = false;
         outparams->cfg_update = init ? true : false;
         return XCAM_RETURN_NO_ERROR;
     }
-
+#endif
     if (dehaze_attrib->opMode != RK_AIQ_OP_MODE_AUTO) {
         LOGE_ADEHAZE("mode is %d, not auto mode, ignore", dehaze_attrib->opMode);
         return XCAM_RETURN_NO_ERROR;

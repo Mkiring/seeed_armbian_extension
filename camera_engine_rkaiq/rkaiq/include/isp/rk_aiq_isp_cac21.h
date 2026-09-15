@@ -25,8 +25,9 @@
 typedef struct cac_psfParam_s {
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_cacCfg_psf_path),
-        M4_TYPE(char),
-        M4_SIZE_EX(1,255),
+        M4_TYPE(string),
+        M4_SIZE_EX(1,1),
+        M4_RANGE_EX(0,255),
         M4_DEFAULT("/etc/iqfiles/cac_map.bin"),
         M4_HIDE_EX(0),
         M4_RO(0),

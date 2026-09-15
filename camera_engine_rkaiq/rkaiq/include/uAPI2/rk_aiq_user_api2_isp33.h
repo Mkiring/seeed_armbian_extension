@@ -92,5 +92,6 @@
 #include "uAPI2/rk_aiq_user_api2_ldc.h"
 
 #include "uAPI2/rk_aiq_user_api2_postisp.h"
+#include "uAPI2/rk_aiq_user_api2_amtd.h"
 
 #endif

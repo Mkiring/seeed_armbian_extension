@@ -128,9 +128,9 @@ void rk_aiq_dm24_params_cvt(void* attr, isp_params_t* isp_params, common_cvt_inf
             filter_coe[k] = ROUND_F(gaus_table[k] * (1 << RK_DM23_FIX_BIT_BF_WGT));
         }
     } else {
-        filter_coe[0] = ROUND_F(ROUND_F(pdyn->gOutlsFlt_bifilt.hw_dmT_filtSpatial_wgt[0]) * (1 << RK_DM23_FIX_BIT_BF_WGT));
-        filter_coe[1] = ROUND_F(ROUND_F(pdyn->gOutlsFlt_bifilt.hw_dmT_filtSpatial_wgt[1]) * (1 << RK_DM23_FIX_BIT_BF_WGT));
-        filter_coe[2] = ROUND_F(ROUND_F(pdyn->gOutlsFlt_bifilt.hw_dmT_filtSpatial_wgt[2]) * (1 << RK_DM23_FIX_BIT_BF_WGT));
+        filter_coe[0] = ROUND_F(pdyn->gOutlsFlt_bifilt.hw_dmT_filtSpatial_wgt[0] * (1 << RK_DM23_FIX_BIT_BF_WGT));
+        filter_coe[1] = ROUND_F(pdyn->gOutlsFlt_bifilt.hw_dmT_filtSpatial_wgt[1] * (1 << RK_DM23_FIX_BIT_BF_WGT));
+        filter_coe[2] = ROUND_F(pdyn->gOutlsFlt_bifilt.hw_dmT_filtSpatial_wgt[2] * (1 << RK_DM23_FIX_BIT_BF_WGT));
     }
 
     // check filter coeff

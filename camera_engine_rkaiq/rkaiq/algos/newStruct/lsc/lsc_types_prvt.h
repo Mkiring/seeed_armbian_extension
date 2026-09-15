@@ -46,12 +46,14 @@ typedef struct LscContext_s {
 
     uint8_t pre_illu_idx;
     float pre_vignetting;
+    Selector lsc_selector;
 
     bool damp_converged;
     lsc_meshGain_t undamped_matrix;
     lsc_meshGain_t damped_matrix;
 
     bool is_calib_update;
+    bool isReCal_;
 
 } LscContext_t;
 

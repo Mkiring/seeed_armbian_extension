@@ -9,9 +9,10 @@
 extern "C" {
 #endif
 
-#define IPC_CMDID_GET_3ASTATS 0x100
-#define IPC_CMDID_ENQUE_RKRAW 0x101
-#define IPC_CMDID_WRITE_AWBIN 0x102
+#define IPC_CMDID_GET_3ASTATS       0x100
+#define IPC_CMDID_ENQUE_RKRAW       0x101
+#define IPC_CMDID_WRITE_AWBIN       0x102
+#define IPC_CMDID_GET_HDRCOMPRCURVE 0x103
 
 #define IPC_RET_OK  0xff00
 #define IPC_RET_JSON_ERROR  0xff01
@@ -43,13 +44,35 @@ typedef struct RkToolExpParam_s {
     RkToolExpSensorParam_t exp_sensor_params;//reg value
 } RkToolExpParam_t;
 
+typedef struct RkToolAwbParam_s {
+    float awb_gain_r;
+    float awb_gain_gr;
+    float awb_gain_gb;
+    float awb_gain_b;
+} RkToolAwbParam_t;
+
+#ifndef HDR_COMPR_POINT_MAX
+#define HDR_COMPR_POINT_MAX 32
+#endif
+typedef struct rk_aiq_isp_tool_hdr_compr_curve_s {
+    uint16_t version;  // 0x0100 = v1.0
+    uint8_t point;
+    uint8_t src_bit;
+    uint8_t k_shift;
+    uint16_t data_compr[HDR_COMPR_POINT_MAX];
+    uint32_t data_src[HDR_COMPR_POINT_MAX];
+    uint32_t slope_k[HDR_COMPR_POINT_MAX];
+    uint8_t reserved[512];
+} rk_aiq_isp_tool_hdr_compr_curve_t;
+
 typedef struct rk_aiq_isp_tool_stats_s {
     uint16_t version; // 0x0100 = v1.0
     uint32_t frameID;
     RkToolExpParam_t linearExp; // from RKAiqAecStats_t::ae_exp.LinearExp.exp_real_params
     RkToolExpParam_t hdrExp[3];
-    uint8_t reserved[256];
-}rk_aiq_isp_tool_stats_t;
+    RkToolAwbParam_t awbGain;
+    uint8_t reserved[240];
+} rk_aiq_isp_tool_stats_t;
 #pragma pack()
 
 typedef struct {
@@ -77,6 +100,7 @@ bool socket_client_getConnected(SocketClientCtx_t *ctx);
 rk_aiq_isp_tool_stats_t *socket_client_get_isp_statics(void* aiqctx);
 int socket_client_writeAwbIn(void* aiqctx, char* data);
 int socket_client_enque_rkraw(void* aiqctx, char* data);
+rk_aiq_isp_tool_hdr_compr_curve_t* socket_client_get_hdrComprCurve(void* aiqctx);
 
 #ifdef  __cplusplus
 }

@@ -152,6 +152,16 @@ XCamReturn rk_aiq_uapi2_setFrameRate(const rk_aiq_sys_ctx_t* ctx, frameRateInfo_
 
 /*
 *****************************
+* Desc: set vts directly to sensor
+* Argument:
+* vts: override the ae fps setting if not 0
+*
+*****************************
+*/
+XCamReturn rk_aiq_uapi2_setSnsVts(const rk_aiq_sys_ctx_t* ctx, uint32_t vts);
+
+/*
+*****************************
 *
 * Desc: set exposure parameter
 * Argument:
@@ -816,6 +826,17 @@ XCamReturn rk_aiq_uapi2_resetZoom(const rk_aiq_sys_ctx_t* ctx);
 *****************************
 */
 XCamReturn rk_aiq_uapi2_setAngleZ(const rk_aiq_sys_ctx_t* ctx, float angleZ);
+
+/*
+*****************************
+*
+* Desc: getPdafLibOutput
+* Argument:
+*
+*
+*****************************
+*/
+XCamReturn rk_aiq_uapi2_getPdafLibOutput(const rk_aiq_sys_ctx_t* ctx, rk_aiq_pdlib_output* pdlib_output, int timeout_ms);
 
 
 /*

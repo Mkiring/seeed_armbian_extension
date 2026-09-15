@@ -24,6 +24,7 @@
 #include "algos/anr/rkpostisp.h"
 #include "uAPI2/rk_aiq_user_api_common.h"
 // #include "rk_aiq_user_api_sysctl.h"
+#include "common/rkisp2-config.h"
 
 RKAIQ_BEGIN_DECLARE
 
@@ -78,6 +79,18 @@ rk_aiq_uapi2_sysctl_init(const char* sns_ent_name,
                         const char* iq_file_dir,
                         rk_aiq_error_cb err_cb,
                         rk_aiq_metas_cb metas_cb);
+
+/*!
+ * \brief Configure hardware mode from single to multi camera
+ * Should be called in init state
+ * \param[in] ctx             the context returned by \ref rk_aiq_uapi_sysctl_init
+ * \param[in] isp_num         the isp num corresponding to the frame pattern nums.
+ * \param[in] frame_pattern   customize different frame pattern.Like A pattern has 1 frame ,\n
+ *                            B has 1 frame, then it's {1,1,0,0}.
+ * \param[in] bSingleExp      salve cams use main cam's exp.
+ */
+XCamReturn rk_aiq_uapi2_sysctl_setOnetoMultiMode(rk_aiq_sys_ctx_t* ctx, int isp_num,
+                                                 __u32 frame_pattern[4], bool bSingleExp);
 
 /*!
  * \brief deinitialze aiq context
@@ -515,18 +528,16 @@ void rk_aiq_uapi2_sysctl_rawReproc_genIspParams (rk_aiq_sys_ctx_t* sys_ctx,
                                                  int mode);
 
 /**
- * @brief set isp driver work mode to all offline
+ * @brief set aiq cis/isp param and raw controler working mode with isp driver name
  *
  * @param isp_driver          isp driver module name(such as rkisp0-vir0)
  * use media-clt to print rkisp driver media info and get isp driver module name from the info printed
- * @param offline_sns_name    new sensor name
- * @param two_frm_exp_info[2] an array which include first frame and seond frame exp info
+ * @param ctrl_info           aiq cis/isp param and raw controler working mode
  * @return sns_ent_name
  */
 const char*
 rk_aiq_uapi2_sysctl_rawReproc_preInit(const char* isp_driver,
-                                      const char* offline_sns_name,
-                                      rk_aiq_frame_info_t two_frm_exp_info[2]);
+                                      rk_aiq_control_preinit_t ctrl_info);
 /**
  * @brief set user delay counts of params related to stats
  *
@@ -539,7 +550,7 @@ void rk_aiq_uapi2_sysctl_setIspParamsDelayCnts(const rk_aiq_sys_ctx_t* sys_ctx, 
 
 XCamReturn
 rk_aiq_uapi2_sysctl_preInit_rkrawstream_info(const char* sns_ent_name,
-                           const rk_aiq_rkrawstream_info_t* info);
+                                             const rk_aiq_rkrawstream_info_t* info);
 
 XCamReturn
 rk_aiq_uapi2_sysctl_setCrop(const rk_aiq_sys_ctx_t* sys_ctx, rk_aiq_rect_t rect);
@@ -580,10 +591,10 @@ void
 rk_aiq_uapi2_sysctl_setListenStrmStatus(rk_aiq_sys_ctx_t* sys_ctx, bool isListen);
 
 XCamReturn
-rk_aiq_uapi2_sysctl_initAiisp(rk_aiq_sys_ctx_t* sys_ctx, rk_aiq_aiisp_cfg_t* aiisp_cfg,
+rk_aiq_uapi2_sysctl_initAiisp(rk_aiq_sys_ctx_t* sys_ctx, struct rkisp_aiisp_cfg* aiisp_cfg,
                                 rk_aiq_aiisp_cb aiisp_cb);
 XCamReturn
-rk_aiq_uapi2_sysctl_ReadAiisp(rk_aiq_sys_ctx_t* sys_ctx);
+rk_aiq_uapi2_sysctl_ReadAiisp(rk_aiq_sys_ctx_t* sys_ctx, rk_aiq_aiisp_t* aiisp_evt);
 
 XCamReturn
 rk_aiq_uapi2_sysctl_register3Aalgo(const rk_aiq_sys_ctx_t* ctx,
@@ -601,6 +612,59 @@ rk_aiq_uapi2_sysctl_unRegister3Aalgo(const rk_aiq_sys_ctx_t* ctx,
  */
 XCamReturn
 rk_aiq_uapi2_sysctl_setSnsSyncMode(const rk_aiq_sys_ctx_t* ctx, enum rkmodule_sync_mode sync_mode);
+
+/**
+ * @brief set sensor sync mode
+ *
+ * \param[in] sys_ctx             the context returned by \ref rk_aiq_uapi2_sysctl_init
+ * \note should be called after rk_aiq_uapi2_sysctl_prepare
+ */
+XCamReturn
+rk_aiq_uapi2_sysctl_setReadBackMode(rk_aiq_sys_ctx_t* ctx, bool on);
+
+/**
+ * @brief set sensor sync mode
+ *
+ * \param[in] sys_ctx             the context returned by \ref rk_aiq_uapi2_sysctl_init
+ * \note should be called after rk_aiq_uapi2_sysctl_prepare
+ */
+XCamReturn
+rk_aiq_uapi2_setRawBufNum(rk_aiq_sys_ctx_t* ctx, uint16_t buf_num);
+
+typedef struct AiqImuData_s AiqImuData_t;
+void rk_aiq_uapi2_setImuData(const rk_aiq_sys_ctx_t* ctx, AiqImuData_t *data);
+
+/*!
+ * \brief get hdr compr curve
+ *
+ * \param[in] ctx             the context returned by \ref rk_aiq_uapi2_sysctl_init
+ * \param[out] compr          hdr compr curve
+ * \return return 0 if success
+ */
+XCamReturn rk_aiq_uapi2_sysctl_getHdrComprCurve(const rk_aiq_sys_ctx_t* ctx,
+                                                RkAiqHdrCompr_t* compr);
+
+
+/*!
+ * \brief get hdr compr curve
+ *
+ * \param[in] ctx             the context returned by \ref rk_aiq_uapi2_sysctl_init
+ * \param[in] async           async mode
+ * \return return 0 if success
+ */
+XCamReturn rk_aiq_uapi2_setSingleRawBufAsyncMode(const rk_aiq_sys_ctx_t* ctx, bool async);
+
+/*!
+ * \brief set aibnr buf cnt
+ *
+ * \param[in] ctx             the context returned by \ref rk_aiq_uapi2_sysctl_init
+ * \param[in] aibnr_buf_cnt   aibnr buffer count
+ * \return return 0 if success
+ * \note This interface should be called after \ref rk_aiq_uapi2_sysctl_init and before \ref
+ * rk_aiq_uapi2_sysctl_prepare
+ */
+XCamReturn rk_aiq_uapi2_setAiBnrBufCnt(const rk_aiq_sys_ctx_t* ctx,
+                                       rk_aiq_aibnr_buffer_count_t aibnr_buf_cnt);
 
 RKAIQ_END_DECLARE
 

@@ -1950,6 +1950,7 @@ Isp20Params::convertAiqLscToIsp20Params(T& isp_cfg,
     memcpy(cfg->gr_data_tbl, lsc.gr_data_tbl, sizeof(lsc.gr_data_tbl));
     memcpy(cfg->gb_data_tbl, lsc.gb_data_tbl, sizeof(lsc.gb_data_tbl));
     memcpy(cfg->b_data_tbl, lsc.b_data_tbl, sizeof(lsc.b_data_tbl));
+
 #ifndef MAX_LSC_VALUE
 #define MAX_LSC_VALUE 8191
 #endif
@@ -1961,6 +1962,10 @@ if(lsc.lsc_en) {
         cfg->gr_data_tbl[i] = MIN(cfg->gr_data_tbl[i], MAX_LSC_VALUE);
     }
 }
+#if defined(ISP_HW_V30) || defined(ISP_HW_V21)
+memcpy(&mLatestLscCfg, cfg, sizeof(mLatestLscCfg));
+#endif
+
 #if 0//def ISP_HW_V30 // will be done Isp21Params::convertAiqExpIspDgainToIspParams
 #define MAX_LSC_VALUE 8191
     struct isp21_bls_cfg &bls_cfg = isp_cfg.others.bls_cfg;

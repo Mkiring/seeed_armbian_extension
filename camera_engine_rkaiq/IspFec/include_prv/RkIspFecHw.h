@@ -18,16 +18,40 @@
 #ifndef _RK_ISPFEC_HW_H_
 #define _RK_ISPFEC_HW_H_
 
+#if defined(__ANDROID__) && !CMAKE_BUILD_ANDROID
+#if defined(ISP_HW_V30)
+#include "android/rkfec_config_v10.h"
+#elif defined(ISP_HW_V35)
+#include "android/rkfec_config_v20.h"
+#else
+#error "Please define supported ISP version!!!, eg: -DISP_HW_V30"
+#endif
+#else
+#include "rkfec_config.h"
+#endif
+
+#ifdef RKFEC_HW_V20
+#include "rk-fec-config.h"
+#else
 #include "rkispp-config.h"
+#endif
 
 namespace RKISPFEC {
+
+#ifdef RKFEC_HW_V20
+using RKFecInOut = struct rkfec_in_out;
+#else
+using RKFecInOut = struct rkispp_fec_in_out;
+#endif
 
 class RkIspFecHw {
 public:
     virtual ~RkIspFecHw();
     explicit RkIspFecHw(const char* dev);
-    int process(struct rkispp_fec_in_out& param);
-private:
+    int process(RKFecInOut& param);
+    int detach_dma_buffer(int dma_fd);
+
+ private:
     RkIspFecHw(const RkIspFecHw&) = default;
     RkIspFecHw & operator = (const RkIspFecHw&) = default;
     int mFd;

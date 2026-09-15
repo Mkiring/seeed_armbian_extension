@@ -4,7 +4,7 @@
 
 #include "st_string.h"
 
-ST_STRING_UNUSED void string_printf_va(st_string *s, const char *fmt, va_list ap) {
+ST_STRING_UNUSED void aiq_string_printf_va(st_string *s, const char *fmt, va_list ap) {
     int n;
     va_list cp;
     for (;;) {
@@ -29,13 +29,13 @@ ST_STRING_UNUSED void string_printf_va(st_string *s, const char *fmt, va_list ap
 
 #ifdef __GNUC__
 /* support printf format checking (2=the format string, 3=start of varargs) */
-void string_printf(st_string *s, const char *fmt, ...)
+void aiq_string_printf(st_string *s, const char *fmt, ...)
     __attribute__ (( format( printf, 2, 3) ));
 #endif
 
-ST_STRING_UNUSED void string_printf(st_string *s, const char *fmt, ...) {
+ST_STRING_UNUSED void aiq_string_printf(st_string *s, const char *fmt, ...) {
     va_list ap;
     va_start(ap,fmt);
-    string_printf_va(s,fmt,ap);
+    aiq_string_printf_va(s,fmt,ap);
     va_end(ap);
 }

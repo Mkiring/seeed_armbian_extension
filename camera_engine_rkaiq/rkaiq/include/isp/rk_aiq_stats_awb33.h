@@ -9,6 +9,7 @@
 #define AWBSTATS_WPLUMAWGTCURVE_SEGMENT_MAX       (AWBSTATS_WP_HIST_BIN_NUM+1)
 #define AWBSTATS_WPFLTOUTFULL_ENTITY_NUM          4
 #define AWBSTATS_WPFLTOUTSMP_ENTITY_NUM           3
+#define AWBSTATS_WPFLTOUT_TOTAL_ENTITY_NUM        (AWBSTATS_WPFLTOUTFULL_ENTITY_NUM+AWBSTATS_WPFLTOUTSMP_ENTITY_NUM)
 #define AWBSTATS_WPVECTDISCURVE_SEGMENT_MAX       6
 #define AWBSTATS_ZONE_15x15_NUM                   225
 
@@ -203,7 +204,7 @@ typedef struct awbStats_mainWin_s {
         M4_ALIAS(hw_awbCfg_win_x),
         M4_TYPE(u16),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,0x1FFF),
+        M4_RANGE_EX(0,8191),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -216,7 +217,7 @@ typedef struct awbStats_mainWin_s {
         M4_ALIAS(hw_awbCfg_win_y),
         M4_TYPE(u16),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,0x1FFF),
+        M4_RANGE_EX(0,8191),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -229,7 +230,7 @@ typedef struct awbStats_mainWin_s {
         M4_ALIAS(hw_awbCfg_win_width),
         M4_TYPE(u16),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,0x1FFF),
+        M4_RANGE_EX(0,8191),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -242,7 +243,7 @@ typedef struct awbStats_mainWin_s {
         M4_ALIAS(hw_awbCfg_win_height),
         M4_TYPE(u16),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,0x1FFF),
+        M4_RANGE_EX(0,8191),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -416,7 +417,7 @@ typedef struct awbStats_xyRegionVtx_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(X coordinate of the vertex in the XY space white point region.\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     //reg:sw_rawawb_nor_x0~1_0~3, sw_rawawb_big_x0~1_0~3
     float hw_awbT_vtxX_val;
     /* M4_GENERIC_DESC(
@@ -430,7 +431,7 @@ typedef struct awbStats_xyRegionVtx_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Y coordinate of the vertex in the XY space white point region.\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     //reg:sw_rawawb_nor_y0~1_0~3, sw_rawawb_big_x0~1_0~3
     float hw_awbT_vtxY_val;
 } awbStats_xyRegionVtx_t;
@@ -444,7 +445,7 @@ typedef struct awbStats_xyRegion_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES( The left top vertex of the XY space white point region\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_xyRegionVtx_t ltVtx;
     /* M4_GENERIC_DESC(
         M4_ALIAS(rtVtx),
@@ -454,7 +455,7 @@ typedef struct awbStats_xyRegion_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES( The right bottom vertex of the XY space white point region\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_xyRegionVtx_t rbVtx;
 } awbStats_xyRegion_t;
 
@@ -500,6 +501,7 @@ typedef struct awbStats_uvRegionVtx_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0,255),
         M4_DEFAULT(0),
+        M4_DIGIT_EX(2),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -512,6 +514,7 @@ typedef struct awbStats_uvRegionVtx_s {
         M4_TYPE(f32),
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0,255),
+        M4_DIGIT_EX(2),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -532,7 +535,7 @@ typedef struct awbStats_uvRegion_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Four vertexs of the UV space white point region\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_uvRegionVtx_t regionVtx[AWBSTATS_WPDCT_UVREGIONVTX_NUM];
 } awbStats_uvRegion_t;
 
@@ -546,7 +549,7 @@ typedef struct awbStats_uvWpDct_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Parameters for detecting white points in UV space \n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_uvRegion_t wpRegion[AWBSTATS_WPDCT_UVREGION_NUM];
 } awbStats_uvWpDct_t;
 
@@ -710,7 +713,7 @@ typedef struct awbStats_wpLumaWgtCurve_s {
         M4_ALIAS(idx),
         M4_TYPE(u8),
         M4_SIZE_EX(1,9),
-        M4_RANGE_EX(0,0x3F),
+        M4_RANGE_EX(0,63),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -843,7 +846,7 @@ typedef struct awbStats_rotYuvRegion_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Parameters for detecting white points \n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_wpVectDistThCurve_t hw_awbT_u2WpDistTh_curve;
     /* M4_GENERIC_DESC(
         M4_ALIAS(lsVect),
@@ -853,7 +856,7 @@ typedef struct awbStats_rotYuvRegion_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Parameters for the ideal white point vector of the light source in the rotYUV space \n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_rotYuvVect_t lsVect;
 } awbStats_rotYuvRegion_t;
 
@@ -868,7 +871,7 @@ typedef struct awbStats_rotYuvWpDct_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(RGB2ROTYUV coefficient mat.\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     float hw_awbCfg_rgb2RotYuv_coeff[12];
      /* M4_GENERIC_DESC(
         M4_ALIAS(wpRegion),
@@ -878,7 +881,7 @@ typedef struct awbStats_rotYuvWpDct_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Parameters for detecting white points in rotate YUV space \n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_rotYuvRegion_t wpRegion[AWBSTATS_WPDCT_LS_NUM];
 } awbStats_rotYuvWpDct_t;
 
@@ -1052,7 +1055,7 @@ typedef struct awbStats_wpEngine_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Parameters for detecting white points in XY space \n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_xyWpDct_t wpDct_xySpace;
     /* M4_GENERIC_DESC(
         M4_ALIAS(wpDct_uvSpace),
@@ -1062,7 +1065,7 @@ typedef struct awbStats_wpEngine_s {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(Parameters for detecting white points in UV space \n
-        Freq of use: high))  */
+        Freq of use: low))  */
     awbStats_uvWpDct_t wpDct_uvSpace;
     /* M4_GENERIC_DESC(
         M4_ALIAS(wpDct_uvSpace),
@@ -1125,7 +1128,7 @@ typedef struct awbStats_wpEngine_s {
         M4_ALIAS(hw_awbCfg_zone_wgt),
         M4_TYPE(u8),
         M4_SIZE_EX(15,15),
-        M4_RANGE_EX(0,0x3F),
+        M4_RANGE_EX(0,63),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -1359,7 +1362,7 @@ typedef struct awbStats_wpStats_s {
         M4_ALIAS(hw_awbCfg_wpNo),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1371,7 +1374,7 @@ typedef struct awbStats_wpStats_s {
         M4_ALIAS(hw_awbCfg_rGainSum_val),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1383,7 +1386,7 @@ typedef struct awbStats_wpStats_s {
         M4_ALIAS(hw_awbCfg_bGainSum_val),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1418,7 +1421,7 @@ typedef struct awbStats_wpEngineStats_s {
         M4_ALIAS(hw_awbCfg_wpNoWithoutWgt),
         M4_TYPE(u32),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1430,7 +1433,7 @@ typedef struct awbStats_wpEngineStats_s {
         M4_ALIAS(hw_awb_wpHistBin_val),
         M4_TYPE(u32),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1458,7 +1461,7 @@ typedef struct awbStats_pixStats_s {
         M4_ALIAS(hw_awbCfg_wpNo),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1469,7 +1472,7 @@ typedef struct awbStats_pixStats_s {
         M4_ALIAS(hw_awbCfg_rSum_val),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1480,7 +1483,7 @@ typedef struct awbStats_pixStats_s {
         M4_ALIAS(hw_awbCfg_gSum_val),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),
@@ -1491,7 +1494,7 @@ typedef struct awbStats_pixStats_s {
         M4_ALIAS(hw_awbCfg_bSum_val),
         M4_TYPE(u64),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0, 0xFFFFFFFF),
+        M4_RANGE_EX(0, 4294967296),
         M4_DEFAULT(0),
         M4_HIDE_EX(0),
         M4_RO(1),

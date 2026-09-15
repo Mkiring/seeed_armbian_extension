@@ -56,6 +56,7 @@ typedef struct BlcContext_s {
     int iso;
     bool isReCal_;
     bool isAiIsp;
+    bool aeIsConverged;
 } BlcContext_t;
 
 XCAM_BEGIN_DECLARE

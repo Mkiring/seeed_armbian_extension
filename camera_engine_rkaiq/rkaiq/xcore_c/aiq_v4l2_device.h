@@ -73,6 +73,8 @@ XCamReturn AiqV4l2Device_close(AiqV4l2Device_t* v4l2_dev);
 int AiqV4l2Device_ioctl(AiqV4l2Device_t* v4l2_dev, unsigned long cmd, void* arg);
 XCamReturn AiqV4l2Device_subscribeEvt(AiqV4l2Device_t* v4l2_dev, int event);
 XCamReturn AiqV4l2Device_unsubscribeEvt(AiqV4l2Device_t* v4l2_dev, int event);
+XCamReturn AiqV4l2Device_subscribeEvt2(AiqV4l2Device_t* v4l2_dev, int event, int id);
+XCamReturn AiqV4l2Device_unsubscribeEvt2(AiqV4l2Device_t* v4l2_dev, int event, int id);
 XCamReturn AiqV4l2Device_dqEvt(AiqV4l2Device_t* v4l2_dev, struct v4l2_event* event);
 /* end: following functions are used for both v4l2Device and v4l2SubDevice */
 

@@ -27,6 +27,49 @@ static int aiq_notifier_subscriber_valid(struct aiq_notifier_subscriber* sub) {
         case AIQ_NOTIFIER_MATCH_HWI_STREAM_PROC:
         case AIQ_NOTIFIER_MATCH_HWI_SENSOR:
         case AIQ_NOTIFIER_MATCH_HWI_ISP_PARAMS:
+        case AIQ_NOTIFIER_MATCH_HWI_ISP_ACTIVE_PARAMS:
+        case AIQ_NOTIFIER_MATCH_CORE:
+        case AIQ_NOTIFIER_MATCH_CORE_BUF_MGR:
+        case AIQ_NOTIFIER_MATCH_CORE_GRP_ANALYZER:
+        case AIQ_NOTIFIER_MATCH_CORE_ISP_PARAMS:
+        case AIQ_NOTIFIER_MATCH_AEC:
+        case AIQ_NOTIFIER_MATCH_HIST:
+        case AIQ_NOTIFIER_MATCH_AWB:
+        case AIQ_NOTIFIER_MATCH_AWBGAIN:
+        case AIQ_NOTIFIER_MATCH_AF:
+        case AIQ_NOTIFIER_MATCH_DPCC:
+        case AIQ_NOTIFIER_MATCH_MERGE:
+        case AIQ_NOTIFIER_MATCH_CCM:
+        case AIQ_NOTIFIER_MATCH_LSC:
+        case AIQ_NOTIFIER_MATCH_BLC:
+        case AIQ_NOTIFIER_MATCH_RAWNR:
+        case AIQ_NOTIFIER_MATCH_GIC:
+        case AIQ_NOTIFIER_MATCH_DEBAYER:
+        case AIQ_NOTIFIER_MATCH_LUT3D:
+        case AIQ_NOTIFIER_MATCH_DEHAZE:
+        case AIQ_NOTIFIER_MATCH_AGAMMA:
+        case AIQ_NOTIFIER_MATCH_ADEGAMMA:
+        case AIQ_NOTIFIER_MATCH_CSM:
+        case AIQ_NOTIFIER_MATCH_CGC:
+        case AIQ_NOTIFIER_MATCH_GAIN:
+        case AIQ_NOTIFIER_MATCH_CP:
+        case AIQ_NOTIFIER_MATCH_IE:
+        case AIQ_NOTIFIER_MATCH_TNR:
+        case AIQ_NOTIFIER_MATCH_YNR:
+        case AIQ_NOTIFIER_MATCH_CNR:
+        case AIQ_NOTIFIER_MATCH_SHARPEN:
+        case AIQ_NOTIFIER_MATCH_DRC:
+        case AIQ_NOTIFIER_MATCH_CAC:
+        case AIQ_NOTIFIER_MATCH_AFD:
+        case AIQ_NOTIFIER_MATCH_RGBIR:
+        case AIQ_NOTIFIER_MATCH_LDC:
+        case AIQ_NOTIFIER_MATCH_AESTATS:
+        case AIQ_NOTIFIER_MATCH_HISTEQ:
+        case AIQ_NOTIFIER_MATCH_ENH:
+        case AIQ_NOTIFIER_MATCH_TEXEST:
+        case AIQ_NOTIFIER_MATCH_HSV:
+        case AIQ_NOTIFIER_MATCH_AIBNR:
+        case AIQ_NOTIFIER_MATCH_AIYNR:
             break;
         default:
             printf("Invalid match type %u on %s\n", sub->match_type, sub->name);
@@ -54,6 +97,19 @@ unlock:
     return ret;
 }
 
+int aiq_notifier_remove_subscriber(struct aiq_notifier* notifier, int type) {
+    if (!notifier) return -1;
+
+    struct aiq_notifier_subscriber *sub = NULL, *tmp = NULL;
+    list_for_each_entry_safe(sub, tmp, &notifier->sub_list, list) {
+        if (!sub->dump.dumper || !sub->dump.dump_fn_t) continue;
+
+        if (sub->match_type == (enum aiq_notifier_match_type)type) list_del(&sub->list);
+    }
+
+    return 0;
+}
+
 int aiq_notifier_notify_dumpinfo(struct aiq_notifier* notifier, int type, st_string* dump_info,
                                  int argc, void* argv[]) {
     struct aiq_notifier_subscriber *sub, *tmp;
@@ -63,17 +119,45 @@ int aiq_notifier_notify_dumpinfo(struct aiq_notifier* notifier, int type, st_str
         if (type != AIQ_NOTIFIER_MATCH_ALL && (enum aiq_notifier_match_type)type != sub->match_type)
             continue;
 
-        if (sub->match_type != AIQ_NOTIFIER_MATCH_HWI_STREAM_CAP &&
-            sub->match_type != AIQ_NOTIFIER_MATCH_HWI_STREAM_PROC) {
-            snprintf(buffer, MAX_LINE_LENGTH, "[%s]:", sub->name);
-            string_printf(dump_info, buffer);
-            string_printf(dump_info, "\n");
-            sub->dump.dump_fn_t(sub->dump.dumper, dump_info, argc, argv);
-            string_printf(dump_info, "\n");
-        } else {
-            sub->dump.dump_fn_t(sub->dump.dumper, dump_info, argc, argv);
-        }
+        if (!sub->dump.dumper || !sub->dump.dump_fn_t) continue;
+
+        if (type != AIQ_NOTIFIER_MATCH_ALL)
+            aiq_info_dump_mod_name(dump_info, aiq_notifier_module_name(notifier, type));
+
+        if (sub->match_type < _MODS_NUM_OFFSET) aiq_info_dump_submod_name(dump_info, sub->name);
+
+        sub->dump.dump_fn_t(sub->dump.dumper, dump_info, argc, argv);
+        aiq_string_printf(dump_info, "\n");
     }
 
     return 0;
+}
+
+const char* aiq_notifier_notify_subscriber_name(struct aiq_notifier* notifier, int type) {
+    struct aiq_notifier_subscriber *sub, *tmp;
+
+    list_for_each_entry_safe(sub, tmp, &notifier->sub_list, list) {
+        if ((enum aiq_notifier_match_type)type != sub->match_type) continue;
+
+        if (!sub->dump.dumper || !sub->dump.dump_fn_t) continue;
+
+        return sub->name;
+    }
+
+    return NULL;
+}
+
+const char* aiq_notifier_module_name(struct aiq_notifier* notifier, int type) {
+    enum aiq_notifier_match_type match_type = (enum aiq_notifier_match_type)type;
+
+    if (match_type >= AIQ_NOTIFIER_MATCH_HWI_BASE && match_type < AIQ_NOTIFIER_MATCH_HWI_ALL)
+        return "HWI";
+
+    if (match_type >= AIQ_NOTIFIER_MATCH_CORE && match_type < AIQ_NOTIFIER_MATCH_CORE_ALL)
+        return "CORE";
+
+    if (match_type >= _MODS_NUM_OFFSET && match_type < AIQ_NOTIFIER_MATCH_MODS_ALL)
+        return NotifierMatchType2Str[match_type];
+
+    return NULL;
 }

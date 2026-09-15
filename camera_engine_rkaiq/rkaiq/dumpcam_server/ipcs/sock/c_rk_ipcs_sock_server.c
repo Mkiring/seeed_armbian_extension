@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <sys/un.h>
 #include <sys/socket.h>
+#include <strings.h>
 
 #include "c_rk_ipcs_sock_server.h"
 #include "c_rk_info_service_control.h"

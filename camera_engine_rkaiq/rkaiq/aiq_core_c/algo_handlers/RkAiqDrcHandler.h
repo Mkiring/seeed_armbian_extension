@@ -21,6 +21,7 @@
 typedef struct AiqDrcHandler_s {
     AiqAlgoHandler_t _base;
     RkAiqAlgoProcResAeShared_t mAeProcRes;
+    bool damping;
 } AiqDrcHandler_t;
 
 AiqAlgoHandler_t* AiqAlgoHandlerDrc_constructor(RkAiqAlgoDesComm* des, AiqCore_t* aiqCore);

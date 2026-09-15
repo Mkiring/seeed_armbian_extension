@@ -188,10 +188,10 @@ static XCamReturn initAeStatsCfg(rk_aiq_ae_algo_config_t* pConfig)
         pConfig->aeStatsCfg.entityGroup.entities.entity3.hw_aeCfg_statsSrc_mode = aeStats_btnrOutHigh_mode;
     } else {
         if(pConfig->isHdr) {
-            pConfig->aeStatsCfg.entityGroup.entities.entity0.hw_aeCfg_statsSrc_mode = aeStats_entity0_chl0Wb0Out_mode;
-            pConfig->aeStatsCfg.entityGroup.entities.entity3.hw_aeCfg_statsSrc_mode = aeStats_entity3_chl1Wb0Out_mode;
+            pConfig->aeStatsCfg.entityGroup.entities.entity0.hw_aeCfg_statsSrc_mode = aeStats_entity0_chl0DpcOut_mode;
+            pConfig->aeStatsCfg.entityGroup.entities.entity3.hw_aeCfg_statsSrc_mode = aeStats_entity3_chl1DpcOut_mode;
         } else {
-            pConfig->aeStatsCfg.entityGroup.entities.entity0.hw_aeCfg_statsSrc_mode = aeStats_entity0_chl0Wb0Out_mode;
+            pConfig->aeStatsCfg.entityGroup.entities.entity0.hw_aeCfg_statsSrc_mode = aeStats_entity0_chl0DpcOut_mode;
             pConfig->aeStatsCfg.entityGroup.entities.entity3.hw_aeCfg_statsSrc_mode = aeStats_dmIn_mode;
         }
     }
@@ -869,6 +869,7 @@ static XCamReturn AeDemoPrepare(RkAiqAlgoCom* params)
         }
     } else {
         if(algo_ctx->isGrpMode) {
+            LOGE("GROUP PREPARE");
 #ifdef RKAIQ_ENABLE_CAMGROUP
             ret = g_RkIspAlgoDescCamgroupAe.prepare(params);
 #endif
@@ -1126,6 +1127,27 @@ static XCamReturn AeDemoPostProcess(const RkAiqAlgoCom* inparams, RkAiqAlgoResCo
     return XCAM_RETURN_NO_ERROR;
 }
 
+#if RKAIQ_HAVE_DUMPSYS
+static XCamReturn AeDemoDump(const RkAiqAlgoCom* inparams, st_string* result)
+{
+    RESULT ret = RK_AIQ_RET_SUCCESS;
+
+    RkAiqAlgoContext* algo_ctx = inparams->ctx;
+
+    if(algo_ctx->cbs == NULL) {
+
+        if(algo_ctx->isGrpMode) {
+#ifdef RKAIQ_ENABLE_CAMGROUP
+            ret = g_RkIspAlgoDescCamgroupAe.dump(inparams, result);
+#endif
+        } else {
+            ret = g_RkIspAlgoDescAe.dump(inparams, result);
+        }
+    }
+
+    return XCAM_RETURN_NO_ERROR;
+}
+#endif
 //static std::map<rk_aiq_sys_ctx_t*, RkAiqAlgoDescription*> g_customAe_desc_map;
 
 XCamReturn
@@ -1201,6 +1223,9 @@ rk_aiq_uapi2_ae_register(const rk_aiq_sys_ctx_t* ctx, rk_aiq_pfnAe_t* cbs)
     desc->pre_process = AeDemoPreProcess;
     desc->processing = AeDemoProcessing;
     desc->post_process = AeDemoPostProcess;
+#if RKAIQ_HAVE_DUMPSYS
+    desc->dump = AeDemoDump;
+#endif
 
     static RkAiqGrpCondition_t aeGrpCondV3x[] = {
         [0] = {XCAM_MESSAGE_AEC_STATS_OK, ISP_PARAMS_EFFECT_DELAY_CNT},
@@ -1213,6 +1238,9 @@ rk_aiq_uapi2_ae_register(const rk_aiq_sys_ctx_t* ctx, rk_aiq_pfnAe_t* cbs)
 #endif
 #if defined(ISP_HW_V33)
         { &desc->common, RK_AIQ_CORE_ANALYZE_AE, 0,  6,  0, aeGrpCondsV3x},
+#endif
+#if defined(ISP_HW_V35)
+        { &desc->common, RK_AIQ_CORE_ANALYZE_AE, 0,  7,  0, aeGrpCondsV3x},
 #endif
         { NULL, RK_AIQ_CORE_ANALYZE_ALL, 0,  0,  0, {0, 0} },
     };
@@ -1277,12 +1305,18 @@ rk_aiq_uapi2_ae_register(const rk_aiq_sys_ctx_t* ctx, rk_aiq_pfnAe_t* cbs)
         desc->pre_process = AeDemoPreProcess;
         desc->processing = AeDemoGroupProcessing;
         desc->post_process = AeDemoPostProcess;
+#if RKAIQ_HAVE_DUMPSYS
+        desc->dump = AeDemoDump;
+#endif
 
         struct RkAiqAlgoDesCommExt algoDes_group[] = {
 #if defined(ISP_HW_V39)
             { &desc->common, RK_AIQ_CORE_ANALYZE_AE, 0,  5,  0,  {0, 0}},
 #endif
 #if defined(ISP_HW_V33)
+            { &desc->common, RK_AIQ_CORE_ANALYZE_AE, 0,  6,  0,  {0, 0}},
+#endif
+#if defined(ISP_HW_V35)
             { &desc->common, RK_AIQ_CORE_ANALYZE_AE, 0,  6,  0,  {0, 0}},
 #endif
             { NULL, RK_AIQ_CORE_ANALYZE_ALL, 0,  0,  0, {0, 0} },
@@ -1309,9 +1343,15 @@ rk_aiq_uapi2_ae_register(const rk_aiq_sys_ctx_t* ctx, rk_aiq_pfnAe_t* cbs)
 
     if(!cbs) {
         LOGD_AEC_SUBM(0xff, "RK AE");
+        cast_ctx->_isCustomAe = false;
+        if (cast_ctx->next_ctx)
+            cast_ctx->next_ctx->_isCustomAe = false;
     } else {
         LOGD_AEC_SUBM(0xff, "CUSTOM AE");
         algoCtx->aiq_ctx = (rk_aiq_sys_ctx_t*)(ctx);
+        cast_ctx->_isCustomAe = true;
+        if (cast_ctx->next_ctx)
+            cast_ctx->next_ctx->_isCustomAe = true;
         LOGD_AEC_SUBM(0xff, "register custom ae algo sucess for sys_ctx %p, lib_id %d !",
                       ctx,
                       desc->common.id);

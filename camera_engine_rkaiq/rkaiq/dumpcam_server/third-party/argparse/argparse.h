@@ -79,7 +79,11 @@ struct argparse_option {
     void *value;
     const char *help;
     argparse_callback *callback;
+#if 0  // support 64 bits for OPT_BIT
     intptr_t data;
+#else
+    uint64_t data;
+#endif
     int flags;
 };
 

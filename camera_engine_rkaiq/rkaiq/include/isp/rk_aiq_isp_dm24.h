@@ -56,7 +56,7 @@ typedef struct {
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(The offset to control direction-detect sensitivity for g interpolation.\n
-        Higher the value, lower the sensitivity.Freq of use: high))  */
+        Higher the value, lower the sensitivity.Freq of use: low))  */
     uint16_t hw_dmT_luma2Drct_offset[8];
     /* M4_GENERIC_DESC(
         M4_ALIAS(hw_dmT_drctMethod_thred),
@@ -116,7 +116,7 @@ typedef struct {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.Freq of use: high))  */
     float hw_dmT_gradLoFlt_alpha;
 } dm_gdrctalpha_param_dyn_t;
 
@@ -128,7 +128,6 @@ typedef struct {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
-        M4_GROUP_CTRL(g_interp_group),
         M4_NOTES(Enable g-channel clip using its neighboring pixels.\n
         Freq of use: high))  */
     bool hw_dmT_gInterpClip_en;
@@ -141,7 +140,6 @@ typedef struct {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(1),
-        M4_GROUP(g_interp_group),
         M4_NOTES(The offset to contrl fusion weight of color-channel gradient for g interpolation, related to sharp strength.\n
         Freq of use: high))  */
     uint16_t hw_dmT_gInterpSharpStrg_offset;
@@ -154,7 +152,6 @@ typedef struct {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_GROUP(g_interp_group),
         M4_NOTES(The max fusion weight of color-channel gradient for g interpolation, related to sharp strength.\n
         Freq of use: high))  */
     uint8_t hw_dmT_gInterpSharpStrg_maxLim;
@@ -191,13 +188,13 @@ typedef struct dm_gOutlsFlt_bifilt_s {
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_dmT_filtCfg_mode),
         M4_TYPE(enum),
-        M4_ENUM_DEF(sw_dmT_filtCfg_mode),
+        M4_ENUM_DEF(dm_filtCfg_mode_t),
         M4_DEFAULT(dm_cfgByFiltStrg_mode),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
         M4_NOTES(The mode how filter coefficients for configuring filters generated.\n
-        Freq of use: high))  */
+        Freq of use: low))  */
     dm_filtCfg_mode_t sw_dmT_filtCfg_mode;
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_dmT_filtSpatial_strg),
@@ -223,7 +220,7 @@ typedef struct dm_gOutlsFlt_bifilt_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.Freq of use: high))  */
     float hw_dmT_filtSpatial_wgt[3];
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_dmT_luma2Sgm_val),
@@ -235,7 +232,7 @@ typedef struct dm_gOutlsFlt_bifilt_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.Freq of use: low))  */
     uint16_t hw_dmT_luma2RgeSgm_val[8];
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_dmT_gOutlsFlt_ratio),
@@ -247,7 +244,7 @@ typedef struct dm_gOutlsFlt_bifilt_s {
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(2),
-        M4_NOTES(TODO))  */
+        M4_NOTES(TODO.Freq of use: high))  */
     float hw_dmT_bifilt_alpha;
 } dm_gOutlsFlt_bifilt_t;
 
@@ -329,7 +326,7 @@ typedef struct {
 
 typedef struct {
     /* M4_GENERIC_DESC(
-        M4_ALIAS(static_param),
+        M4_ALIAS(sta),
         M4_TYPE(struct),
         M4_UI_MODULE(static_ui),
         M4_HIDE_EX(0),
@@ -338,7 +335,7 @@ typedef struct {
         M4_NOTES(The static params of demosaic module))  */
     dm_params_static_t sta;
     /* M4_GENERIC_DESC(
-        M4_ALIAS(dynamic_param),
+        M4_ALIAS(dyn),
         M4_TYPE(struct),
         M4_UI_MODULE(dynamic_ui),
         M4_HIDE_EX(0),

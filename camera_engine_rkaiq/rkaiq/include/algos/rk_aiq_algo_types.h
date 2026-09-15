@@ -47,6 +47,7 @@
 #include "algos/aldch/rk_aiq_types_aldch_algo_int.h"
 #include "algos/alsc/rk_aiq_types_alsc_algo_int.h"
 #include "algos/amd/rk_aiq_types_algo_amd_int.h"
+#include "algos/amtd/rk_aiq_types_amtd_algo_int.h"
 #include "algos/amerge/rk_aiq_types_amerge_algo_int.h"
 #include "algos/amfnr/rk_aiq_types_amfnr_algo_int_v1.h"
 #include "algos/anr/rk_aiq_types_anr_algo_int.h"

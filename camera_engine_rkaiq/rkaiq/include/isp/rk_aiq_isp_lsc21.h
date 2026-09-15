@@ -63,11 +63,11 @@ typedef enum lsc_meshGrid_mode_e {
     // @reg: x_sect_size = width/LSC_MESHGRID_SIZE
     // @reg: y_sect_size = height/LSC_MESHGRID_SIZE
     lsc_equalSector_mode = 1,
-    // default set to lsc_equalSector_mode 
+    // default set to lsc_equalSector_mode
     lsc_vendorDefault_mode,
 } lsc_meshGrid_mode_t;
 
-typedef struct lsc_meshGain_s {   
+typedef struct lsc_meshGain_s {
     /* M4_GENERIC_DESC(
         M4_ALIAS(hw_lscC_gainR_val),
         M4_TYPE(u16),

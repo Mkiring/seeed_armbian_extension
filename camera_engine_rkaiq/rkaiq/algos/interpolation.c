@@ -91,6 +91,51 @@ void interpolation_f(const float *x, const float *y, int Num, float x0, float*y0
     *y0 = k;
 }
 
+void get_interpolationf_wgt(const float *x, const float *y, int Num, float x0, int *idxS, int *idxE, float *wgtS, float *wgtE)
+{
+    int i ;
+    float k;
+    if (x0 <= x[0])
+    {
+        k = y[0];
+        *idxS=0;
+        *idxE=0;
+        *wgtS=1;
+        *wgtE=0;
+    }
+    else if (x0 >= x[Num - 1])
+    {
+        k = y[Num - 1];
+        *idxS=Num-1;
+        *idxE=Num-1;
+        *wgtS=0;
+        *wgtE=1;
+    }
+    else
+    {
+        for (i = 0; i < Num; i++)
+        {
+            if (x0 < x[i])
+                break;
+        }
+        *idxS = i - 1;
+        *idxE=*idxS+1;
+        if ((float)x[*idxE] - (float)x[*idxS] < 0.001){
+            *wgtS=1;
+            *wgtE=0;
+        }else{
+            *wgtE = ((float)x0 - (float)x[*idxS]) / ((float)x[*idxE] - (float)x[*idxS]);
+            *wgtS=1-*wgtE;
+        }
+    }
+
+}
+
+void interpolation_with_wgt(float valueS,float valueE,float wgtS,float wgtE,float *value)
+{
+    *value = valueS*wgtS + valueE*wgtE;
+}
+
 void interpolation_s(const float *x, const unsigned short *y, int Num, float x0, unsigned short *y0)
 {
     int i, index;

@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string>
 #include <unistd.h>
+#include <errno.h>
 #ifndef TEMP_FAILURE_RETRY
 /* Used to retry syscalls that can return EINTR. */
 #define TEMP_FAILURE_RETRY(exp) ({         \

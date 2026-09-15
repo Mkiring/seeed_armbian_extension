@@ -25,6 +25,11 @@
 #include "iq_parser_v2/RkAiqCalibDbV2Helper.h"
 #include "xcam_log.h"
 
+#if RKAIQ_HAVE_DUMPSYS
+#include "include/algo_ldc_info.h"
+#include "rk_info_utils.h"
+#endif
+
 static XCamReturn create_context(RkAiqAlgoContext** context, const AlgoCtxInstanceCfg* cfg) {
     XCamReturn result                 = XCAM_RETURN_NO_ERROR;
     CamCalibDbV2Context_t* pCalibDbV2 = cfg->calibv2;
@@ -78,6 +83,16 @@ static XCamReturn processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outp
     return XCAM_RETURN_NO_ERROR;
 }
 
+#if RKAIQ_HAVE_DUMPSYS
+static int dump(const RkAiqAlgoCom* config, st_string* result) {
+    ldc_dump_mod_param(config, result);
+    ldc_dump_mod_attr(config, result);
+    ldc_dump_mod_status(config, result);
+
+    return 0;
+}
+#endif
+
 LdcLutBuffer* algo_ldc_getLdchFreeLutBuf(RkAiqAlgoContext* ctx) {
     LdcContext_t* ctx_  = (LdcContext_t*)ctx;
     LdcAlgoAdaptor* adp = (LdcAlgoAdaptor*)(ctx_->handler);
@@ -111,4 +126,7 @@ RkAiqAlgoDescription g_RkIspAlgoDescLdc = {
         },
     .prepare    = prepare,
     .processing = processing,
+#if RKAIQ_HAVE_DUMPSYS
+    .dump = dump,
+#endif
 };

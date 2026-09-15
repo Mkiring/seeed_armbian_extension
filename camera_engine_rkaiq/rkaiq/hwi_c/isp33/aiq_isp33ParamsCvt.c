@@ -136,7 +136,7 @@ static void convertAiqAwbGainToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_b
     // 1)//check awb gain apply position
     pCvt->awb_gain_final.applyPosition =
         ((rk_aiq_working_mode_t)(pCvt->_working_mode) == RK_AIQ_WORKING_MODE_NORMAL) ? IN_AWBGAIN1
-                                                                                     : IN_AWBGAIN0;
+        : IN_AWBGAIN0;
     // 2) //otp
     AwbGainOtpAdjust(&pCvt->awb_gain_final, &pCvt->mCommonCvtInfo.otp_awb);
     // 3)//ConfigWbgainBaseOnBlc
@@ -188,36 +188,15 @@ static void convertAiqAwbGainToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_b
 
     pCvt->mLatestWbGainCfg = *cfg;
 }
-// 函数用于将补码表示的整数转换为真值，指定符号位位置
-static inline int32_t c2trval(int signBitPosition,uint32_t complement)
-{
-    // 计算符号掩码，只保留符号位
-    uint32_t signMask = 1 << signBitPosition;
-    if ((complement & signMask) == 0) {
-        // 符号位为 0，补码就是真值
-        return (int32_t)complement;
-    }
-    else {
-        // 符号位为 1，计算真值
-        // 取反所有位，然后加1得到反码
-        // 注意：这里使用了 uint32_t 来避免在取反时发生符号扩展
-        uint32_t oneComplement = ~complement + 1;
-        // 现在 oneComplement 可能包含比原整数更多的1
-        // 需要将其限制到原整数的位数内
-        oneComplement &= (signMask << 1) - 1;
-        // 将反码转换为真值，即取反后加1的结果
-        return -(int32_t)oneComplement;
-    }
-}
 
 
 static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
 {
 #if 0
     static int count = 0;
-    if(count>20) return;
+    if(count > 20) return;
     char fName[100];
-    sprintf(fName, "./tmp/config_rkisp_demo_s_%d.txt",count);
+    sprintf(fName, "./tmp/config_rkisp_demo_s_%d.txt", count);
     count++;
     LOGV_AWB( "%s", fName);
     FILE* fp = fopen(fName, "wb");
@@ -228,24 +207,24 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         //fprintf(fp, "g_awb_para.sw_img_depth         =%d;\n",wpDetectPara-> );
         //fprintf(fp, "g_awb_para.rawBayerPattern      =%d;\n",wpDetectPara-> );
 
-        fprintf(fp, "g_awb_para.sw_rawawb_en                 =%d;\n",1                 );
-        fprintf(fp, "g_awb_para.sw_rawawb_xy_en0             =%d;\n",wpDetectPara->xy_en0             );
-        fprintf(fp, "g_awb_para.sw_rawawb_uv_en0             =%d;\n",wpDetectPara->uv_en0             );
+        fprintf(fp, "g_awb_para.sw_rawawb_en                 =%d;\n", 1                 );
+        fprintf(fp, "g_awb_para.sw_rawawb_xy_en0             =%d;\n", wpDetectPara->xy_en0             );
+        fprintf(fp, "g_awb_para.sw_rawawb_uv_en0             =%d;\n", wpDetectPara->uv_en0             );
         //fprintf(fp, "g_awb_para.sw_rawawb_3dyuv_en0          =%d;\n",wpDetectPara->yuv3d_en0          );
-        fprintf(fp, "g_awb_para.sw_rawawb_xy_en1             =%d;\n",wpDetectPara->xy_en1             );
-        fprintf(fp, "g_awb_para.sw_rawawb_uv_en1             =%d;\n",wpDetectPara->uv_en1             );
+        fprintf(fp, "g_awb_para.sw_rawawb_xy_en1             =%d;\n", wpDetectPara->xy_en1             );
+        fprintf(fp, "g_awb_para.sw_rawawb_uv_en1             =%d;\n", wpDetectPara->uv_en1             );
         //fprintf(fp, "g_awb_para.sw_rawawb_3dyuv_en1          =%d;\n",wpDetectPara->yuv3d_en1          );
-        fprintf(fp, "g_awb_para.sw_rawawb_wp_blk_wei_en0     =%d;\n",wpDetectPara->wp_blk_wei_en0     );
-        fprintf(fp, "g_awb_para.sw_rawawb_wp_blk_wei_en1     =%d;\n",wpDetectPara->wp_blk_wei_en1     );
-        fprintf(fp, "g_awb_para.sw_3a_rawawb_sel             =%d;\n",wpDetectPara->rawawb_sel             );
-        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_enable =%d;\n",wpDetectPara->blk_measure_enable );
-        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_mode   =%d;\n",wpDetectPara->blk_measure_mode   );
-        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_xytype =%d;\n",wpDetectPara->blk_measure_xytype );
-        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_illu_idx  =%d;\n",wpDetectPara->blk_measure_illu_idx );
-        fprintf(fp, "g_awb_para.sw_rawawb_blk_with_luma_wei_en  =%d;\n",wpDetectPara->blk_with_luma_wei_en);
-        fprintf(fp, "g_awb_para.sw_rawawb_wp_luma_wei_en0   =%d;\n",wpDetectPara->wp_luma_wei_en0 );
+        fprintf(fp, "g_awb_para.sw_rawawb_wp_blk_wei_en0     =%d;\n", wpDetectPara->wp_blk_wei_en0     );
+        fprintf(fp, "g_awb_para.sw_rawawb_wp_blk_wei_en1     =%d;\n", wpDetectPara->wp_blk_wei_en1     );
+        fprintf(fp, "g_awb_para.sw_3a_rawawb_sel             =%d;\n", wpDetectPara->rawawb_sel             );
+        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_enable =%d;\n", wpDetectPara->blk_measure_enable );
+        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_mode   =%d;\n", wpDetectPara->blk_measure_mode   );
+        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_xytype =%d;\n", wpDetectPara->blk_measure_xytype );
+        fprintf(fp, "g_awb_para.sw_rawawb_blk_measure_illu_idx  =%d;\n", wpDetectPara->blk_measure_illu_idx );
+        fprintf(fp, "g_awb_para.sw_rawawb_blk_with_luma_wei_en  =%d;\n", wpDetectPara->blk_with_luma_wei_en);
+        fprintf(fp, "g_awb_para.sw_rawawb_wp_luma_wei_en0   =%d;\n", wpDetectPara->wp_luma_wei_en0 );
         fprintf(fp, "g_awb_para.sw_rawawb_wp_luma_wei_en1   = %d;\n", wpDetectPara->wp_luma_wei_en1);
-        fprintf(fp, "g_awb_para.sw_rawawb_wp_hist_xytype    =%d;\n",wpDetectPara->wp_hist_xytype);
+        fprintf(fp, "g_awb_para.sw_rawawb_wp_hist_xytype    =%d;\n", wpDetectPara->wp_hist_xytype);
         //fprintf(fp, "g_awb_para.sw_rawawb_3dyuv_ls_idx0    = %d;\n", wpDetectPara->yuv3d_ls_idx0);
         //fprintf(fp, "g_awb_para.sw_rawawb_3dyuv_ls_idx1    = %d;\n", wpDetectPara->yuv3d_ls_idx1);
         //fprintf(fp, "g_awb_para.sw_rawawb_3dyuv_ls_idx2    = %d;\n", wpDetectPara->yuv3d_ls_idx2);
@@ -268,42 +247,42 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_g_min          = %d;\n", wpDetectPara->g_min);
         fprintf(fp, "g_awb_para.sw_rawawb_b_min          = %d;\n", wpDetectPara->b_min);
         fprintf(fp, "g_awb_para.sw_rawawb_y_min          = %d;\n", wpDetectPara->y_min);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_0    =%d;\n",wpDetectPara->vertex0_u_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_0    =%d;\n",wpDetectPara->vertex0_v_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_0    =%d;\n",wpDetectPara->vertex1_u_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_v_0    =%d;\n",wpDetectPara->vertex1_v_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_u_0    =%d;\n",wpDetectPara->vertex2_u_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_0    =%d;\n",wpDetectPara->vertex2_v_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_0    =%d;\n",wpDetectPara->vertex3_u_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_0    =%d;\n",wpDetectPara->vertex3_v_0);
-        fprintf(fp, "g_awb_para.sw_rawawb_islope01_0      =%d;\n",c2trval(31,wpDetectPara->islope01_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope12_0      =%d;\n",c2trval(31,wpDetectPara->islope12_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope23_0      =%d;\n",c2trval(31,wpDetectPara->islope23_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope30_0      =%d;\n",c2trval(31,wpDetectPara->islope30_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_1     =%d;\n",wpDetectPara->vertex0_u_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_1     =%d;\n",wpDetectPara->vertex0_v_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_1     =%d;\n",wpDetectPara->vertex1_u_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_v_1     =%d;\n",wpDetectPara->vertex1_v_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_u_1     =%d;\n",wpDetectPara->vertex2_u_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_1     =%d;\n",wpDetectPara->vertex2_v_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_1     =%d;\n",wpDetectPara->vertex3_u_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_1     =%d;\n",wpDetectPara->vertex3_v_1);
-        fprintf(fp, "g_awb_para.sw_rawawb_islope01_1      =%d;\n",c2trval(31,wpDetectPara->islope01_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope12_1      =%d;\n",c2trval(31,wpDetectPara->islope12_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope23_1      =%d;\n",c2trval(31,wpDetectPara->islope23_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope30_1      =%d;\n",c2trval(31,wpDetectPara->islope30_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_2    =%d;\n",wpDetectPara->vertex0_u_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_2    =%d;\n",wpDetectPara->vertex0_v_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_2    =%d;\n",wpDetectPara->vertex1_u_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_v_2    =%d;\n",wpDetectPara->vertex1_v_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_u_2    =%d;\n",wpDetectPara->vertex2_u_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_2    =%d;\n",wpDetectPara->vertex2_v_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_2    =%d;\n",wpDetectPara->vertex3_u_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_2    =%d;\n",wpDetectPara->vertex3_v_2 );
-        fprintf(fp, "g_awb_para.sw_rawawb_islope01_2      =%d;\n",c2trval(31,wpDetectPara->islope01_2   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope12_2      =%d;\n",c2trval(31,wpDetectPara->islope12_2  ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope23_2      =%d;\n",c2trval(31,wpDetectPara->islope23_2  ));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope30_2      =%d;\n",c2trval(31,wpDetectPara->islope30_2  ));
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_0    =%d;\n", wpDetectPara->vertex0_u_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_0    =%d;\n", wpDetectPara->vertex0_v_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_0    =%d;\n", wpDetectPara->vertex1_u_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_v_0    =%d;\n", wpDetectPara->vertex1_v_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_u_0    =%d;\n", wpDetectPara->vertex2_u_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_0    =%d;\n", wpDetectPara->vertex2_v_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_0    =%d;\n", wpDetectPara->vertex3_u_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_0    =%d;\n", wpDetectPara->vertex3_v_0);
+        fprintf(fp, "g_awb_para.sw_rawawb_islope01_0      =%d;\n", c2trval(31, wpDetectPara->islope01_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope12_0      =%d;\n", c2trval(31, wpDetectPara->islope12_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope23_0      =%d;\n", c2trval(31, wpDetectPara->islope23_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope30_0      =%d;\n", c2trval(31, wpDetectPara->islope30_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_1     =%d;\n", wpDetectPara->vertex0_u_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_1     =%d;\n", wpDetectPara->vertex0_v_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_1     =%d;\n", wpDetectPara->vertex1_u_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_v_1     =%d;\n", wpDetectPara->vertex1_v_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_u_1     =%d;\n", wpDetectPara->vertex2_u_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_1     =%d;\n", wpDetectPara->vertex2_v_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_1     =%d;\n", wpDetectPara->vertex3_u_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_1     =%d;\n", wpDetectPara->vertex3_v_1);
+        fprintf(fp, "g_awb_para.sw_rawawb_islope01_1      =%d;\n", c2trval(31, wpDetectPara->islope01_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope12_1      =%d;\n", c2trval(31, wpDetectPara->islope12_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope23_1      =%d;\n", c2trval(31, wpDetectPara->islope23_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope30_1      =%d;\n", c2trval(31, wpDetectPara->islope30_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_2    =%d;\n", wpDetectPara->vertex0_u_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_2    =%d;\n", wpDetectPara->vertex0_v_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_2    =%d;\n", wpDetectPara->vertex1_u_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex1_v_2    =%d;\n", wpDetectPara->vertex1_v_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_u_2    =%d;\n", wpDetectPara->vertex2_u_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_2    =%d;\n", wpDetectPara->vertex2_v_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_2    =%d;\n", wpDetectPara->vertex3_u_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_2    =%d;\n", wpDetectPara->vertex3_v_2 );
+        fprintf(fp, "g_awb_para.sw_rawawb_islope01_2      =%d;\n", c2trval(31, wpDetectPara->islope01_2   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope12_2      =%d;\n", c2trval(31, wpDetectPara->islope12_2  ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope23_2      =%d;\n", c2trval(31, wpDetectPara->islope23_2  ));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope30_2      =%d;\n", c2trval(31, wpDetectPara->islope30_2  ));
         fprintf(fp, "g_awb_para.sw_rawawb_vertex0_u_3    = %d;\n", wpDetectPara->vertex0_u_3);
         fprintf(fp, "g_awb_para.sw_rawawb_vertex0_v_3    = %d;\n", wpDetectPara->vertex0_v_3);
         fprintf(fp, "g_awb_para.sw_rawawb_vertex1_u_3    = %d;\n", wpDetectPara->vertex1_u_3);
@@ -312,10 +291,10 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_vertex2_v_3    = %d;\n", wpDetectPara->vertex2_v_3);
         fprintf(fp, "g_awb_para.sw_rawawb_vertex3_u_3    = %d;\n", wpDetectPara->vertex3_u_3);
         fprintf(fp, "g_awb_para.sw_rawawb_vertex3_v_3    = %d;\n", wpDetectPara->vertex3_v_3);
-        fprintf(fp, "g_awb_para.sw_rawawb_islope01_3      = %d;\n", c2trval(31,wpDetectPara->islope01_3));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope12_3      = %d;\n", c2trval(31,wpDetectPara->islope12_3));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope23_3      = %d;\n", c2trval(31,wpDetectPara->islope23_3));
-        fprintf(fp, "g_awb_para.sw_rawawb_islope30_3      = %d;\n", c2trval(31,wpDetectPara->islope30_3));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope01_3      = %d;\n", c2trval(31, wpDetectPara->islope01_3));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope12_3      = %d;\n", c2trval(31, wpDetectPara->islope12_3));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope23_3      = %d;\n", c2trval(31, wpDetectPara->islope23_3));
+        fprintf(fp, "g_awb_para.sw_rawawb_islope30_3      = %d;\n", c2trval(31, wpDetectPara->islope30_3));
 #if 0
         //fprintf(fp, "g_awb_para.sw_rawawb_rgb2ryuvmat0_u = %d;\n", c2trval(15,wpDetectPara->rgb2ryuvmat0_u));
         //fprintf(fp, "g_awb_para.sw_rawawb_rgb2ryuvmat1_u = %d;\n", c2trval(15,wpDetectPara->rgb2ryuvmat1_u));
@@ -341,32 +320,32 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_th3_ls0 =%d;\n", wpDetectPara->th3_ls0);
         fprintf(fp, "g_awb_para.sw_rawawb_th4_ls0 =%d;\n", wpDetectPara->th4_ls0);
         fprintf(fp, "g_awb_para.sw_rawawb_th5_ls0 =%d;\n", wpDetectPara->th5_ls0);
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls0_u =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls0_u));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls0_v =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls0_v));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls0_y =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls0_y));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls0_u =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls0_u));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls0_v =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls0_v));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls0_y =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls0_y));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls0_u =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls0_u));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls0_v =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls0_v));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls0_y =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls0_y));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls0_u =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls0_u));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls0_v =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls0_v));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls0_y =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls0_y));
         fprintf(fp, "g_awb_para.sw_rawawb_dis_x1x2_ls0 =%d;\n", wpDetectPara->dis_x1x2_ls0);
-        fprintf(fp, "g_awb_para.sw_rawawb_rotu0_ls1 =%d;\n",wpDetectPara->rotu0_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_rotu1_ls1 =%d;\n",wpDetectPara->rotu1_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_rotu2_ls1 =%d;\n",wpDetectPara->rotu2_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_rotu3_ls1 =%d;\n",wpDetectPara->rotu3_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_rotu4_ls1 =%d;\n",wpDetectPara->rotu4_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_rotu5_ls1 =%d;\n",wpDetectPara->rotu5_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_th0_ls1 =%d;\n",wpDetectPara->th0_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_th1_ls1 =%d;\n",wpDetectPara->th1_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_th2_ls1 =%d;\n",wpDetectPara->th2_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_th3_ls1 =%d;\n",wpDetectPara->th3_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_th4_ls1 =%d;\n",wpDetectPara->th4_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_th5_ls1 =%d;\n",wpDetectPara->th5_ls1 );
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls1_u =%d;\n",c2trval(15,wpDetectPara->coor_x1_ls1_u ));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls1_v =%d;\n",c2trval(15,wpDetectPara->coor_x1_ls1_v ));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls1_y =%d;\n",c2trval(15,wpDetectPara->coor_x1_ls1_y ));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls1_u =%d;\n",c2trval(15,wpDetectPara->vec_x21_ls1_u ));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls1_v =%d;\n",c2trval(15,wpDetectPara->vec_x21_ls1_v ));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls1_y =%d;\n",c2trval(15,wpDetectPara->vec_x21_ls1_y ));
-        fprintf(fp, "g_awb_para.sw_rawawb_dis_x1x2_ls1 =%d;\n",wpDetectPara->dis_x1x2_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_rotu0_ls1 =%d;\n", wpDetectPara->rotu0_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_rotu1_ls1 =%d;\n", wpDetectPara->rotu1_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_rotu2_ls1 =%d;\n", wpDetectPara->rotu2_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_rotu3_ls1 =%d;\n", wpDetectPara->rotu3_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_rotu4_ls1 =%d;\n", wpDetectPara->rotu4_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_rotu5_ls1 =%d;\n", wpDetectPara->rotu5_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_th0_ls1 =%d;\n", wpDetectPara->th0_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_th1_ls1 =%d;\n", wpDetectPara->th1_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_th2_ls1 =%d;\n", wpDetectPara->th2_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_th3_ls1 =%d;\n", wpDetectPara->th3_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_th4_ls1 =%d;\n", wpDetectPara->th4_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_th5_ls1 =%d;\n", wpDetectPara->th5_ls1 );
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls1_u =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls1_u ));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls1_v =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls1_v ));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls1_y =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls1_y ));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls1_u =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls1_u ));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls1_v =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls1_v ));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls1_y =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls1_y ));
+        fprintf(fp, "g_awb_para.sw_rawawb_dis_x1x2_ls1 =%d;\n", wpDetectPara->dis_x1x2_ls1 );
         fprintf(fp, "g_awb_para.sw_rawawb_rotu0_ls2 =%d;\n", wpDetectPara->rotu0_ls2);
         fprintf(fp, "g_awb_para.sw_rawawb_rotu1_ls2 =%d;\n", wpDetectPara->rotu1_ls2);
         fprintf(fp, "g_awb_para.sw_rawawb_rotu2_ls2 =%d;\n", wpDetectPara->rotu2_ls2);
@@ -379,12 +358,12 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_th3_ls2 =%d;\n", wpDetectPara->th3_ls2);
         fprintf(fp, "g_awb_para.sw_rawawb_th4_ls2 =%d;\n", wpDetectPara->th4_ls2);
         fprintf(fp, "g_awb_para.sw_rawawb_th5_ls2 =%d;\n", wpDetectPara->th5_ls2);
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls2_u =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls2_u));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls2_v =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls2_v));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls2_y =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls2_y));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls2_u =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls2_u));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls2_v =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls2_v));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls2_y =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls2_y));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls2_u =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls2_u));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls2_v =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls2_v));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls2_y =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls2_y));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls2_u =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls2_u));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls2_v =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls2_v));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls2_y =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls2_y));
         fprintf(fp, "g_awb_para.sw_rawawb_dis_x1x2_ls2 =%d;\n", wpDetectPara->dis_x1x2_ls2);
         fprintf(fp, "g_awb_para.sw_rawawb_rotu0_ls3 =%d;\n", wpDetectPara->rotu0_ls3);
         fprintf(fp, "g_awb_para.sw_rawawb_rotu1_ls3 =%d;\n", wpDetectPara->rotu1_ls3);
@@ -398,138 +377,138 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_th3_ls3 =%d;\n", wpDetectPara->th3_ls3);
         fprintf(fp, "g_awb_para.sw_rawawb_th4_ls3 =%d;\n", wpDetectPara->th4_ls3);
         fprintf(fp, "g_awb_para.sw_rawawb_th5_ls3 =%d;\n", wpDetectPara->th5_ls3);
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls3_u =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls3_u));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls3_v =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls3_v));
-        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls3_y =%d;\n", c2trval(15,wpDetectPara->coor_x1_ls3_y));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls3_u =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls3_u));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls3_v =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls3_v));
-        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls3_y =%d;\n", c2trval(15,wpDetectPara->vec_x21_ls3_y));
-        fprintf(fp, "g_awb_para.sw_rawawb_dis_x1x2_ls3 =%d;\n", c2trval(7,wpDetectPara->dis_x1x2_ls3));
- #endif
-        fprintf(fp, "g_awb_para.sw_rawawb_wt0            =%d;\n",wpDetectPara->wt0      );
-        fprintf(fp, "g_awb_para.sw_rawawb_wt1            =%d;\n",wpDetectPara->wt1      );
-        fprintf(fp, "g_awb_para.sw_rawawb_wt2            =%d;\n",wpDetectPara->wt2      );
-        fprintf(fp, "g_awb_para.sw_rawawb_mat0_x         =%d;\n",c2trval(15,wpDetectPara->mat0_x   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_mat1_x         =%d;\n",c2trval(15,wpDetectPara->mat1_x   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_mat2_x         =%d;\n",c2trval(15,wpDetectPara->mat2_x   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_mat0_y         =%d;\n",c2trval(15,wpDetectPara->mat0_y   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_mat1_y         =%d;\n",c2trval(15,wpDetectPara->mat1_y   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_mat2_y         =%d;\n",c2trval(15,wpDetectPara->mat2_y   ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_0       =%d;\n",c2trval(15,wpDetectPara->nor_x0_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_0       =%d;\n",c2trval(15,wpDetectPara->nor_x1_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_0       =%d;\n",c2trval(15,wpDetectPara->nor_y0_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_0       =%d;\n",c2trval(15,wpDetectPara->nor_y1_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_0       =%d;\n",c2trval(15,wpDetectPara->big_x0_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_0       =%d;\n",c2trval(15,wpDetectPara->big_x1_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_0       =%d;\n",c2trval(15,wpDetectPara->big_y0_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_0       =%d;\n",c2trval(15,wpDetectPara->big_y1_0 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_1       =%d;\n",c2trval(15,wpDetectPara->nor_x0_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_1       =%d;\n",c2trval(15,wpDetectPara->nor_x1_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_1       =%d;\n",c2trval(15,wpDetectPara->nor_y0_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_1       =%d;\n",c2trval(15,wpDetectPara->nor_y1_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_1       =%d;\n",c2trval(15,wpDetectPara->big_x0_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_1       =%d;\n",c2trval(15,wpDetectPara->big_x1_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_1       =%d;\n",c2trval(15,wpDetectPara->big_y0_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_1       =%d;\n",c2trval(15,wpDetectPara->big_y1_1 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_2       =%d;\n",c2trval(15,wpDetectPara->nor_x0_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_2       =%d;\n",c2trval(15,wpDetectPara->nor_x1_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_2       =%d;\n",c2trval(15,wpDetectPara->nor_y0_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_2       =%d;\n",c2trval(15,wpDetectPara->nor_y1_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_2       =%d;\n",c2trval(15,wpDetectPara->big_x0_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_2       =%d;\n",c2trval(15,wpDetectPara->big_x1_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_2       =%d;\n",c2trval(15,wpDetectPara->big_y0_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_2       =%d;\n",c2trval(15,wpDetectPara->big_y1_2 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_3       =%d;\n",c2trval(15,wpDetectPara->nor_x0_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_3       =%d;\n",c2trval(15,wpDetectPara->nor_x1_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_3       =%d;\n",c2trval(15,wpDetectPara->nor_y0_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_3       =%d;\n",c2trval(15,wpDetectPara->nor_y1_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_3       =%d;\n",c2trval(15,wpDetectPara->big_x0_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_3       =%d;\n",c2trval(15,wpDetectPara->big_x1_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_3       =%d;\n",c2trval(15,wpDetectPara->big_y0_3 ));
-        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_3       =%d;\n",c2trval(15,wpDetectPara->big_y1_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls3_u =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls3_u));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls3_v =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls3_v));
+        fprintf(fp, "g_awb_para.sw_rawawb_coor_x1_ls3_y =%d;\n", c2trval(15, wpDetectPara->coor_x1_ls3_y));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls3_u =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls3_u));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls3_v =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls3_v));
+        fprintf(fp, "g_awb_para.sw_rawawb_vec_x21_ls3_y =%d;\n", c2trval(15, wpDetectPara->vec_x21_ls3_y));
+        fprintf(fp, "g_awb_para.sw_rawawb_dis_x1x2_ls3 =%d;\n", c2trval(7, wpDetectPara->dis_x1x2_ls3));
+#endif
+        fprintf(fp, "g_awb_para.sw_rawawb_wt0            =%d;\n", wpDetectPara->wt0      );
+        fprintf(fp, "g_awb_para.sw_rawawb_wt1            =%d;\n", wpDetectPara->wt1      );
+        fprintf(fp, "g_awb_para.sw_rawawb_wt2            =%d;\n", wpDetectPara->wt2      );
+        fprintf(fp, "g_awb_para.sw_rawawb_mat0_x         =%d;\n", c2trval(15, wpDetectPara->mat0_x   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_mat1_x         =%d;\n", c2trval(15, wpDetectPara->mat1_x   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_mat2_x         =%d;\n", c2trval(15, wpDetectPara->mat2_x   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_mat0_y         =%d;\n", c2trval(15, wpDetectPara->mat0_y   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_mat1_y         =%d;\n", c2trval(15, wpDetectPara->mat1_y   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_mat2_y         =%d;\n", c2trval(15, wpDetectPara->mat2_y   ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_0       =%d;\n", c2trval(15, wpDetectPara->nor_x0_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_0       =%d;\n", c2trval(15, wpDetectPara->nor_x1_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_0       =%d;\n", c2trval(15, wpDetectPara->nor_y0_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_0       =%d;\n", c2trval(15, wpDetectPara->nor_y1_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_0       =%d;\n", c2trval(15, wpDetectPara->big_x0_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_0       =%d;\n", c2trval(15, wpDetectPara->big_x1_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_0       =%d;\n", c2trval(15, wpDetectPara->big_y0_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_0       =%d;\n", c2trval(15, wpDetectPara->big_y1_0 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_1       =%d;\n", c2trval(15, wpDetectPara->nor_x0_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_1       =%d;\n", c2trval(15, wpDetectPara->nor_x1_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_1       =%d;\n", c2trval(15, wpDetectPara->nor_y0_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_1       =%d;\n", c2trval(15, wpDetectPara->nor_y1_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_1       =%d;\n", c2trval(15, wpDetectPara->big_x0_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_1       =%d;\n", c2trval(15, wpDetectPara->big_x1_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_1       =%d;\n", c2trval(15, wpDetectPara->big_y0_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_1       =%d;\n", c2trval(15, wpDetectPara->big_y1_1 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_2       =%d;\n", c2trval(15, wpDetectPara->nor_x0_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_2       =%d;\n", c2trval(15, wpDetectPara->nor_x1_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_2       =%d;\n", c2trval(15, wpDetectPara->nor_y0_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_2       =%d;\n", c2trval(15, wpDetectPara->nor_y1_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_2       =%d;\n", c2trval(15, wpDetectPara->big_x0_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_2       =%d;\n", c2trval(15, wpDetectPara->big_x1_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_2       =%d;\n", c2trval(15, wpDetectPara->big_y0_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_2       =%d;\n", c2trval(15, wpDetectPara->big_y1_2 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x0_3       =%d;\n", c2trval(15, wpDetectPara->nor_x0_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_x1_3       =%d;\n", c2trval(15, wpDetectPara->nor_x1_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y0_3       =%d;\n", c2trval(15, wpDetectPara->nor_y0_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_nor_y1_3       =%d;\n", c2trval(15, wpDetectPara->nor_y1_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x0_3       =%d;\n", c2trval(15, wpDetectPara->big_x0_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_x1_3       =%d;\n", c2trval(15, wpDetectPara->big_x1_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y0_3       =%d;\n", c2trval(15, wpDetectPara->big_y0_3 ));
+        fprintf(fp, "g_awb_para.sw_rawawb_big_y1_3       =%d;\n", c2trval(15, wpDetectPara->big_y1_3 ));
         fprintf(fp, "g_awb_para.sw_rawawb_pre_wbgain_inv_r =%d;\n", wpDetectPara->pre_wbgain_inv_r);
         fprintf(fp, "g_awb_para.sw_rawawb_pre_wbgain_inv_g =%d;\n", wpDetectPara->pre_wbgain_inv_g);
         fprintf(fp, "g_awb_para.sw_rawawb_pre_wbgain_inv_b =%d;\n", wpDetectPara->pre_wbgain_inv_b);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow_en =%d;\n", wpDetectPara->multiwindow_en);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_h_offs =%d;\n", wpDetectPara->multiwindow0_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_v_offs =%d;\n", wpDetectPara->multiwindow0_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_h_size =%d;//note:diff with chip\n", wpDetectPara->multiwindow0_h_size- wpDetectPara->multiwindow0_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_v_size =%d;\n", wpDetectPara->multiwindow0_v_size- wpDetectPara->multiwindow0_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_h_size =%d;//note:diff with chip\n", wpDetectPara->multiwindow0_h_size - wpDetectPara->multiwindow0_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow0_v_size =%d;\n", wpDetectPara->multiwindow0_v_size - wpDetectPara->multiwindow0_v_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_h_offs =%d;\n", wpDetectPara->multiwindow1_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_v_offs =%d;\n", wpDetectPara->multiwindow1_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_h_size =%d;\n", wpDetectPara->multiwindow1_h_size- wpDetectPara->multiwindow1_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_v_size =%d;\n", wpDetectPara->multiwindow1_v_size- wpDetectPara->multiwindow1_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_h_size =%d;\n", wpDetectPara->multiwindow1_h_size - wpDetectPara->multiwindow1_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow1_v_size =%d;\n", wpDetectPara->multiwindow1_v_size - wpDetectPara->multiwindow1_v_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_h_offs =%d;\n", wpDetectPara->multiwindow2_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_v_offs =%d;\n", wpDetectPara->multiwindow2_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_h_size =%d;\n", wpDetectPara->multiwindow2_h_size- wpDetectPara->multiwindow2_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_v_size =%d;\n", wpDetectPara->multiwindow2_v_size- wpDetectPara->multiwindow2_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_h_size =%d;\n", wpDetectPara->multiwindow2_h_size - wpDetectPara->multiwindow2_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow2_v_size =%d;\n", wpDetectPara->multiwindow2_v_size - wpDetectPara->multiwindow2_v_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_h_offs =%d;\n", wpDetectPara->multiwindow3_h_offs);
         fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_v_offs =%d;\n", wpDetectPara->multiwindow3_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_h_size =%d;\n", wpDetectPara->multiwindow3_h_size- wpDetectPara->multiwindow3_h_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_v_size =%d;\n", wpDetectPara->multiwindow3_v_size- wpDetectPara->multiwindow3_v_offs);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen0 =%d;\n", wpDetectPara->exc_wp_region0_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen1 =%d;\n", wpDetectPara->exc_wp_region0_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_h_size =%d;\n", wpDetectPara->multiwindow3_h_size - wpDetectPara->multiwindow3_h_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_multiwindow3_v_size =%d;\n", wpDetectPara->multiwindow3_v_size - wpDetectPara->multiwindow3_v_offs);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen0 =%d;\n", wpDetectPara->exc_wp_region0_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_excen1 =%d;\n", wpDetectPara->exc_wp_region0_excen & 0x2 >> 1);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_measen =%d;\n", wpDetectPara->exc_wp_region0_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_domain =%d;\n", wpDetectPara->exc_wp_region0_domain);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_weight =%d;\n", wpDetectPara->exc_wp_region0_weight);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region0_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region0_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region0_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region0_yv1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_excen0 =%d;\n", wpDetectPara->exc_wp_region1_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_excen1 =%d;\n", wpDetectPara->exc_wp_region1_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region0_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region0_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region0_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region0_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region0_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_excen0 =%d;\n", wpDetectPara->exc_wp_region1_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_excen1 =%d;\n", wpDetectPara->exc_wp_region1_excen & 0x2 >> 1);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_measen =%d;\n", wpDetectPara->exc_wp_region1_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_weight =%d;\n", wpDetectPara->exc_wp_region1_weight);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_domain =%d;\n", wpDetectPara->exc_wp_region1_domain);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region1_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region1_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region1_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region1_yv1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_excen0 =%d;\n", wpDetectPara->exc_wp_region2_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_excen1 =%d;\n", wpDetectPara->exc_wp_region2_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region1_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region1_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region1_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region1_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region1_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_excen0 =%d;\n", wpDetectPara->exc_wp_region2_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_excen1 =%d;\n", wpDetectPara->exc_wp_region2_excen & 0x2 >> 1);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_measen =%d;\n", wpDetectPara->exc_wp_region2_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_domain =%d;\n", wpDetectPara->exc_wp_region2_domain);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_weight =%d;\n", wpDetectPara->exc_wp_region2_weight);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region2_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region2_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region2_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region2_yv1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_excen0 =%d;\n", wpDetectPara->exc_wp_region3_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_excen1 =%d;\n", wpDetectPara->exc_wp_region3_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region2_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region2_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region2_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region2_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region2_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_excen0 =%d;\n", wpDetectPara->exc_wp_region3_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_excen1 =%d;\n", wpDetectPara->exc_wp_region3_excen & 0x2 >> 1);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_measen =%d;\n", wpDetectPara->exc_wp_region3_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_domain =%d;\n", wpDetectPara->exc_wp_region3_domain);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_weight =%d;\n", wpDetectPara->exc_wp_region3_weight);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region3_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region3_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region3_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region3_yv1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_excen0 =%d;\n", wpDetectPara->exc_wp_region4_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_excen1 =%d;\n", wpDetectPara->exc_wp_region4_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region3_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region3_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region3_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region3_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region3_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_excen0 =%d;\n", wpDetectPara->exc_wp_region4_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_excen1 =%d;\n", wpDetectPara->exc_wp_region4_excen & 0x2 >> 1);
         //fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_measen =%d;\n", wpDetectPara->exc_wp_region4_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_domain =%d;\n", wpDetectPara->exc_wp_region4_domain);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_weight =%d;\n", wpDetectPara->exc_wp_region4_weight);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region4_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region4_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region4_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region4_yv1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_excen0 =%d;\n", wpDetectPara->exc_wp_region5_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_excen1 =%d;\n", wpDetectPara->exc_wp_region5_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region4_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region4_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region4_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region4_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region4_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_excen0 =%d;\n", wpDetectPara->exc_wp_region5_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_excen1 =%d;\n", wpDetectPara->exc_wp_region5_excen & 0x2 >> 1);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_weight =%d;\n", wpDetectPara->exc_wp_region5_weight);
         //fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_measen =%d;\n", wpDetectPara->exc_wp_region5_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_domain =%d;\n", wpDetectPara->exc_wp_region5_domain);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region5_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region5_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region5_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region5_yv1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_excen0 =%d;\n", wpDetectPara->exc_wp_region6_excen&0x1);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_excen1 =%d;\n", wpDetectPara->exc_wp_region6_excen&0x2>>1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region5_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region5_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region5_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region5_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region5_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_excen0 =%d;\n", wpDetectPara->exc_wp_region6_excen & 0x1);
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_excen1 =%d;\n", wpDetectPara->exc_wp_region6_excen & 0x2 >> 1);
         //fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_measen =%d;\n", wpDetectPara->exc_wp_region6_measen);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_domain =%d;\n", wpDetectPara->exc_wp_region6_domain);
         fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_weight =%d;\n", wpDetectPara->exc_wp_region6_weight);
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_xu0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region6_xu0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_xu1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region6_xu1));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_yv0 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region6_yv0));
-        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_yv1 =%d;\n", c2trval(15,wpDetectPara->exc_wp_region6_yv1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_xu0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region6_xu0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_xu1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region6_xu1));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_yv0 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region6_yv0));
+        fprintf(fp, "g_awb_para.sw_rawawb_exc_wp_region6_yv1 =%d;\n", c2trval(15, wpDetectPara->exc_wp_region6_yv1));
 
         fprintf(fp, "g_awb_para.sw_rawawb_wp_luma_weicurve_y0 =%d;\n", wpDetectPara->wp_luma_weicurve_y0);
         fprintf(fp, "g_awb_para.sw_rawawb_wp_luma_weicurve_y1 =%d;\n", wpDetectPara->wp_luma_weicurve_y1);
@@ -551,7 +530,7 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_rawawb_wp_luma_weicurve_w8 =%d;\n", wpDetectPara->wp_luma_weicurve_w8);
 
         for (int i = 0; i < ISP39_RAWAWB_WEIGHT_NUM; i++) {
-            fprintf(fp, "g_awb_para.sw_rawawb_wp_blk_wei_w[%d]    =%d;\n",i,wpDetectPara->wp_blk_wei_w[i] );
+            fprintf(fp, "g_awb_para.sw_rawawb_wp_blk_wei_w[%d]    =%d;\n", i, wpDetectPara->wp_blk_wei_w[i] );
         }
         fprintf(fp, "g_awb_para.sw_rawawb_blk_rtdw_measure_en =%d;\n", wpDetectPara->blk_rtdw_measure_en);
         fprintf(fp, "g_awb_para.sw_rawawb_rshift_to_12bit_en =%d;\n", wpDetectPara->in_rshift_to_12bit_en);
@@ -566,15 +545,15 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
         fprintf(fp, "g_awb_para.sw_bls_b_fixed =%d;\n", wpDetectPara->bls2_val.gr);
         fprintf(fp, "g_awb_para.sw_bls_c_fixed =%d;\n", wpDetectPara->bls2_val.gb);
         fprintf(fp, "g_awb_para.sw_bls_d_fixed =%d;\n", wpDetectPara->bls2_val.b);
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[0] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff0_r));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[1] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff1_r));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[2] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff2_r));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[3] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff0_g));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[4] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff1_g));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[5] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff2_g));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[6] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff0_b));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[7] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff1_b));
-        fprintf(fp, "g_awb_para.sw_rawawb_ccm[8] =%d;\n", c2trval(15,wpDetectPara->ccm_coeff2_b));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[0] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff0_r));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[1] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff1_r));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[2] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff2_r));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[3] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff0_g));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[4] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff1_g));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[5] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff2_g));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[6] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff0_b));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[7] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff1_b));
+        fprintf(fp, "g_awb_para.sw_rawawb_ccm[8] =%d;\n", c2trval(15, wpDetectPara->ccm_coeff2_b));
         fclose(fp);
     }
 
@@ -584,9 +563,9 @@ static void WriteDataForIcCmodel(struct isp33_rawawb_meas_cfg* wpDetectPara)
 static void WriteAwbReg(struct isp33_rawawb_meas_cfg* awb_cfg_v32) {
 #if 0
     static int count = 0;
-    if(count>20) return;
+    if(count > 20) return;
     char fName[100];
-    sprintf(fName, "./tmp/awb_reg_%d.txt",count);
+    sprintf(fName, "./tmp/awb_reg_%d.txt", count);
     count++;
     LOGE_AWB( "%s", fName);
 
@@ -653,15 +632,15 @@ static void WriteAwbReg(struct isp33_rawawb_meas_cfg* awb_cfg_v32) {
     fprintf(fp, "\t\tsw_rawawb_wp_luma_weicurve_w6 = 0x%0x (%d)\n",               awb_cfg_v32->wp_luma_weicurve_w6, awb_cfg_v32->wp_luma_weicurve_w6);
     fprintf(fp, "\t\tsw_rawawb_wp_luma_weicurve_w7 = 0x%0x (%d)\n",               awb_cfg_v32->wp_luma_weicurve_w7, awb_cfg_v32->wp_luma_weicurve_w7);
     fprintf(fp, "\t\tsw_rawawb_wp_luma_weicurve_w8 = 0x%0x (%d)\n",               awb_cfg_v32->wp_luma_weicurve_w8, awb_cfg_v32->wp_luma_weicurve_w8);
-    fprintf(fp, "\t\tsw_ccm_coeff0_r = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff0_r,awb_cfg_v32->ccm_coeff0_r);
-    fprintf(fp, "\t\tsw_ccm_coeff1_r = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff1_r,awb_cfg_v32->ccm_coeff1_r);
-    fprintf(fp, "\t\tsw_ccm_coeff2_r = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff2_r,awb_cfg_v32->ccm_coeff2_r);
-    fprintf(fp, "\t\tsw_ccm_coeff0_g = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff0_g,awb_cfg_v32->ccm_coeff0_g);
-    fprintf(fp, "\t\tsw_ccm_coeff1_g = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff1_g,awb_cfg_v32->ccm_coeff1_g);
-    fprintf(fp, "\t\tsw_ccm_coeff2_g = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff2_g,awb_cfg_v32->ccm_coeff2_g);
-    fprintf(fp, "\t\tsw_ccm_coeff0_b = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff0_b,awb_cfg_v32->ccm_coeff0_b);
-    fprintf(fp, "\t\tsw_ccm_coeff1_b = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff1_b,awb_cfg_v32->ccm_coeff1_b);
-    fprintf(fp, "\t\tsw_ccm_coeff2_b = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff2_b,awb_cfg_v32->ccm_coeff2_b);
+    fprintf(fp, "\t\tsw_ccm_coeff0_r = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff0_r, awb_cfg_v32->ccm_coeff0_r);
+    fprintf(fp, "\t\tsw_ccm_coeff1_r = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff1_r, awb_cfg_v32->ccm_coeff1_r);
+    fprintf(fp, "\t\tsw_ccm_coeff2_r = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff2_r, awb_cfg_v32->ccm_coeff2_r);
+    fprintf(fp, "\t\tsw_ccm_coeff0_g = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff0_g, awb_cfg_v32->ccm_coeff0_g);
+    fprintf(fp, "\t\tsw_ccm_coeff1_g = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff1_g, awb_cfg_v32->ccm_coeff1_g);
+    fprintf(fp, "\t\tsw_ccm_coeff2_g = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff2_g, awb_cfg_v32->ccm_coeff2_g);
+    fprintf(fp, "\t\tsw_ccm_coeff0_b = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff0_b, awb_cfg_v32->ccm_coeff0_b);
+    fprintf(fp, "\t\tsw_ccm_coeff1_b = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff1_b, awb_cfg_v32->ccm_coeff1_b);
+    fprintf(fp, "\t\tsw_ccm_coeff2_b = 0x%0x (%d)\n",                             awb_cfg_v32->ccm_coeff2_b, awb_cfg_v32->ccm_coeff2_b);
 
     fprintf(fp, "\t\tsw_rawawb_pre_wbgain_inv_r = 0x%0x (%d)\n",                  awb_cfg_v32->pre_wbgain_inv_r, awb_cfg_v32->pre_wbgain_inv_r);
     fprintf(fp, "\t\tsw_rawawb_pre_wbgain_inv_g = 0x%0x (%d)\n",                  awb_cfg_v32->pre_wbgain_inv_g, awb_cfg_v32->pre_wbgain_inv_g);
@@ -826,17 +805,17 @@ static void WriteAwbReg(struct isp33_rawawb_meas_cfg* awb_cfg_v32) {
     fprintf(fp, "\t\tsw_rawawb_exc_wp_region6_yv0 = 0x%0x (%d)\n",                awb_cfg_v32->exc_wp_region6_yv0, awb_cfg_v32->exc_wp_region6_yv0);
     fprintf(fp, "\t\tsw_rawawb_exc_wp_region6_yv1 = 0x%0x (%d)\n",                awb_cfg_v32->exc_wp_region6_yv1, awb_cfg_v32->exc_wp_region6_yv1);
     fprintf(fp, "\t\tbls2 en(%d),val_rggb(%d,%d,%d,%d))\n",             awb_cfg_v32->bls2_en, awb_cfg_v32->bls2_val.r,
-        awb_cfg_v32->bls2_val.gr,awb_cfg_v32->bls2_val.gb,awb_cfg_v32->bls2_val.b);
+            awb_cfg_v32->bls2_val.gr, awb_cfg_v32->bls2_val.gb, awb_cfg_v32->bls2_val.b);
 
-    fprintf(fp,"awb_cfg_v32->wp_blk_wei_w:");
-    for(int i=0;i<225;i++){
-         if (i%15==0){
-            fprintf(fp,"\n");
+    fprintf(fp, "awb_cfg_v32->wp_blk_wei_w:");
+    for(int i = 0; i < 225; i++) {
+        if (i % 15 == 0) {
+            fprintf(fp, "\n");
         }
-        fprintf(fp,"0x%03x (%3d),",awb_cfg_v32->wp_blk_wei_w[i],awb_cfg_v32->wp_blk_wei_w[i]);
+        fprintf(fp, "0x%03x (%3d),", awb_cfg_v32->wp_blk_wei_w[i], awb_cfg_v32->wp_blk_wei_w[i]);
 
     }
-    fprintf(fp,"\n");
+    fprintf(fp, "\n");
     fclose(fp);
 #endif
 }
@@ -849,7 +828,7 @@ static void calcInputBitIs12Bit(uint8_t* inputBitIs12Bit, const awbStats_cfg_t* 
     bool selectBayerNrData = (awb_meas->hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode);
     bool dgainEn           = ablc_en && isp_ob_predgain > 1;
     if (selectBayerNrData &&
-        (dgainEn || (rk_aiq_working_mode_t)working_mode != RK_AIQ_WORKING_MODE_NORMAL)) {
+            (dgainEn || (rk_aiq_working_mode_t)working_mode != RK_AIQ_WORKING_MODE_NORMAL)) {
         *inputBitIs12Bit = false;
     } else {
         *inputBitIs12Bit = true;
@@ -857,7 +836,7 @@ static void calcInputBitIs12Bit(uint8_t* inputBitIs12Bit, const awbStats_cfg_t* 
 }
 static int filtOutFixed(float fval, awb_wpSpace_mode_t hw_awbT_wpSpace_mode)
 {
-     if(hw_awbT_wpSpace_mode==awbStats_xyWp_mode)
+    if(hw_awbT_wpSpace_mode == awbStats_xyWp_mode)
         return UtlFloatToFix_S0310(fval);
     else
         return (uint16_t)(fval * 16 + 0.5);
@@ -865,16 +844,16 @@ static int filtOutFixed(float fval, awb_wpSpace_mode_t hw_awbT_wpSpace_mode)
 
 static void ConfigBlc2(const blc_res_cvt_t* ablc, const awbStats_cfg_t* awb_meas, float isp_dgain,
                        float isp_ob_predgain, int working_mode,
-                       struct isp33_rawawb_meas_cfg* awb_cfg_v32) {
-    awb_cfg_v32->bls2_en     = false;
+                       struct isp33_rawawb_meas_cfg* awb_cfg_v32, float blc1_hw) {
+    awb_cfg_v32->bls2_en = false;
     awb_cfg_v32->bls2_val.r  = 0;
     awb_cfg_v32->bls2_val.gr = 0;
     awb_cfg_v32->bls2_val.gb = 0;
     awb_cfg_v32->bls2_val.b  = 0;
     if (awb_meas->hw_awbCfg_statsSrc_mode == awbStats_drcOut_mode ||
-        (awb_meas->hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode &&
-         working_mode != RK_AIQ_WORKING_MODE_NORMAL)) {
-        LOGW_AWB("The BLC bias of the awbStats pathway is not effective in the current mode and is consistent with the main pathway");
+            (awb_meas->hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode &&
+             working_mode != RK_AIQ_WORKING_MODE_NORMAL)) {
+        LOGD_AWB("The BLC bias of the awbStats pathway is not effective in the current mode and is consistent with the main pathway");
         // don't support to use blc2
         return;
     }
@@ -903,16 +882,16 @@ static void ConfigBlc2(const blc_res_cvt_t* ablc, const awbStats_cfg_t* awb_meas
     }
     // 2 blc2 recalc base on ablc
     if (awb_meas->hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode) {
-        // update by (offset +blc1)*dgain
+        // update by blc1hw
         // working_mode = normal,so   applyPosition = IN_AWBGAIN1
         awb_cfg_v32->bls2_val.r =
-            (awbBls2.hw_awbCfg_obR_val + blc1[AWB_CHANNEL_R]) * isp_dgain * dgain2 + 0.5;
+            (awbBls2.hw_awbCfg_obR_val ) * isp_dgain * dgain2 + 0.5 + blc1_hw;
         awb_cfg_v32->bls2_val.b =
-            (awbBls2.hw_awbCfg_obB_val + blc1[AWB_CHANNEL_B]) * isp_dgain * dgain2 + 0.5;
+            (awbBls2.hw_awbCfg_obB_val ) * isp_dgain * dgain2 + 0.5 + blc1_hw;
         awb_cfg_v32->bls2_val.gr =
-            (awbBls2.hw_awbCfg_obGr_val + blc1[AWB_CHANNEL_GR]) * isp_dgain * dgain2 + 0.5;
+            (awbBls2.hw_awbCfg_obGr_val ) * isp_dgain * dgain2 + 0.5 + blc1_hw;
         awb_cfg_v32->bls2_val.gb =
-            (awbBls2.hw_awbCfg_obGb_val + blc1[AWB_CHANNEL_GB]) * isp_dgain * dgain2 + 0.5;
+            (awbBls2.hw_awbCfg_obGb_val ) * isp_dgain * dgain2 + 0.5 + blc1_hw;
     } else {  // select raw
         // update by offset +blc1
         awb_cfg_v32->bls2_val.r  = (awbBls2.hw_awbCfg_obR_val + blc1[AWB_CHANNEL_R]) + 0.5;
@@ -924,9 +903,9 @@ static void ConfigBlc2(const blc_res_cvt_t* ablc, const awbStats_cfg_t* awb_meas
 
 // call after blc2 calc
 static XCamReturn ConfigOverexposureValue(const blc_res_cvt_t* ablc, float hdrmge_gain0_1,
-                                          float isp_ob_predgain, int working_mode,
-                                          const awbStats_cfg_t* awb_meas,
-                                          struct isp33_rawawb_meas_cfg* awb_cfg_v32) {
+        float isp_ob_predgain, int working_mode,
+        const awbStats_cfg_t* awb_meas,
+        struct isp33_rawawb_meas_cfg* awb_cfg_v32) {
     XCamReturn ret                        = XCAM_RETURN_NO_ERROR;
     awb_cfg_v32->in_overexposure_check_en = true;
     float dgain                           = 1.0;
@@ -1025,8 +1004,8 @@ static void UvParaFixed32(const awbStats_uvRegion_t* wpRegion, unsigned short pu
             if (tmp != 0) {
                 float tmp2       = (float)(pu_region[j] - pu_region[j - 1]) / (float)tmp;
                 slope_inv[j - 1] = tmp2 > 0
-                                       ? (int32_t)(tmp2 * (1 << AWB_UV_RANGE_SLOVE_FRACTION) + 0.5)
-                                       : (int32_t)(tmp2 * (1 << AWB_UV_RANGE_SLOVE_FRACTION) - 0.5);
+                                   ? (int32_t)(tmp2 * (1 << AWB_UV_RANGE_SLOVE_FRACTION) + 0.5)
+                                   : (int32_t)(tmp2 * (1 << AWB_UV_RANGE_SLOVE_FRACTION) - 0.5);
             } else {
                 slope_inv[j - 1] =
                     (1 << (AWB_UV_RANGE_SLOVE_FRACTION + AWB_UV_RANGE_SLOVE_SINTER - 1)) - 1;
@@ -1047,9 +1026,9 @@ static void ConfigPreWbgain3(struct isp33_rawawb_meas_cfg* awb_cfg_v32,
     //    prewbgain =1/stat3aAwbGainOut *iqMap2MainCam.wbgain
     float preWbgainSw[4];
     if (awb_meas->mode == AWB_CFG_MODE_RK &&
-        (awb_meas->preWbgainSw[0] * awb_meas->preWbgainSw[1] * awb_meas->preWbgainSw[2] *
+            (awb_meas->preWbgainSw[0] * awb_meas->preWbgainSw[1] * awb_meas->preWbgainSw[2] *
              awb_meas->preWbgainSw[3] >
-         0.0001)) {
+             0.0001)) {
         preWbgainSw[0] = awb_meas->preWbgainSw[0];
         preWbgainSw[1] = awb_meas->preWbgainSw[1];
         preWbgainSw[2] = awb_meas->preWbgainSw[2];
@@ -1066,9 +1045,9 @@ static void ConfigPreWbgain3(struct isp33_rawawb_meas_cfg* awb_cfg_v32,
 
     // pre_wbgain_inv_b is updating  for awb0-gain enable+select = bnr/hdrc case
     if ((awb_gain->rgain * awb_gain->grgain * awb_gain->bgain > 0.0001) &&
-        (awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_drcOut_mode ||
-         (awb_gain->applyPosition == IN_AWBGAIN0 &&
-          awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode))) {
+            (awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_drcOut_mode ||
+             (awb_gain->applyPosition == IN_AWBGAIN0 &&
+              awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode))) {
         // for awb statistics after the awbgain application
         awb_cfg_v32->pre_wbgain_inv_r =
             (1 << RK_AIQ_AWB_PRE_WBGAIN_FRAC_BIT) / awb_gain->rgain * preWbgainSw[0] + 0.5;
@@ -1079,8 +1058,8 @@ static void ConfigPreWbgain3(struct isp33_rawawb_meas_cfg* awb_cfg_v32,
 
     } else {
         if ((awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_drcOut_mode ||
-             (awb_gain->applyPosition == IN_AWBGAIN0 &&
-              awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode))) {
+                (awb_gain->applyPosition == IN_AWBGAIN0 &&
+                 awb_meas->com.hw_awbCfg_statsSrc_mode == awbStats_btnrOut_mode))) {
             LOGE_AWB("%s, wrong awb_gain!!! ", __FUNCTION__);
         }
         // for awb statistics before the awbgain application
@@ -1097,16 +1076,16 @@ static void ConfigPreWbgain3(struct isp33_rawawb_meas_cfg* awb_cfg_v32,
                  awb_cfg_v32->pre_wbgain_inv_r, awb_cfg_v32->pre_wbgain_inv_g,
                  awb_cfg_v32->pre_wbgain_inv_b);
         awb_cfg_v32->pre_wbgain_inv_r = (float)awb_cfg_v32->pre_wbgain_inv_r *
-                                            (float)otp_awb->golden_r_value /
-                                            (float)otp_awb->r_value +
+                                        (float)otp_awb->golden_r_value /
+                                        (float)otp_awb->r_value +
                                         0.5;
         awb_cfg_v32->pre_wbgain_inv_g = (float)awb_cfg_v32->pre_wbgain_inv_g *
-                                            (float)(otp_awb->golden_gr_value + 1024) /
-                                            (float)(otp_awb->gr_value + 1024) +
+                                        (float)(otp_awb->golden_gr_value + 1024) /
+                                        (float)(otp_awb->gr_value + 1024) +
                                         0.5;
         awb_cfg_v32->pre_wbgain_inv_b = (float)awb_cfg_v32->pre_wbgain_inv_b *
-                                            (float)otp_awb->golden_b_value /
-                                            (float)otp_awb->b_value +
+                                        (float)otp_awb->golden_b_value /
+                                        (float)otp_awb->b_value +
                                         0.5;
         LOGD_AWB("otp pre_wbgain_inv = [%d, %d, %d] \n", awb_cfg_v32->pre_wbgain_inv_r,
                  awb_cfg_v32->pre_wbgain_inv_g, awb_cfg_v32->pre_wbgain_inv_b);
@@ -1114,13 +1093,13 @@ static void ConfigPreWbgain3(struct isp33_rawawb_meas_cfg* awb_cfg_v32,
 }
 
 static bool isAwbCfgVaild(const rk_aiq_isp_awb_meas_cfg_v33_t* awb_meas_priv,
-                   const common_cvt_info_t* mCommonCvtInfo) {
+                          const common_cvt_info_t* mCommonCvtInfo) {
     const awbStats_cfg_t* wpDetectPara = (awbStats_cfg_t*)awb_meas_priv;
     if (wpDetectPara->mainWin.hw_awbCfg_win_x > mCommonCvtInfo->rawWidth ||
-        wpDetectPara->mainWin.hw_awbCfg_win_x + wpDetectPara->mainWin.hw_awbCfg_win_width >
+            wpDetectPara->mainWin.hw_awbCfg_win_x + wpDetectPara->mainWin.hw_awbCfg_win_width >
             mCommonCvtInfo->rawWidth ||
-        wpDetectPara->mainWin.hw_awbCfg_win_y > mCommonCvtInfo->rawHeight ||
-        wpDetectPara->mainWin.hw_awbCfg_win_y + wpDetectPara->mainWin.hw_awbCfg_win_height >
+            wpDetectPara->mainWin.hw_awbCfg_win_y > mCommonCvtInfo->rawHeight ||
+            wpDetectPara->mainWin.hw_awbCfg_win_y + wpDetectPara->mainWin.hw_awbCfg_win_height >
             mCommonCvtInfo->rawHeight) {
         LOGE_AWB("mainWin[%d,%d,%d,%d]is invaild!!!\n", wpDetectPara->mainWin.hw_awbCfg_win_x,
                  wpDetectPara->mainWin.hw_awbCfg_win_y, wpDetectPara->mainWin.hw_awbCfg_win_width,
@@ -1157,7 +1136,7 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
         (rk_aiq_isp_awb_meas_cfg_v33_t*)pBase->_data;
     const awbStats_cfg_t* awb_meas = &awb_meas_priv->com;
     if (isAwbCfgVaild(awb_meas_priv, &pCvt->mCommonCvtInfo) == false ||
-        srcChooseCheck(awb_meas->hw_awbCfg_statsSrc_mode, pCvt->_working_mode) == false) {
+            srcChooseCheck(awb_meas->hw_awbCfg_statsSrc_mode, pCvt->_working_mode) == false) {
         return;
     }
 
@@ -1167,7 +1146,7 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
             pCvt->isp_params.isp_cfg->module_ens |= ISP39_MODULE_RAWAWB;
             pCvt->isp_params.isp_cfg->module_cfg_update |= ISP39_MODULE_RAWAWB;
             pCvt->isp_params.isp_cfg->module_en_update |= ISP39_MODULE_RAWAWB;
-        }else{
+        } else {
             pCvt->isp_params.isp_cfg->module_en_update |= (ISP39_MODULE_RAWAWB);
             pCvt->isp_params.isp_cfg->module_ens &= ~(ISP39_MODULE_RAWAWB);
             pCvt->isp_params.isp_cfg->module_cfg_update &= ~(ISP39_MODULE_RAWAWB);
@@ -1209,8 +1188,8 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     if (blc == NULL) {
         LOGW_AWB("%s blc_res is null", __FUNCTION__);
     }
-    float isp_ob_predgain = pCvt->mCommonCvtInfo.preDGain;
-    ConfigBlc2(blc, awb_meas, isp_dgain, isp_ob_predgain, pCvt->_working_mode, awb_cfg_v32);
+    float isp_ob_predgain = pCvt->mCommonCvtInfo.preDGain_drc;
+    ConfigBlc2(blc, awb_meas, isp_dgain, isp_ob_predgain, pCvt->_working_mode, awb_cfg_v32, pCvt->mCommonCvtInfo.offset2Blc1);
     LOGD_AWB("blc2_cfg %d %d,%d,%d,%d", awb_cfg_v32->bls2_en, awb_cfg_v32->bls2_val.r,
              awb_cfg_v32->bls2_val.gr, awb_cfg_v32->bls2_val.gb, awb_cfg_v32->bls2_val.b);
 
@@ -1244,8 +1223,8 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->wp_blk_wei_en0   = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_zoneWgt_en;
     awb_cfg_v32->wp_blk_wei_en1   = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_zoneWgt_en;
     awb_cfg_v32->rawlsc_bypass_en = awb_meas->hw_awbCfg_statsSrc_mode == awbStats_drcOut_mode
-                                        ? true
-                                        : (!awb_meas->hw_awbCfg_lsc_en);
+                                    ? true
+                                    : (!awb_meas->hw_awbCfg_lsc_en);
     awb_cfg_v32->blk_measure_enable = awb_meas->pixEngine.hw_awbCfg_stats_en;
     awb_cfg_v32->blk_measure_mode =
         awb_meas->pixEngine.hw_awbCfg_zoneStatsSrc_mode > awbStats_pixAll_mode;
@@ -1263,7 +1242,7 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->v_size               = awb_meas->mainWin.hw_awbCfg_win_height;
 
     if (awb_meas->hw_awbCfg_ds_mode == awbStats_ds_4x4 ||
-        awb_meas->hw_awbCfg_ds_mode == awbStats_ds_8x8) {
+            awb_meas->hw_awbCfg_ds_mode == awbStats_ds_8x8) {
         awb_cfg_v32->wind_size      = awb_meas->hw_awbCfg_ds_mode;
         awb_cfg_v32->ds16x8_mode_en = 0;
     } else if (awb_meas->hw_awbCfg_ds_mode == awbStats_ds_16x8) {
@@ -1343,17 +1322,17 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->wt2 =
         UtlFloatToFix_U0012(awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_rgb2xy_coeff[2]);
     awb_cfg_v32->mat0_x = UtlFloatToFix_S0312(
-        awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[0]);
+                              awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[0]);
     awb_cfg_v32->mat1_x = UtlFloatToFix_S0312(
-        awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[1]);
+                              awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[1]);
     awb_cfg_v32->mat2_x = UtlFloatToFix_S0312(
-        awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[2]);
+                              awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[2]);
     awb_cfg_v32->mat0_y = UtlFloatToFix_S0312(
-        awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[3]);
+                              awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[3]);
     awb_cfg_v32->mat1_y = UtlFloatToFix_S0312(
-        awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[4]);
+                              awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[4]);
     awb_cfg_v32->mat2_y = UtlFloatToFix_S0312(
-        awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[5]);
+                              awb_meas->wpEngine.wpDct_xySpace.rgb2xy.hw_awbCfg_xyTransMatrix_coeff[5]);
     const awbStats_xyRegion_t* norWpRegion = &awb_meas->wpEngine.wpDct_xySpace.norWpRegion[0];
     const awbStats_xyRegion_t* bigWpRegion = &awb_meas->wpEngine.wpDct_xySpace.bigWpRegion[0];
     awb_cfg_v32->nor_x0_0 = UtlFloatToFix_S0310(norWpRegion->ltVtx.hw_awbT_vtxX_val);
@@ -1432,16 +1411,16 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region0_domain =
         awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region0_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region0_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region0_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region0_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[0].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region0_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_fullEntity[0].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
     int exc_wp_region1_excen0 = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_wpFiltOut_en[1];
     int exc_wp_region1_excen1 = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_wpFiltOut_en[1];
@@ -1452,16 +1431,16 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region1_domain =
         awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region1_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region1_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region1_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region1_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[1].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region1_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_fullEntity[1].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
     int exc_wp_region2_excen0 = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_wpFiltOut_en[2];
     int exc_wp_region2_excen1 = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_wpFiltOut_en[2];
@@ -1472,16 +1451,16 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region2_domain =
         awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region2_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region2_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region2_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region2_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[2].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region2_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
     int exc_wp_region3_excen0 = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_wpFiltOut_en[3];
     int exc_wp_region3_excen1 = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_wpFiltOut_en[3];
@@ -1492,16 +1471,16 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region3_domain =
         awb_meas->wpEngine.wpFiltOut_fullEntity[3].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region3_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region3_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region3_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region3_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_fullEntity[3].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_fullEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region3_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_fullEntity[3].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
     int exc_wp_region4_excen0 = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_wpFiltOut_en[4];
     int exc_wp_region4_excen1 = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_wpFiltOut_en[4];
@@ -1510,16 +1489,16 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region4_domain =
         awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region4_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region4_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region4_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region4_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[0].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region4_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_smpEntity[0].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
     int exc_wp_region5_excen0 = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_wpFiltOut_en[5];
     int exc_wp_region5_excen1 = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_wpFiltOut_en[5];
@@ -1528,16 +1507,16 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region5_domain =
         awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region5_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region5_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region5_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region5_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[1].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region5_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_smpEntity[1].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
     int exc_wp_region6_excen0 = awb_meas->wpEngine.norWpStatsCfg.hw_awbCfg_wpFiltOut_en[6];
     int exc_wp_region6_excen1 = awb_meas->wpEngine.bigWpStatsCfg.hw_awbCfg_wpFiltOut_en[6];
@@ -1546,28 +1525,28 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->exc_wp_region6_domain =
         awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode;
     awb_cfg_v32->exc_wp_region6_xu0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.ltVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.ltVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region6_xu1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.rbVtx.hw_awbT_vtxXU_val,awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.rbVtx.hw_awbT_vtxXU_val, awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region6_yv0 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.ltVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.ltVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region6_yv1 =
-        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.rbVtx.hw_awbT_vtxYV_val,awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
+        filtOutFixed(awb_meas->wpEngine.wpFiltOut_smpEntity[2].wpRegion.rbVtx.hw_awbT_vtxYV_val, awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_wpSpace_mode);
     awb_cfg_v32->exc_wp_region6_weight =
         (uint8_t)(awb_meas->wpEngine.wpFiltOut_smpEntity[2].hw_awbT_stats_wgt *
-                      ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
+                  ((1 << RK_AIQ_WP_INCLUDE_BIS) - 1) +
                   0.5);
 
     LOGV_AWB("hw_awbT_luma2WpWgt_ccm(%f,%f,%f,%f,%f,%f,%f,%f,%f)",
-        awb_cfg_v32->ccm_coeff0_r,
-        awb_cfg_v32->ccm_coeff1_r,
-        awb_cfg_v32->ccm_coeff2_r,
-        awb_cfg_v32->ccm_coeff0_g,
-        awb_cfg_v32->ccm_coeff1_g,
-        awb_cfg_v32->ccm_coeff2_g,
-        awb_cfg_v32->ccm_coeff0_b,
-        awb_cfg_v32->ccm_coeff1_b,
-        awb_cfg_v32->ccm_coeff2_b);
+             awb_cfg_v32->ccm_coeff0_r,
+             awb_cfg_v32->ccm_coeff1_r,
+             awb_cfg_v32->ccm_coeff2_r,
+             awb_cfg_v32->ccm_coeff0_g,
+             awb_cfg_v32->ccm_coeff1_g,
+             awb_cfg_v32->ccm_coeff2_g,
+             awb_cfg_v32->ccm_coeff0_b,
+             awb_cfg_v32->ccm_coeff1_b,
+             awb_cfg_v32->ccm_coeff2_b);
 
     awb_cfg_v32->ccm_coeff0_r = UtlFloatToFix_S0406(awb_meas->wpEngine.hw_awbT_luma2WpWgt_ccm[0]);
     awb_cfg_v32->ccm_coeff1_r = UtlFloatToFix_S0406(awb_meas->wpEngine.hw_awbT_luma2WpWgt_ccm[1]);
@@ -1589,32 +1568,32 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->wp_luma_weicurve_y7 = awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.idx[7];
     awb_cfg_v32->wp_luma_weicurve_y8 = awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.idx[8];
     awb_cfg_v32->wp_luma_weicurve_w0 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[0] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w1 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[1] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w2 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[2] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w3 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[3] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w4 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[4] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w5 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[5] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w6 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[6] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w7 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[7] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
     awb_cfg_v32->wp_luma_weicurve_w8 = (uint8_t)(awb_meas->wpEngine.hw_awbT_luma2WpWgt_curve.val[8] *
-                                                     ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
-                                                 0.5);
+                                       ((1 << RK_AIQ_AWB_WP_WEIGHT_BIS_V201) - 1) +
+                                       0.5);
 
 
 
@@ -1624,6 +1603,7 @@ static void convertAiqAwbToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     awb_cfg_v32->blk_rtdw_measure_en = 0;
     WriteDataForIcCmodel(awb_cfg_v32);
     WriteAwbReg(awb_cfg_v32);
+    pCvt->mLatestMeasCfg.rawawb = pCvt->isp_params.isp_cfg->meas.rawawb;
 }
 
 #if RKAIQ_HAVE_CAC_V30
@@ -1645,7 +1625,7 @@ static void convertAiqCacToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     isp_cfg->others.cac_cfg.bypass_en = pBase->bypass;
     if(is_multi_isp)
         isp_cfg_right->others.cac_cfg.bypass_en = pBase->bypass;
-    rk_aiq_cac30_params_cvt(pBase->_data, isp_cfg, isp_cfg_right, is_multi_isp, &pCvt->mCommonCvtInfo);
+    rk_aiq_cac30_params_cvt(pBase->_data, &isp_cfg->others.cac_cfg, &isp_cfg_right->others.cac_cfg, is_multi_isp, &pCvt->mCommonCvtInfo);
 }
 #endif
 
@@ -1657,14 +1637,15 @@ static void convertAiqBtnrToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base
         pCvt->isp_params.isp_cfg->module_en_update |= ISP3X_MODULE_BAY3D;
         pCvt->isp_params.isp_cfg->module_cfg_update |= ISP3X_MODULE_BAY3D;
     } else {
-        // tnr can't open/close in runtime.
-        pCvt->isp_params.isp_cfg->module_ens |= ISP3X_MODULE_BAY3D;
+        // tnr can't open/close in runtime if not enable in first frame
+        pCvt->isp_params.isp_cfg->module_ens &= ~ISP3X_MODULE_BAY3D;
+        pCvt->isp_params.isp_cfg->module_en_update |= ISP3X_MODULE_BAY3D;
         return;
     }
 
     pCvt->isp_params.isp_cfg->others.bay3d_cfg.bypass_en = pBase->bypass;
     pCvt->mBtnrInfo.btnr_attrib = pCvt->btnr_attrib;
-    rk_aiq_btnr41_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo, &pCvt->mBtnrInfo);
+    rk_aiq_btnr41_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo, &pCvt->mBtnrInfo, &pCvt->mergeLuma2Wgt);
 }
 #endif
 
@@ -1682,13 +1663,12 @@ static void convertAiqYnrToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
         return;
     }
 
-    if(pBase->bypass){
+    if(pBase->bypass) {
         ynr_param_t *ynr_param = (ynr_param_t *) pBase->_data;
         ynr_param->dyn.hiNr.hw_ynrT_hiNr_en = 0;
-        ynr_param->dyn.midNr.hw_ynrT_midNr_en = 0;
-        ynr_param->dyn.loNr.hw_ynrT_loNr_en = 0;
-        LOGW_ANR("ynr en disable is changed to bypass on, "
-                    "Equivalent effect, but not equivalent power consumption.");
+        ynr_param->dyn.midLoNr.mf.hw_ynrT_midNr_en = 0;
+        ynr_param->dyn.midLoNr.lf.hw_ynrT_loNr_en = 0;
+        LOGW_ANR("Bypass ynr instead by ynr.dyn.hiNr.hw_ynrT_hiNr_en, ynr.dyn.midLoNr.mf.hw_ynrT_midNr_en and ynr.dyn.midLoNr.lf.hw_ynrT_loNr_en.");
     }
 
     rk_aiq_ynr40_params_cvt(pBase->_data, &pCvt->isp_params, &pCvt->mCommonCvtInfo);
@@ -1766,12 +1746,12 @@ static void convertAiqGicToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
     }
 
     pCvt->isp_params.isp_cfg->others.gic_cfg.bypass_en = pBase->bypass;
-    rk_aiq_gic30_params_cvt(pBase->_data, &pCvt->isp_params.isp_cfg->others.gic_cfg);
+    rk_aiq_gic30_params_cvt(pBase->_data, &pCvt->isp_params.isp_cfg->others.gic_cfg, &pCvt->mBtnrInfo);
 }
 #endif
 
 #if RKAIQ_HAVE_HISTEQ_V10
-static void convertAiqHisteqToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase){
+static void convertAiqHisteqToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
     if (pBase->en) {
         pCvt->isp_params.isp_cfg->module_ens |= ISP33_MODULE_HIST;
         pCvt->isp_params.isp_cfg->module_en_update |= ISP33_MODULE_HIST;
@@ -1787,7 +1767,7 @@ static void convertAiqHisteqToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_ba
 #endif
 
 #if RKAIQ_HAVE_ENHANCE_V10
-static void convertAiqEnhToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase){
+static void convertAiqEnhToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
     if (pBase->en) {
         pCvt->isp_params.isp_cfg->module_ens |= ISP33_MODULE_ENH;
         pCvt->isp_params.isp_cfg->module_en_update |= ISP33_MODULE_ENH;
@@ -1805,7 +1785,7 @@ static void convertAiqEnhToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_
 #endif
 
 #if RKAIQ_HAVE_HSV_V10
-static void convertAiqHsvToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase){
+static void convertAiqHsvToIsp33Params(AiqIspParamsCvt_t* pCvt, aiq_params_base_t* pBase) {
     if (pBase->en) {
         pCvt->isp_params.isp_cfg->module_ens |= ISP33_MODULE_HSV;
         pCvt->isp_params.isp_cfg->module_en_update |= ISP33_MODULE_HSV;
@@ -1838,22 +1818,22 @@ static const struct params_cvt_info_isp33 params_cvts_isp33[] = {
     CVT_INFO(RESULT_TYPE_AWB_PARAM, convertAiqAwbToIsp33Params),
     CVT_INFO(RESULT_TYPE_AWBGAIN_PARAM, convertAiqAwbGainToIsp33Params),
     CVT_INFO(RESULT_TYPE_CCM_PARAM, convertAiqCcmToIsp39Params),
- #if (RKAIQ_HAVE_BAYERTNR_V41)
-     CVT_INFO(RESULT_TYPE_TNR_PARAM, convertAiqBtnrToIsp33Params),
- #endif
- #if RKAIQ_HAVE_YNR_V40
-     CVT_INFO(RESULT_TYPE_YNR_PARAM, convertAiqYnrToIsp33Params),
- #endif
- #if (RKAIQ_HAVE_CNR_V35)
-     CVT_INFO(RESULT_TYPE_UVNR_PARAM, convertAiqCnrToIsp33Params),
- #endif
+#if (RKAIQ_HAVE_BAYERTNR_V41)
+    CVT_INFO(RESULT_TYPE_TNR_PARAM, convertAiqBtnrToIsp33Params),
+#endif
+#if RKAIQ_HAVE_YNR_V40
+    CVT_INFO(RESULT_TYPE_YNR_PARAM, convertAiqYnrToIsp33Params),
+#endif
+#if (RKAIQ_HAVE_CNR_V35)
+    CVT_INFO(RESULT_TYPE_UVNR_PARAM, convertAiqCnrToIsp33Params),
+#endif
     CVT_INFO(RESULT_TYPE_MERGE_PARAM, convertAiqMergeToIsp39Params),
     CVT_INFO(RESULT_TYPE_HISTEQ_PARAM, convertAiqHisteqToIsp33Params),
     CVT_INFO(RESULT_TYPE_ENH_PARAM, convertAiqEnhToIsp33Params),
- #if (RKAIQ_HAVE_SHARP_V40)
-     CVT_INFO(RESULT_TYPE_TEXEST_PARAM, convertAiqTexEstToIsp33Params),
-     CVT_INFO(RESULT_TYPE_SHARPEN_PARAM, convertAiqSharpToIsp33Params),
- #endif
+#if (RKAIQ_HAVE_SHARP_V40)
+    CVT_INFO(RESULT_TYPE_TEXEST_PARAM, convertAiqTexEstToIsp33Params),
+    CVT_INFO(RESULT_TYPE_SHARPEN_PARAM, convertAiqSharpToIsp33Params),
+#endif
     CVT_INFO(RESULT_TYPE_HSV_PARAM, convertAiqHsvToIsp33Params),
     CVT_INFO(RESULT_TYPE_BLC_PARAM, convertAiqBlcToIsp39Params),
     CVT_INFO(RESULT_TYPE_CSM_PARAM, convertAiqCsmToIsp39Params),

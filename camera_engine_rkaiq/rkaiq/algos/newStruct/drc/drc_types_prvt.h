@@ -108,7 +108,7 @@ bool DrcDamping(drc_param_t* out, CurrData_t* pCurrData, int FrameID);
 void DrcExpoParaProcessing(DrcContext_t* pDrcCtx, drc_param_t* out);
 #endif
 
-#if RKAIQ_HAVE_DRC_V20
+#if defined(RKAIQ_HAVE_DRC_V20) || defined(RKAIQ_HAVE_DRC_V21)
 XCamReturn DrcSelectParam(DrcContext_t* pDrcCtx, drc_param_t* out, trans_params_static_t* pstaTrans,
                           int iso);
 static XCamReturn drcApplyStrength(DrcContext_t* pDrcCtx, drc_param_t* out);

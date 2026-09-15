@@ -2,10 +2,14 @@
 #ifndef _RK_AIQ_USER_API2_AIQ_STATS_H_
 #define _RK_AIQ_USER_API2_AIQ_STATS_H_
 
-#if ISP_HW_V39
+#ifdef ISP_HW_V39
 #include "isp/rk_aiq_isp_stats_v39.h"
-#else
+#endif
+#ifdef ISP_HW_V33
 #include "isp/rk_aiq_isp_stats_v33.h"
+#endif
+#ifdef ISP_HW_V35
+#include "isp/rk_aiq_isp_stats_v35.h"
 #endif
 
 RKAIQ_BEGIN_DECLARE
