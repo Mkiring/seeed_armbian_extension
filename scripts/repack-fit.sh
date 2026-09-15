@@ -61,6 +61,7 @@ BOOTARGS_OVERRIDE=""
 ITS_TEMPLATE_OVERRIDE=""
 WORKDIR_OVERRIDE=""
 DOCKER_IMAGE=""
+RKBIN_DIR=""
 
 # ===== state (populated by parse_args) =====
 SOURCE_BOOT_ITB=""
@@ -99,9 +100,14 @@ Optional:
   --workdir PATH              Use this workdir instead of mktemp -d
   --docker-image IMAGE        Sign + verify inside this docker container
                               (e.g. armbian.local.only/armbian-build:<tag>).
-                              Recommended: the container's OpenSSL signs PSS
-                              with the salt length this U-Boot's verifier
-                              expects; host OpenSSL 3.x does not.
+                              Explicit override: wins over --rkbin-dir.
+  --rkbin-dir PATH            Rockchip prebuilt tools dir containing tools/mkimage
+                              (e.g. <armbian-build>/cache/sources/rockchip_sdk_tools/
+                              rkbin/${soc}_rkbin). Default: auto-detected from
+                              --u-boot-dir. The prebuilt mkimage bundles its own
+                              RSA code and signs PSS with the maximum salt the
+                              on-board verifier requires, independent of the
+                              host's OpenSSL (>= 3.5 signs digest-length salt).
   --keep-workdir              Don't delete workdir on exit (debug)
   -h, --help                  Show this help
 EOF
@@ -124,6 +130,7 @@ parse_args() {
             --bootargs)           BOOTARGS_OVERRIDE="$2"; shift 2 ;;
             --workdir)            WORKDIR_OVERRIDE="$2"; shift 2 ;;
             --docker-image)       DOCKER_IMAGE="$2"; shift 2 ;;
+            --rkbin-dir)          RKBIN_DIR="$2"; shift 2 ;;
             --keep-workdir)       KEEP_WORKDIR=1; shift ;;
             -h|--help)            usage; exit 0 ;;
             *)                    echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -165,6 +172,7 @@ parse_args() {
     for p in SOURCE_BOOT_ITB LINUX_SOURCE UBOOT_DIR KEYS_SOURCE_DIR ITS_TEMPLATE; do
         declare -g "${p}=$(readlink -m "${!p}")"
     done
+    [[ -n "${RKBIN_DIR}" ]] && RKBIN_DIR="$(readlink -m "${RKBIN_DIR}")"
     OUTPUT_PATH="$(readlink -m "${OUTPUT_PATH}")"
 
     # ${UBOOT_DIR}/fit/boot.itb doubles as the signing scratch location in the
@@ -235,6 +243,40 @@ resolve_tool() {
     else
         printf '%s' "$(command -v "${tool}")"
     fi
+}
+
+mkimage_supports_signing() {
+    local help
+    help="$("$1" -h 2>&1 || true)"
+    [[ "${help}" != *"Signing / verified boot not supported"* ]]
+}
+
+resolve_signing_mkimage() {
+    # Auto-discover a signing-capable Rockchip prebuilt mkimage from the
+    # armbian-build tree the u-boot worktree lives in. It bundles its own RSA
+    # code and always signs PSS with the maximum salt length this U-Boot's
+    # verifier (rsa-verify.c) hard-codes, independent of the host's OpenSSL. A
+    # tree-built mkimage linked against OpenSSL >= 3.5 signs PSS with
+    # digest-length salt, which the device rejects.
+    # NB: not every rkbin build can sign (rk3588_rkbin's mkimage is compiled
+    # without CONFIG_FIT_SIGNATURE and silently emits unsigned FITs); mkimage
+    # is SoC-agnostic, so fall through to a sibling build that can.
+    local armbian_root candidate
+    armbian_root="${UBOOT_DIR%%/cache/sources/*}"
+    local rkbin_root="${armbian_root}/cache/sources/rockchip_sdk_tools/rkbin"
+    local candidates=(
+        "${rkbin_root}/${BOOT_SOC}_rkbin/tools/mkimage"
+        "${rkbin_root}/rk3576_rkbin/tools/mkimage"
+        "${rkbin_root}/rk3588_rkbin/tools/mkimage"
+        "${rkbin_root}/tools/mkimage"
+    )
+    for candidate in "${candidates[@]}"; do
+        [[ -x "${candidate}" ]] || continue
+        mkimage_supports_signing "${candidate}" || continue
+        printf '%s' "${candidate}"
+        return 0
+    done
+    return 1
 }
 
 extract_source_artifacts() {
@@ -482,16 +524,31 @@ secondary_signing() {
     local keys_work
     keys_work="$(prepare_keys_workdir "${work}")"
 
+    local signing_mkimage=""
+    if [[ -z "${DOCKER_IMAGE}" ]]; then
+        if [[ -n "${RKBIN_DIR}" ]]; then
+            [[ -x "${RKBIN_DIR}/tools/mkimage" ]] ||
+                exit_with_error "--rkbin-dir has no tools/mkimage" "${RKBIN_DIR}"
+            signing_mkimage="${RKBIN_DIR}/tools/mkimage"
+        else
+            signing_mkimage="$(resolve_signing_mkimage)" || signing_mkimage=""
+        fi
+        if [[ -z "${signing_mkimage}" ]]; then
+            display_alert "repack-fit" \
+                "Rockchip prebuilt mkimage not found; falling back to the tree-built mkimage. On hosts with OpenSSL >= 3.5 it signs PSS with digest-length salt, which the device rejects (fit_check_sign below will fail the run). Use --rkbin-dir or --docker-image." "warn"
+        else
+            display_alert "repack-fit" "Signing with the Rockchip prebuilt mkimage (salt-safe)" "info"
+        fi
+    fi
+    [[ -n "${signing_mkimage}" ]] || signing_mkimage="${UBOOT_DIR}/tools/mkimage"
+
     local sign_cmd
-    sign_cmd="'${UBOOT_DIR}/tools/mkimage' -f '${work}/boot-final.its' -k '${keys_work}' -E -p ${fit_padding} -r '${work}/boot.itb'"
+    sign_cmd="'${signing_mkimage}' -f '${work}/boot-final.its' -k '${keys_work}' -E -p ${fit_padding} -r '${work}/boot.itb'"
 
     if [[ -n "${DOCKER_IMAGE}" ]]; then
-        # Sign inside the armbian build container. Reason: this U-Boot fork's
-        # rsa-sign.c never sets a PSS salt length, so mkimage follows the
-        # OpenSSL default. The container's OpenSSL signs with salt = max
-        # (222 for RSA2048+sha256), matching the hardcoded expectation in
-        # rsa-verify.c padding_pss_verify. Host OpenSSL 3.x defaults to
-        # salt = hash length (32) — such signatures always fail verification.
+        # Sign inside the armbian build container (explicit override). The
+        # container's OpenSSL signs PSS with salt = max (222 for RSA2048+sha256),
+        # matching the hardcoded expectation in rsa-verify.c padding_pss_verify.
         # UBOOT_DIR is mounted read-only: the tree must not be modified.
         display_alert "repack-fit" "Signing FIT in docker: ${DOCKER_IMAGE}" "info"
         if ! docker run --rm \
@@ -505,14 +562,16 @@ secondary_signing() {
 
     display_alert "repack-fit" "Signing FIT on host (RSA, key-name-hint=dev)" "info"
 
-    # Same guard as secure-boot-image.sh: a USBPLUG-postprocessed mkimage may
-    # lack signature support and silently emit an unsigned FIT. NB: this
-    # mkimage exits 1 on `-h`, so capture output instead of piping into grep
-    # (pipefail would turn the usage print into a false positive).
-    local mkimage_help
-    mkimage_help="$("${UBOOT_DIR}/tools/mkimage" -h 2>&1 || true)"
-    [[ "${mkimage_help}" != *"Signing / verified boot not supported"* ]] ||
-        exit_with_error "mkimage lacks FIT signature support" "${UBOOT_DIR}/tools/mkimage"
+    if [[ "${signing_mkimage}" == "${UBOOT_DIR}/tools/mkimage" ]]; then
+        # Same guard as secure-boot-image.sh: a USBPLUG-postprocessed mkimage may
+        # lack signature support and silently emit an unsigned FIT. NB: this
+        # mkimage exits 1 on `-h`, so capture output instead of piping into grep
+        # (pipefail would turn the usage print into a false positive).
+        local mkimage_help
+        mkimage_help="$("${UBOOT_DIR}/tools/mkimage" -h 2>&1 || true)"
+        [[ "${mkimage_help}" != *"Signing / verified boot not supported"* ]] ||
+            exit_with_error "mkimage lacks FIT signature support" "${UBOOT_DIR}/tools/mkimage"
+    fi
 
     if ! bash -c "set -e; ${sign_cmd}"; then
         exit_with_error "FIT signing failed" "${work}/boot-final.its"

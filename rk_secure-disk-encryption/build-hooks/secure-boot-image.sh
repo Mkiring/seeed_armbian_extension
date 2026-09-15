@@ -35,6 +35,52 @@ function rk_secure_boot_patch_dtb_bootargs() {
     display_alert "fit-post-initrd" "Injected DTB bootargs: ${bootargs}" "info"
 }
 
+# Bake DEFAULT_OVERLAYS into a DTB copy before FIT/resource.img packaging.
+#
+# RAW FIT boot has no /boot filesystem, so U-Boot cannot load .dtbo files at
+# boot time. Merging overlays into the base DTB on the build host — before
+# the FIT is signed — keeps the signature covering the final DTB and makes
+# the overlay's effect deterministic across boot modes.
+#
+# Operates on a copy (board.dtb or the resource.img staging file), not the
+# kernel build artifact, so callers must pass the path they intend to embed.
+# overlay_dir is the kernel's arch/arm64/boot/dts/rockchip/overlay directory.
+function rk_secure_boot_apply_default_overlays() {
+    local dtb_file="$1"
+    local overlay_dir="$2"
+
+    [[ -n "${DEFAULT_OVERLAYS:-}" ]] || return 0
+
+    [[ -f "${dtb_file}" ]] ||
+        exit_with_error "FIT packaging failed: DTB copy missing for overlay merge" "${dtb_file}"
+    [[ -d "${overlay_dir}" ]] ||
+        exit_with_error "FIT packaging failed: overlay directory missing" "${overlay_dir}"
+    command -v fdtoverlay >/dev/null 2>&1 ||
+        exit_with_error "FIT packaging failed: fdtoverlay missing" "device-tree-compiler"
+
+    local -a overlay_args=()
+    local ov src
+    for ov in ${DEFAULT_OVERLAYS}; do
+        src="${overlay_dir}/${ov}.dtbo"
+        [[ -f "${src}" ]] ||
+            exit_with_error "FIT packaging failed: overlay missing" "${src}"
+        overlay_args+=("${src}")
+    done
+
+    display_alert "fit-post-initrd" "Baking overlays into DTB: ${DEFAULT_OVERLAYS}" "info"
+
+    local tmp_out err_log
+    tmp_out="$(mktemp)"
+    err_log="$(mktemp)"
+    if ! fdtoverlay -i "${dtb_file}" -o "${tmp_out}" "${overlay_args[@]}" 2>"${err_log}"; then
+        local err_msg; err_msg="$(< "${err_log}")"
+        rm -f "${tmp_out}" "${err_log}"
+        exit_with_error "FIT packaging failed: fdtoverlay rejected overlay" "${DEFAULT_OVERLAYS}: ${err_msg}"
+    fi
+    rm -f "${err_log}"
+    mv -f "${tmp_out}" "${dtb_file}"
+}
+
 function rk_secure_boot_find_ramdisk() {
     local boot_dir="$1"
 
@@ -76,19 +122,38 @@ function rk_secure_boot_find_kernel_image() {
     display_alert "fit-post-initrd" "Using installed kernel image: ${RK_SECURE_BOOT_KERNEL_IMAGE_PATH}" "info"
 }
 
+function rk_secure_boot_mkimage_supports_signing() {
+    local help
+    help="$("$1" -h 2>&1 || true)"
+    [[ "${help}" != *"Signing / verified boot not supported"* ]]
+}
+
 function rk_secure_boot_resolve_mkimage() {
-    local rkbin_dir
+    local rkbin_dir candidate
 
     RK_SECURE_BOOT_MKIMAGE=""
+
+    # The per-platform rkbin dirs ship different mkimage builds: rk3576_rkbin's
+    # is statically linked with FIT signature support, while rk3588_rkbin's is
+    # built without CONFIG_FIT_SIGNATURE and silently emits unsigned FITs.
+    # mkimage is a host tool and FIT signing is SoC-agnostic, so any
+    # signing-capable prebuilt serves both platforms.
     rkbin_dir="$(resolve_platform_rkbin_dir)"
-    if [[ -x "${rkbin_dir}/tools/mkimage" ]]; then
-        RK_SECURE_BOOT_MKIMAGE="${rkbin_dir}/tools/mkimage"
-    elif [[ -x "$(rk_sdk_rkbin_root)/tools/mkimage" ]]; then
-        RK_SECURE_BOOT_MKIMAGE="$(rk_sdk_rkbin_root)/tools/mkimage"
-    fi
+    local candidates=(
+        "${rkbin_dir}/tools/mkimage"
+        "$(rk_sdk_rkbin_root)/rk3576_rkbin/tools/mkimage"
+        "$(rk_sdk_rkbin_root)/rk3588_rkbin/tools/mkimage"
+        "$(rk_sdk_rkbin_root)/tools/mkimage"
+    )
+    for candidate in "${candidates[@]}"; do
+        [[ -x "${candidate}" ]] || continue
+        rk_secure_boot_mkimage_supports_signing "${candidate}" || continue
+        RK_SECURE_BOOT_MKIMAGE="${candidate}"
+        break
+    done
 
     [[ -x "${RK_SECURE_BOOT_MKIMAGE}" ]] ||
-        exit_with_error "FIT packaging failed: mkimage missing" "${RK_SECURE_BOOT_MKIMAGE}"
+        exit_with_error "FIT signing failed: no signing-capable mkimage under" "$(rk_sdk_rkbin_root)"
 }
 
 function rk_secure_boot_prepare_fit_workdir() {
@@ -109,6 +174,7 @@ function rk_secure_boot_prepare_fit_workdir() {
         : > "${fit_work}/resource.img"
     fi
     cp -f "${ramdisk_path}" "${fit_work}/initrd.img"
+    rk_secure_boot_apply_default_overlays "${fit_work}/board.dtb" "$(dirname "${dtb_path}")/overlay"
     rk_secure_boot_patch_dtb_bootargs "${fit_work}/board.dtb" "$(rk_secure_boot_kernel_bootargs)"
 }
 
@@ -156,11 +222,11 @@ function rk_secure_boot_run_secondary_fit_signing() {
 
     rm -f "${uboot_dir}/fit/boot.itb" "${uboot_dir}/boot-final.img" 2>/dev/null || true
 
-    if [[ ! -x "${uboot_dir}/tools/mkimage" ]]; then
+    if [[ ! -x "${uboot_dir}/tools/fit_check_sign" ]]; then
         if rk_full_secure_boot_enabled; then
-            exit_with_error "FIT signing failed: mkimage missing" "${uboot_dir}/tools/mkimage"
+            exit_with_error "FIT signing failed: fit_check_sign missing" "${uboot_dir}/tools/fit_check_sign"
         fi
-        display_alert "fit-post-initrd" "mkimage not found, using unsigned fallback image" "warn"
+        display_alert "fit-post-initrd" "fit_check_sign not found, using unsigned fallback image" "warn"
         return 0
     fi
 
@@ -168,16 +234,23 @@ function rk_secure_boot_run_secondary_fit_signing() {
         fit_padding="0x1200"
     fi
 
+    # The boot FIT carries padding = "pss", and the on-board verifiers (SPL /
+    # U-Boot from the radxa v2024.10 tree) only accept maximum-salt PSS
+    # signatures.  A tree-built mkimage linked against OpenSSL >= 3.5 signs
+    # with digest-length salt, which the device rejects.  Sign with the
+    # Rockchip prebuilt mkimage instead: it is statically linked, so its
+    # maximum-salt behaviour is frozen into the binary regardless of the
+    # build container's OpenSSL.
+    [[ -x "${RK_SECURE_BOOT_MKIMAGE}" ]] || rk_secure_boot_resolve_mkimage
+
     # USBPLUG postprocessing can leave a stale tools/mkimage built from a
-    # temporary config without CONFIG_FIT_SIGNATURE.  That binary accepts the
-    # FIT arguments but creates an unsigned image, only failing later in
-    # fit_check_sign with "No RSA key found".  Rebuild it from the final,
-    # secure U-Boot configuration before the secondary FIT signing pass.
-    if "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -q 'Signing / verified boot not supported'; then
-        make -C "${uboot_dir}" -B tools-only || exit_with_error "FIT signing failed: unable to rebuild mkimage" "${uboot_dir}/tools"
+    # temporary config without CONFIG_FIT_SIGNATURE.  That also leaves
+    # fit_check_sign failing with "No RSA key found".  Rebuild the host tools
+    # from the final secure U-Boot configuration before verifying the FIT.
+    if [[ -x "${uboot_dir}/tools/mkimage" ]] &&
+        "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -q 'Signing / verified boot not supported'; then
+        make -C "${uboot_dir}" -B tools-only || exit_with_error "FIT signing failed: unable to rebuild U-Boot host tools" "${uboot_dir}/tools"
     fi
-    "${uboot_dir}/tools/mkimage" -h 2>&1 | grep -qv 'Signing / verified boot not supported' ||
-        exit_with_error "FIT signing failed: mkimage lacks FIT signature support" "${uboot_dir}/tools/mkimage"
 
     display_alert "fit-post-initrd" "Signing final FIT from boot-final.its" "info"
     (
@@ -185,11 +258,11 @@ function rk_secure_boot_run_secondary_fit_signing() {
         mkdir -p fit
         # The U-Boot build phase already embeds key-dev into u-boot.dtb.
         # Re-injecting it here is redundant and can exhaust DTB free space.
-        ./tools/mkimage -f "${fit_work}/boot-final.its" -k keys/ -E -p "${fit_padding}" -r fit/boot.itb || exit 1
+        "${RK_SECURE_BOOT_MKIMAGE}" -f "${fit_work}/boot-final.its" -k keys/ -E -p "${fit_padding}" -r fit/boot.itb || exit 1
         fdtget -l u-boot.dtb /signature 2>/dev/null | grep -qx 'key-dev' || exit 1
-        if [[ -x ./tools/fit_check_sign ]]; then
-            ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
-        fi
+        # Tree-built verifier: same verify code as the running U-Boot, so a
+        # salt drift in the signing tool fails the build instead of the boot.
+        ./tools/fit_check_sign -f fit/boot.itb -k u-boot.dtb || exit 1
     ) || {
         if rk_full_secure_boot_enabled; then
             exit_with_error "FIT signing failed: mkimage signing failed" "${fit_work}/boot-final.its"
