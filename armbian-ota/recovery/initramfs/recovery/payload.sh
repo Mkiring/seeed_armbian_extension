@@ -273,13 +273,15 @@ ota_patch_config() {
     FSTAB="${ROOT_MNT}/etc/fstab"
     CRYPTTAB="${ROOT_MNT}/etc/crypttab"
 
-    # fallback UUID detection (just in case)
+    # fallback UUID detection (just in case), anchored to the boot disk so a
+    # clone disk with duplicate labels does not answer for the boot device
+    _ota_disk="$(recovery_boot_disk || true)"
     if [ "${AUTO_DECRYPT_MODE}" -eq 1 ]; then
         [ -z "$ROOT_UUID" ] && ROOT_UUID="$(get_luks_uuid_for_root)"
     else
-        [ -z "$ROOT_UUID" ] && ROOT_UUID="$(get_uuid_by_label "armbi_root")"
+        [ -z "$ROOT_UUID" ] && ROOT_UUID="$(get_uuid_by_label "armbi_root" "${_ota_disk}")"
     fi
-    [ -z "$BOOT_UUID" ] && BOOT_UUID="$(get_uuid_by_label "armbi_boot")"
+    [ -z "$BOOT_UUID" ] && BOOT_UUID="$(get_uuid_by_label "armbi_boot" "${_ota_disk}")"
 
     log "final ROOT_UUID=${ROOT_UUID}, BOOT_UUID=${BOOT_UUID}"
 

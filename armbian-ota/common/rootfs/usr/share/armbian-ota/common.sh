@@ -259,9 +259,30 @@ ota_manifest_get() {
 }
 
 # Locate the security partition holding the LUKS passphrase / SSKR marker.
+# Anchored to the disk the running root comes from: a clone disk attached as a
+# second device carries a duplicate PARTLABEL=security and a system-wide first
+# match would read the wrong key partition. Falls back to first-match when the
+# running root cannot be resolved.
 ota_get_security_part() {
-    local dev
-    dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1)"
+    local dev root_src part disk
+
+    root_src="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+    [ -n "${root_src}" ] || root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    [ -n "${root_src}" ] || root_src="$(df / | awk 'NR==2 {print $1}')"
+    part="${root_src}"
+    case "${root_src}" in
+        /dev/mapper/*|/dev/dm-*)
+            part="$(lsblk -snro PKNAME "${root_src}" 2>/dev/null | head -n1 || true)"
+            ;;
+    esac
+    if [ -n "${part}" ]; then
+        disk="$(lsblk -no PKNAME "${part}" 2>/dev/null | head -n1 || true)"
+    fi
+    if [ -n "${disk}" ]; then
+        dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null |
+            grep -E "^${disk}p[0-9]+$" | head -n1 || true)"
+    fi
+    [ -z "${dev}" ] && dev="$(blkid -t PARTLABEL=security -o device 2>/dev/null | head -n1)"
     [ -z "${dev}" ] && dev="$(blkid -t LABEL=security -o device 2>/dev/null | head -n1)"
     echo "${dev}"
 }

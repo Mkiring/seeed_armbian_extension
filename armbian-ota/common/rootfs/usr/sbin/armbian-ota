@@ -29,16 +29,30 @@ detect_device_encryption() {
 
     if [ "${mode}" = "ab" ]; then
         # Encrypted A/B: ext4 label is inside the LUKS container, so probe by GPT PARTLABEL.
+        # A cloned A/B disk attached as a second device carries duplicate PARTLABELs, so a
+        # system-wide first blkid match may probe the wrong disk; anchor to the U-Boot boot
+        # disk when its cmdline tokens are present, keep first-match otherwise.
+        local disk
+        disk="$(ab_boot_disk || true)"
         for partlabel in rootfs_a rootfs_b; do
-            dev="$(blkid -t PARTLABEL="${partlabel}" -o device 2>/dev/null | head -n1 || true)"
+            dev="$(ab_blkid_first_on_disk "PARTLABEL=${partlabel}" "${disk}" 2>/dev/null || true)"
             [ -n "${dev}" ] || continue
             [ "$(blkid -o value -s TYPE "${dev}" 2>/dev/null || true)" = "crypto_LUKS" ] && { echo "yes"; return 0; }
         done
         echo "no"
-    elif blkid -t TYPE=crypto_LUKS >/dev/null 2>&1 || [ -e /dev/mapper/armbian-root ]; then
-        echo "yes"
     else
-        echo "no"
+        # Recovery: answer from the root filesystem this system actually runs
+        # from. A system-wide crypto_LUKS scan would let a LUKS partition on an
+        # attached second disk answer for the boot device and reject valid
+        # plain packages (and vice versa).
+        local root_src
+        root_src="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+        [ -n "${root_src}" ] || root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+        [ -n "${root_src}" ] || root_src="$(df / | awk 'NR==2 {print $1}')"
+        case "${root_src}" in
+            /dev/mapper/*|/dev/dm-*) echo "yes" ;;
+            *) [ "$(blkid -o value -s TYPE "${root_src}" 2>/dev/null || true)" = "crypto_LUKS" ] && echo "yes" || echo "no" ;;
+        esac
     fi
 }
 
