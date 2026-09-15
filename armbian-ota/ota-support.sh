@@ -26,7 +26,8 @@ if [[ "${OTA_ENABLE:-}" == "yes" ]]; then
         common/build-hooks/rootfs-install \
         common/build-hooks/overlayroot \
         common/build-hooks/userdata-resize \
-        common/build-hooks/ota-payload-security
+        common/build-hooks/ota-payload-security \
+        common/build-hooks/uboot-env-prefill
     do
         # shellcheck source=/dev/null
         source "${OTA_SUPPORT_DIR}/${ota_support_module}.sh"
@@ -35,8 +36,7 @@ if [[ "${OTA_ENABLE:-}" == "yes" ]]; then
     if [[ "${AB_PART_OTA:-}" == "yes" ]]; then
         for ota_support_module in \
             ab/build-hooks/partitions \
-            ab/build-hooks/runtime-install \
-            ab/build-hooks/uboot-default-env
+            ab/build-hooks/runtime-install
         do
             # shellcheck source=/dev/null
             source "${OTA_SUPPORT_DIR}/${ota_support_module}.sh"

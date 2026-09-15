@@ -1,5 +1,12 @@
 SEEED_EXTENSION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# U-Boot default-environment helpers must exist for every build flavor,
+# including standalone `compile.sh uboot` runs (CI) with no OTA_* variables:
+# the packaging hook inside ships u-boot-default.env in the u-boot deb, which
+# image builds later need for boot-env prefill and A/B initial-env merging.
+# shellcheck source=/dev/null
+source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-default-env.sh"
+
 if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
 	exit_with_error "RK_SECURE_UBOOT_ENABLE and RK_OPTEE_BOOT_ENABLE are mutually exclusive" "use secure-boot or secure-rootfs, not both"
 fi
@@ -45,6 +52,18 @@ if [[ "yes" == "yes" ]]; then
 	display_alert "RK U-Boot postprocess" "Enable rk-uboot-postprocess hooks" "info"
 	enable_extension "seeed_armbian_extension/rk-uboot-postprocess/rk-uboot-postprocess"
 fi
+
+# Anchor root= resolution to the actual boot disk in every image flavor. The
+# init-top script is picked up by mkinitramfs from /etc/initramfs-tools and is
+# a no-op without the armbian.bootdev cmdline token (single-disk/legacy boots).
+function post_customize_image__020_install_bootdev_root_anchor() {
+	install -D -m 0755 \
+		"${SEEED_EXTENSION_ROOT}/initramfs/scripts/init-top/armbian-bootdev-root" \
+		"${MOUNT}/etc/initramfs-tools/scripts/init-top/armbian-bootdev-root" ||
+		exit_with_error "Failed to install bootdev root anchor"
+
+	display_alert "Bootdev root anchor" "Installed init-top armbian-bootdev-root" "info"
+}
 
 # Add the PCIe ASPM workaround to the generated image's kernel command line.
 # Keep any board- or user-provided extraargs intact and make this hook idempotent.

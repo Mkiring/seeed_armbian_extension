@@ -1,4 +1,8 @@
-# A/B U-Boot default-environment build helpers.
+# U-Boot default-environment build helpers, shared by A/B and Recovery OTA.
+# Sourced unconditionally from seeed_armbian_extension.sh: the packaging hook
+# below must also fire during standalone `compile.sh uboot` runs (CI) that carry
+# no OTA_* variables, or the published u-boot deb lacks u-boot-default.env and
+# image-time env prefill cannot work.
 
 function ota_ab_merge_uboot_env_files() {
     local output_env="$1"
@@ -99,15 +103,13 @@ function ota_ab_write_complete_initial_env() {
     rm -f "${merged_env}"
 }
 
-function post_uboot_custom_postprocess__890_package_ab_uboot_default_env() {
-    [[ "${AB_PART_OTA:-}" == "yes" ]] || return 0
-
+function post_uboot_custom_postprocess__890_package_uboot_default_env() {
     local output_env="${uboottempdir}/usr/lib/${uboot_name}/u-boot-default.env"
 
     ota_ab_extract_uboot_default_env "$(pwd)/u-boot" "${output_env}" || {
-        display_alert "A/B U-Boot environment" "Failed to extract default environment from U-Boot" "err"
+        display_alert "U-Boot environment" "Failed to extract default environment from U-Boot" "err"
         return 1
     }
 
-    display_alert "A/B U-Boot environment" "Packaged compiled default environment" "info"
+    display_alert "U-Boot environment" "Packaged compiled default environment" "info"
 }

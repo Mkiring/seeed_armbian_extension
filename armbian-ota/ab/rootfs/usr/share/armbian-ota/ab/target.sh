@@ -118,12 +118,97 @@ ab_update_armbian_env() {
     # Keep armbianEnv.txt.dist in sync so the boot.scr fallback still
     # points at the current rootfs after OTA. Otherwise a later txt
     # corruption would fall back to a stale UUID and fail to rescue.
+    # Runs before the overlays merge so the .dist baseline never absorbs
+    # user overlays.
     local dist_env="${arm_env}.dist"
     if [ -f "${dist_env}" ]; then
         _ab_update_armbian_env_file "${dist_env}" "${root_type}" "${root_uuid}" || return 1
     else
         cp -a "${arm_env}" "${dist_env}"
     fi
+}
+
+# Effective (last-wins) value of a key in an env file, empty if absent.
+_ab_env_get_key() {
+    local env_file="$1" key="$2"
+
+    [ -f "${env_file}" ] || return 0
+    sed -n "s/^${key}=//p" "${env_file}" | tail -n 1
+}
+
+_ab_set_env_key() {
+    local env_file="$1" key="$2" value="$3"
+
+    if grep -q "^${key}=" "${env_file}"; then
+        sed -i "s|^${key}=.*$|${key}=${value}|" "${env_file}" || return 1
+    else
+        printf '\n%s=%s\n' "${key}" "${value}" >> "${env_file}" || return 1
+    fi
+}
+
+# Overlays value from the running slot's env — the only place user edits
+# live, since the target slot only ever received OTA baselines. Falls back
+# to mounting the running slot's boot partition read-only when /boot is not
+# available. Empty output means nothing to migrate. Raw-FIT layouts have no
+# env filesystem at all; every failure path degrades to "skip migration".
+_ab_capture_current_overlays() {
+    local env_file="/boot/armbianEnv.txt" slot dev mnt
+
+    if [ -f "${env_file}" ]; then
+        _ab_env_get_key "${env_file}" overlays
+        return 0
+    fi
+
+    slot="$(ab_get_current_slot 2>/dev/null || true)"
+    case "${slot}" in
+        a|b) ;;
+        *)
+            log_warn "Cannot determine running slot; skipping overlays migration"
+            return 0
+            ;;
+    esac
+
+    dev="$(ab_get_part_by_label "$(ab_get_slot_boot_label "${slot}")" 2>/dev/null || true)"
+    if [ -z "${dev}" ] || [ ! -b "${dev}" ]; then
+        log_warn "Running slot boot partition not found; skipping overlays migration"
+        return 0
+    fi
+
+    mnt="$(make_ota_work_dir "ab-current-boot-ro")"
+    if ! mount -t ext4 -o ro "${dev}" "${mnt}"; then
+        log_warn "Failed to mount ${dev} read-only; skipping overlays migration"
+        if ! mountpoint -q "${mnt}" 2>/dev/null; then rm -rf "${mnt}"; fi
+        return 0
+    fi
+    _ab_env_get_key "${mnt}/armbianEnv.txt" overlays
+    umount "${mnt}" 2>/dev/null || log_warn "Failed to unmount ${mnt}"
+    rm -rf "${mnt}"
+}
+
+# Preserve user DT overlays across slot updates: merge the running slot's
+# overlays value into the freshly written target env. Baseline entries keep
+# their build-verified order (the RK3588 GPU stack overlay must stay
+# first-class); entries only present in the old value are appended,
+# deduplicated.
+ab_merge_env_overlays() {
+    local env_file="$1"
+    local old_overlays merged
+
+    [ -f "${env_file}" ] || return 0
+
+    old_overlays="$(_ab_capture_current_overlays)"
+    [ -n "${old_overlays}" ] || {
+        log_info "Running slot has no overlays= value; keeping target baseline"
+        return 0
+    }
+
+    merged="$(printf '%s\n%s\n' "$(_ab_env_get_key "${env_file}" overlays)" "${old_overlays}" |
+        tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' |
+        sed 's/[[:space:]]*$//')"
+    [ -n "${merged}" ] || return 0
+
+    log_info "Merged overlays into target env: ${merged}"
+    _ab_set_env_key "${env_file}" overlays "${merged}"
 }
 
 ab_write_target_boot_itb() {
@@ -194,6 +279,8 @@ ab_update_target_bootfs() {
         if ! mountpoint -q "${boot_mnt}" 2>/dev/null; then rm -rf "${boot_mnt}"; fi
         return 1
     fi
+    ab_merge_env_overlays "${arm_env}" ||
+        log_warn "Failed to merge overlays into target boot env"
     if ! umount "${boot_mnt}"; then
         log_error "Failed to unmount target boot partition"
         return 1
@@ -212,6 +299,12 @@ ab_update_target_root_boot_env() {
         log_error "Failed to update target root boot environment"
         return 1
     }
+    # Raw-FIT (encrypted) targets have no env filesystem to migrate from;
+    # the capture helper soft-skips there. For boot.scr layouts without
+    # separate boot partitions this env is the live one and gets the
+    # running slot's overlays merged in.
+    ab_merge_env_overlays "${arm_env}" ||
+        log_warn "Failed to merge overlays into target root env"
 }
 
 ab_update_target_boot() {

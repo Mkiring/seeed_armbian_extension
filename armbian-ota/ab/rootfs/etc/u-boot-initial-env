@@ -15,14 +15,23 @@ ab_preboot=if test "${ota_in_progress}" = "1"; then if test "${slot_retry_left}"
 # Select only the active A/B boot partition on the configured boot device.
 ab_select_boot_part=if test "${devtype}" = "${ab_boot_devtype}" && test "${devnum}" = "${ab_boot_devnum}"; then if test "${boot_slot}" = "b"; then setenv devplist ${distro_bootpart_b}; else setenv devplist ${distro_bootpart_a}; fi; else part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; fi
 
-scan_dev_for_boot_part=run ab_select_boot_part; boot_android ${devtype} ${devnum}; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done
+# No boot_android here: our images carry no android boot partition, and each
+# call stomps android_dev_desc, which boot_fit later uses as its device
+# pointer — a scan over mtd/spi repointed it and boot_fit died with
+# "No boot partition" (RK3588 SD boot, 2026-09-03).
+scan_dev_for_boot_part=run ab_select_boot_part; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done
 
 # Raw FIT boot path
 ab_select_fit_slot=if test "${boot_slot}" = "b"; then setenv boot_fit_part boot_b; else setenv boot_fit_part boot_a; fi
 
 # Dispatch to the path detected by armbian-ota-init-uboot.
-# armbian.bootdev/bootdevnum pass the storage U-Boot actually loaded the FIT
-# from (set by atags/rkimg_bootdev before bootcmd runs) so the initramfs and
-# userspace can anchor security/rootfs partition lookup to that disk when
-# several disks carry identical cloned A/B images.
-bootcmd=run ab_preboot; if test "${ab_boot_mode}" = "raw-fit"; then run ab_select_fit_slot; setenv bootargs "${bootargs} armbian.slot=${boot_slot} armbian.bootdev=${devtype} armbian.bootdevnum=${devnum}"; boot_fit; else run distro_bootcmd; boot_fit; bootrkp; fi
+# armbian.bootdev/bootdevnum pass the storage U-Boot actually loaded the OS
+# image from (set by atags/rkimg_bootdev before bootcmd runs) so the initramfs
+# and userspace can anchor security/rootfs partition lookup to that disk when
+# several disks carry identical cloned images. The append sits AFTER ab_preboot
+# and BEFORE the mode dispatch so every branch (raw-fit slot boot, recovery
+# boot_fit) carries the token. It must stay after ab_preboot: that script
+# saveenv's during OTA retry handling and must never persist the mutated
+# bootargs, or the token accumulates across retry boots. No bootrkp tail: the
+# command does not exist in the u-boot we ship.
+bootcmd=run ab_preboot; setenv bootargs "${bootargs} armbian.bootdev=${devtype} armbian.bootdevnum=${devnum}"; if test "${ab_boot_mode}" = "raw-fit"; then run ab_select_fit_slot; setenv bootargs "${bootargs} armbian.slot=${boot_slot}"; boot_fit; else run distro_bootcmd; boot_fit; fi

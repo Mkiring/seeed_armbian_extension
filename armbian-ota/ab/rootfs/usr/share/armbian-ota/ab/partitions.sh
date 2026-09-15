@@ -91,7 +91,7 @@ ab_resolve_physical_part_dev() {
 }
 
 # Disk U-Boot actually loaded the boot image from, passed on the kernel
-# command line by the raw-fit A/B bootcmd (armbian.bootdev/bootdevnum).
+# command line by the bootcmd common prefix (armbian.bootdev/bootdevnum).
 # Identical cloned A/B images on several disks expose duplicate filesystem
 # LABELs and PARTLABELs, so a first blkid match may address the wrong disk;
 # partition discovery below prefers partitions of this disk when the tokens

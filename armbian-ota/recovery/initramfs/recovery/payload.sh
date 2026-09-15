@@ -152,6 +152,18 @@ ota_apply_rootfs() {
     }
     stop_heartbeat
 
+    # Capture the pre-OTA env before the rootfs tar overwrites /boot content.
+    # Only layouts without a boot.tar.gz payload keep the live env in rootfs
+    # /boot; when a boot partition payload applies later, its capture in
+    # ota_apply_boot is authoritative and overwrites this copy.
+    if [ "${HAS_BOOT_TAR:-0}" -ne 1 ] && [ -f "${ROOT_MNT}/boot/armbianEnv.txt" ]; then
+        if cp "${ROOT_MNT}/boot/armbianEnv.txt" "${LOGDIR}/armbianEnv.pre-ota"; then
+            log "captured pre-OTA armbianEnv.txt from rootfs /boot"
+        else
+            log "WARN: failed to capture pre-OTA armbianEnv.txt from rootfs /boot"
+        fi
+    fi
+
     log "extracting ${ROOTFS_TAR} -> ${ROOT_MNT} ..."
     start_heartbeat "extracting rootfs.tar.gz to ${ROOT_MNT}"
     if ! extract_tar "${ROOTFS_TAR}" "${ROOT_MNT}" "rootfs"; then
@@ -213,6 +225,16 @@ ota_apply_boot() {
     fi
 
     if [ "$DO_BOOT_OTA" -eq 1 ]; then
+        # The separate boot partition holds the live env; capture it before
+        # boot.tar.gz overwrites the file (extract does not wipe the fs).
+        if [ -f "${BOOT_MNT}/armbianEnv.txt" ]; then
+            if cp "${BOOT_MNT}/armbianEnv.txt" "${LOGDIR}/armbianEnv.pre-ota"; then
+                log "captured pre-OTA armbianEnv.txt from boot partition"
+            else
+                log "WARN: failed to capture pre-OTA armbianEnv.txt from boot partition"
+            fi
+        fi
+
         log "extracting ${BOOT_TAR} -> ${BOOT_MNT} ..."
         start_heartbeat "extracting boot.tar.gz to ${BOOT_MNT}"
         if ! extract_tar "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
@@ -239,7 +261,8 @@ ota_apply_boot() {
     return 0
 }
 
-# ===== fix UUIDs in armbianEnv.txt and new rootfs /etc/fstab (+ crypttab) =====
+# ===== fix UUIDs in armbianEnv.txt and new rootfs /etc/fstab (+ crypttab),
+# then preserve pre-OTA user overlays in armbianEnv.txt =====
 ota_patch_config() {
     if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
         ARM_ENV="${BOOT_MNT}/armbianEnv.txt"
@@ -287,6 +310,8 @@ ota_patch_config() {
         # Keep armbianEnv.txt.dist in sync so the boot.scr fallback still
         # points at the current rootfs after OTA. Otherwise a later txt
         # corruption would fall back to a stale UUID and fail to rescue.
+        # This runs BEFORE the overlays merge below so the .dist baseline
+        # never absorbs user overlays.
         DIST_ENV="${ARM_ENV}.dist"
         if [ -f "${DIST_ENV}" ]; then
             log "syncing ${DIST_ENV} with new rootdev"
@@ -299,6 +324,28 @@ ota_patch_config() {
         else
             log "  - ${DIST_ENV} missing, copying from ${ARM_ENV}"
             cp -a "${ARM_ENV}" "${DIST_ENV}"
+        fi
+
+        # Preserve user DT overlays across OTA: merge the pre-OTA overlays
+        # value into the fresh baseline above. Baseline entries keep their
+        # build-verified order (the RK3588 GPU stack overlay must stay
+        # first-class for the desktop to come up); entries only present in
+        # the old value are appended, deduplicated.
+        OTA_OLD_ENV="${LOGDIR}/armbianEnv.pre-ota"
+        if [ -f "${OTA_OLD_ENV}" ] && grep -q '^overlays=' "${OTA_OLD_ENV}"; then
+            old_overlays="$(sed -n 's/^overlays=//p' "${OTA_OLD_ENV}" | tail -n 1)"
+            new_overlays="$(sed -n 's/^overlays=//p' "${ARM_ENV}" | tail -n 1)"
+            merged_overlays="$(printf '%s\n%s\n' "${new_overlays}" "${old_overlays}" |
+                tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' |
+                sed 's/[[:space:]]*$//')"
+            if [ -n "${merged_overlays}" ]; then
+                log "  - merge overlays: baseline='${new_overlays}' + pre-OTA='${old_overlays}' -> '${merged_overlays}'"
+                set_env_key "${ARM_ENV}" overlays "${merged_overlays}"
+            else
+                log "  - pre-OTA overlays value empty, keep baseline overlays"
+            fi
+        else
+            log "  - no pre-OTA overlays= line, keep baseline overlays"
         fi
     else
         log "WARN: ${ARM_ENV} not found, cannot patch rootdev/verbosity"
