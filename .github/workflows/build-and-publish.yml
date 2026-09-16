@@ -151,9 +151,9 @@ jobs:
             build_deps: ''
             build_cmd: bash build-usbdevice-deb.sh
 
-          # camera-engine-rkaiq-rk3576 and camera-engine-rkaiq-rk3588 are
-          # distributed as prebuilt binaries (closed-source 3A algorithm .a
-          # files). See prebuilt/ on the deb_source branch.
+          # camera-engine-rkaiq is built by the dedicated build-camera-engine
+          # job below (cross toolchain); on its failure the publish job falls
+          # back to prebuilt/ on the source branch.
 
     steps:
       - name: Checkout
@@ -185,6 +185,53 @@ jobs:
         with:
           name: debs-${{ matrix.name }}
           path: /tmp/debs/*.deb
+
+  # ──────────────────────────────────────────────────
+  # camera-engine-rkaiq cross build (Arm GNU 10.3 toolchain,
+  # pinned libdrm bullseye sysroot — see camera_engine_rkaiq/
+  # build-deb.sh). Must run on x86_64: the toolchain tarball
+  # is x86_64-hosted. continue-on-error keeps the release
+  # flowing: on failure publish falls back to the snapshot
+  # in prebuilt/ on the source branch (same filenames are
+  # no-clobbered by publish's cp -vn).
+  # ──────────────────────────────────────────────────
+  build-camera-engine:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Checkout (package sources)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.source_ref || 'deb_source' }}
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl xz-utils m4 gcc g++ xxd vim-common cmake ninja-build dpkg-dev
+
+      - name: Cache Arm GNU 10.3 toolchain + libdrm sysroot
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/seeed-rkaiq-toolchain
+          key: rkaiq-toolchain-10.3-2021.07-libdrm-2.4.104
+
+      - name: Build rk3576 (ISP v39)
+        working-directory: camera_engine_rkaiq
+        run: ./build-deb.sh rk3576
+
+      - name: Build rk3588 (ISP v30)
+        working-directory: camera_engine_rkaiq
+        run: ./build-deb.sh rk3588
+
+      - name: Upload debs
+        uses: actions/upload-artifact@v4
+        with:
+          name: debs-camera-engine-rkaiq
+          path: camera-engine-rkaiq-*_arm64.deb
+          if-no-files-found: error
 
   # ──────────────────────────────────────────────────
   # Per-board matrix build: kernel + U-Boot (x86 cross-compile)
@@ -283,7 +330,7 @@ jobs:
   # regenerates the entire apt repo + an index HTML page.
   # ──────────────────────────────────────────────────
   publish:
-    needs: [build-userspace, build-kernel]
+    needs: [build-userspace, build-kernel, build-camera-engine]
     runs-on: ubuntu-latest
     permissions:
       contents: write
