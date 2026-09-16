@@ -74,10 +74,10 @@ on:
           - minimal
         default: full
       extension_ref:
-        description: "seeed_armbian_extension ref (branch/tag/commit)"
+        description: "seeed_armbian_extension ref (branch:x / tag:x / commit:sha)"
         required: true
         type: string
-        default: "main"
+        default: "branch:main"
       clear_kernel_cache:
         description: "Clear kernel deb/worktree cache before build"
         required: false
@@ -295,13 +295,22 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix).include }}
 
     steps:
+      # extension_ref is in fetch_from_repo's 方式:参数 format
+      # (branch:x / tag:x / commit:sha); actions/checkout wants the bare
+      # ref, so strip the prefix.
+      - name: Resolve extension ref
+        id: ext
+        run: |
+          ref='${{ inputs.extension_ref }}'
+          echo "bare=${ref#*:}" >> "$GITHUB_OUTPUT"
+
       # The workflow file lives on seeed-build, but the code to build may
-      # be on a different ref (fix/secure_boot, ...) — check that out
+      # be on a different ref (branch:main-pre, ...) — check that out
       # directly instead of the dispatch ref.
       - name: Checkout extension at extension_ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.extension_ref }}
+          ref: ${{ steps.ext.outputs.bare }}
           fetch-depth: 1
 
       - name: Free up disk space
@@ -358,18 +367,15 @@ jobs:
           path: armbian-build
           fetch-depth: 1
 
-      - name: Patch board config to skip extension fetch
-        # The board config hardcodes fetch_from_repo ... branch:main,
-        # which overwrites our extension with upstream main during build.
-        # Comment out fetch_from_repo — the extension is already
-        # pre-placed via symlink (this repo, extension_ref branch).
+      - name: Point extension wrapper at the selected ref
+        # Replace the pinned SEEED_EXTENSION_REF in
+        # extensions/seeed-extension.sh with the selected ref; the
+        # wrapper then fetches/symlinks/enables exactly that revision.
         run: |
           cd armbian-build
-          sed -i '/fetch_from_repo.*seeed_armbian_extension/s/^/# /' \
-              config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc
-          echo "=== board config after patch ==="
-          grep -n 'seeed_armbian_extension' \
-              config/sources/vendors/seeed-studio/recomputer-rk35xx-common.inc | head -5
+          sed -i "s|^SEEED_EXTENSION_REF=.*|SEEED_EXTENSION_REF=\"${{ inputs.extension_ref }}\"|" \
+              extensions/seeed-extension.sh
+          grep -n 'SEEED_EXTENSION_REF' extensions/seeed-extension.sh
 
       - name: Add trailing blank line to vendor defconfigs
         run: |
@@ -387,22 +393,6 @@ jobs:
               lib/functions/host/docker.sh
           echo "=== CRYPTROOT_PASSPHRASE forwarding in docker.sh ==="
           grep -n 'CRYPTROOT_PASSPHRASE' lib/functions/host/docker.sh
-
-      - name: Copy extension into armbian-build/extensions
-        # The build runs inside the armbian docker container, where only
-        # ${SRC} (armbian-build/) is mounted as /armbian. A host-absolute
-        # symlink into $GITHUB_WORKSPACE dangles inside the container and
-        # enable_extension can't find it — real files must live under
-        # armbian-build/. Exclude .git and the armbian-build checkout
-        # itself (it sits inside the workspace; copying it into itself
-        # would recurse).
-        run: |
-          mkdir -p armbian-build/extensions
-          rsync -a --exclude .git --exclude armbian-build \
-                "$GITHUB_WORKSPACE"/ armbian-build/extensions/seeed_armbian_extension/
-          echo "=== extension copied ==="
-          ls -la armbian-build/extensions/seeed_armbian_extension/seeed_armbian_extension.sh
-          ls -la armbian-build/extensions/seeed_armbian_extension/scripts/build.sh
 
       - name: Pre-create rkbin symlink for A/B OTA
         if: ${{ matrix.profile == 'ab' }}
