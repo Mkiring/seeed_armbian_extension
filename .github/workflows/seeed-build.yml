@@ -394,6 +394,18 @@ jobs:
           echo "=== CRYPTROOT_PASSPHRASE forwarding in docker.sh ==="
           grep -n 'CRYPTROOT_PASSPHRASE' lib/functions/host/docker.sh
 
+      - name: Patch radxa-aic8800 extension against GitHub API flakiness
+        # api.github.com is flaky on CI runners; when the releases/latest lookup
+        # fails, upstream resolves the version to "null" and wget 404s (run
+        # 35177119171). The patch adds version pin/cache/fallback and
+        # download-fallback-to-cache. git apply fails loudly if armbian-build
+        # updates the extension, so the patch is never silently skipped.
+        run: |
+          cd armbian-build
+          git apply "${GITHUB_WORKSPACE}/.github/patchs/radxa-aic8800.sh.patch"
+          echo "=== patched radxa-aic8800.sh ==="
+          grep -n "AIC8800_FALLBACK_VERSION\|aic8800_download_file_with_cache" extensions/radxa-aic8800.sh | head -5
+
       - name: Pre-create rkbin symlink for A/B OTA
         if: ${{ matrix.profile == 'ab' }}
         run: |
