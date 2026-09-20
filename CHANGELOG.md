@@ -158,6 +158,14 @@ Covers the work against the initial import (merge base `9980aee`,
 
 ### Changed
 
+- **`rk-uboot-postprocess` hooks are now opt-in via `RK_COMPILE_USBPLUG=yes`.**
+  They were enabled unconditionally, which broke Armbian CI (2026-09-19): with
+  no usbplug compiled, the RK3588 path referenced `rk35/rk3588_usbplug_v1.11.bin`
+  — never shipped in armbian/rkbin — and `boot_merger` aborted with exit 245 on
+  every image build. Plain builds now use the upstream postprocess paths and
+  ship no Maskrom loader in the u-boot deb; Maskrom builds (already setting
+  `RK_COMPILE_USBPLUG=yes`) are unaffected.
+
 - **FIT signing switched to the Rockchip rkbin prebuilt `mkimage`.** The
   board-side verifier only accepts maximum-salt RSA-PSS signatures, while
   the in-tree `mkimage` links against the build container's OpenSSL and

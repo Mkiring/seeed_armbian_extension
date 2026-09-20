@@ -52,11 +52,10 @@ if [[ "yes" == "yes" ]]; then
 	enable_extension "seeed_armbian_extension/ssh-protect/ssh-protect"
 fi
 
-# RK3576/RK3588 U-Boot SPL loader hooks: boot_merger + optional usbplug recompile
-# for Maskrom recovery on new SPI flash boards. Hook functions are inert for SoCs
-# they don't handle (they fall back to upstream mkimage behavior).
-if [[ "yes" == "yes" ]]; then
-	display_alert "RK U-Boot postprocess" "Enable rk-uboot-postprocess hooks" "info"
+# Maskrom-recovery U-Boot hooks (boot_merger + compiled usbplug + spl_loader
+# packaging). Opt-in: unless RK_COMPILE_USBPLUG=yes, upstream postprocess runs.
+if [[ "${RK_COMPILE_USBPLUG:-no}" == "yes" ]]; then
+	display_alert "RK U-Boot postprocess" "Enable rk-uboot-postprocess hooks (Maskrom loader)" "info"
 	enable_extension "seeed_armbian_extension/rk-uboot-postprocess/rk-uboot-postprocess"
 fi
 
