@@ -158,6 +158,13 @@ Covers the work against the initial import (merge base `9980aee`,
 
 ### Changed
 
+- **Boot-size precedence unified across OTA layouts**: `OTA_BOOT_SIZE` now
+  wins over `BOOTSIZE` everywhere (recovery previously preferred `BOOTSIZE`,
+  secure boot ignored it).
+- **Leaner default OTA partition sizing**: rootfs headroom 30% → 20%,
+  userdata 1024 → 512 MiB, boot 512 → 256 MiB. A 6.1 GiB desktop rootfs
+  now yields a ~8.1 GiB recovery image instead of ~9.3 GiB. Overrides:
+  `OTA_BOOT_SIZE` / `OTA_ROOTFS_SIZE` / `OTA_USERDATA_SIZE`.
 - **`rk-uboot-postprocess` hooks are now opt-in via `RK_COMPILE_USBPLUG=yes`.**
   They were enabled unconditionally, which broke Armbian CI (2026-09-19): with
   no usbplug compiled, the RK3588 path referenced `rk35/rk3588_usbplug_v1.11.bin`

@@ -25,12 +25,12 @@ function pre_prepare_partitions__recovery_ota() {
         BOOTPART_REQUIRED="yes"
         BOOTFS_TYPE="ext4"
         BOOT_FS_LABEL="armbi_boot"
-        # OTA_BOOT_SIZE is only computed later, in the prepare_image_size hook
-        # (ota_get_default_partition_sizes needs $rootfs_size). Without the
-        # :-512 fallback BOOTSIZE stays empty here, Armbian core then fills it
-        # with its 256 MiB default (partitioning.sh) and the 512 MiB policy
-        # never takes effect.
-        BOOTSIZE="${BOOTSIZE:-${OTA_BOOT_SIZE:-512}}"
+        # Boot size precedence: OTA_BOOT_SIZE > BOOTSIZE > 512. OTA_BOOT_SIZE
+        # is only computed later (ota_get_default_partition_sizes needs
+        # rootfs_size), so only an explicit env value is visible here; the
+        # inline 512 keeps Armbian core from filling its own 256 MiB default.
+        # Keep in sync with ota_get_default_partition_sizes().
+        BOOTSIZE="${OTA_BOOT_SIZE:-${BOOTSIZE:-512}}"
     fi
 
     if ota_encrypted_rootfs_enabled; then
