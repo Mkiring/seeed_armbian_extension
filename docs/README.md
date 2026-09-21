@@ -15,6 +15,10 @@ Read in order for a full walkthrough, or jump to what you need.
 
 ## Pick your path
 
+- **"I don't want to build anything"** → grab a prebuilt image from the
+  [armbian-build releases](https://github.com/Seeed-Studio/armbian-build/releases)
+  (per-board IMAGE/OTA tables), then flash per
+  [Getting Started §5](01-getting-started.md#5-flash-and-boot).
 - **"I just want a working image"** → [Getting Started](01-getting-started.md), then flash and use; updates come via [Recovery OTA](03-ota-recovery.md).
 - **"I need updates that cannot brick the device"** → [A/B OTA](04-ota-ab.md) (dual slot, automatic rollback).
 - **"The data on the device must be unreadable if it is stolen"** → [Encryption](05-encryption.md).
