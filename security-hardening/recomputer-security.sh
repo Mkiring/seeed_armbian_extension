@@ -91,6 +91,7 @@ EOF
 	- Terrapin mitigation by disabling `chacha20-poly1305@openssh.com` and Encrypt-then-MAC algorithms
 	- PAM faillock: 5 failed login attempts → account locked for 60 seconds (GUI, console)
 	- SSH service disabled by default (users can run `sudo systemctl enable --now ssh` after local login)
+	- polkit GUI authentication: setuid helper fallback — polkitd 127's socket-activated helper requires `SO_PEERPIDFD` (kernel 6.5+), vendor 6.1 lacks it (re-apply `sudo chmod 4755 /usr/lib/polkit-1/polkit-agent-helper-1` after polkitd package upgrades)
 	- DHCP client data minimization for dhclient and systemd-networkd defaults
 
 	Already provided by Armbian first boot:
@@ -122,6 +123,23 @@ EOF
 		chroot_sdcard systemctl --no-reload enable fail2ban.service || display_alert "${board_label}" "Failed to enable fail2ban.service" "warn"
 	else
 		display_alert "${board_label}" "fail2ban.service not found in image; skipping enable" "warn"
+	fi
+
+	# polkitd >= 127 (Ubuntu 25.10+) ships a non-setuid polkit-agent-helper-1 and
+	# authenticates GUI agents through polkit-agent-helper.socket, which needs the
+	# SO_PEERPIDFD socket option (kernel 6.5+) to identify the connecting peer.
+	# Vendor 6.1 kernels lack it, so the socket-activated helper aborts with
+	# "pidfd not supported on this platform" and every privileged GUI toggle
+	# fails to authenticate. Apply the fallback polkit itself documents in that
+	# error message: restore the legacy setuid helper and disable the socket.
+	local polkit_helper="${SDCARD}/usr/lib/polkit-1/polkit-agent-helper-1"
+	if [[ -f "${polkit_helper}" ]] && \
+		(chroot_sdcard test -f /lib/systemd/system/polkit-agent-helper.socket || chroot_sdcard test -f /usr/lib/systemd/system/polkit-agent-helper.socket); then
+		chroot_sdcard chmod 4755 /usr/lib/polkit-1/polkit-agent-helper-1 || display_alert "${board_label}" "Failed to setuid polkit agent helper" "warn"
+		chroot_sdcard systemctl --no-reload disable polkit-agent-helper.socket || display_alert "${board_label}" "Failed to disable polkit-agent-helper.socket" "warn"
+		display_alert "Security hardening" "polkit setuid helper fallback applied (vendor 6.1 lacks SO_PEERPIDFD)" "info"
+	else
+		display_alert "${board_label}" "polkit socket-activated helper not found in image; skipping setuid fallback" "warn"
 	fi
 }
 
