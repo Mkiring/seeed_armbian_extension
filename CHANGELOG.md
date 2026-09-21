@@ -162,8 +162,9 @@ Covers the work against the initial import (merge base `9980aee`,
   longer carry a `_RECOVERY` suffix (stock names, no router changes); A/B
   keeps its `_AB_PART` marker. OTA packages are layout-agnostic
   (`..._OTA.tar.gz`, mode recorded in `package.env`) and are now written to
-  `output/images/ota/` instead of the images root, so they land in a
-  dedicated `/ota` subfolder on the mirrors.
+  `output/images/<BOARD>/ota/` instead of the images root, so each board's
+  packages land under its own subfolder on the mirrors
+  (`dl.armbian.com/BOARD/ota/FILE`).
 - **Boot-size precedence unified across OTA layouts**: `OTA_BOOT_SIZE` now
   wins over `BOOTSIZE` everywhere (recovery previously preferred `BOOTSIZE`,
   secure boot ignored it).
