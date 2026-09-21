@@ -6,7 +6,7 @@ function ota_image_layout_suffix() {
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
         echo "_AB_PART"
     else
-        echo "_RECOVERY"
+        echo ""
     fi
 }
 
@@ -14,7 +14,7 @@ function ota_get_package_type_label() {
     if [[ "${AB_PART_OTA}" == "yes" ]]; then
         echo "AB_PART_OTA"
     else
-        echo "RECOVERY_OTA"
+        echo "OTA"
     fi
 }
 

@@ -523,9 +523,9 @@ function ota_finalize_payload_package() {
     display_alert "OTA package type" "$(ota_get_package_type_label)" "info"
     base_image_name="$(ota_image_package_base_name)"
     ota_package_name="$(ota_image_ota_package_name "${base_image_name}")"
-    ota_output_path="${DEST}/images/${ota_package_name}"
+    ota_output_path="${DEST}/images/ota/${ota_package_name}"
     manifest_mode="$(ota_get_manifest_mode)"
-    mkdir -p "${DEST}/images/"
+    mkdir -p "${DEST}/images/ota/"
 
     ota_write_package_env "${ota_temp_dir}" "${manifest_mode}"
     ota_write_version_file "${ota_temp_dir}" "${base_image_name}"
@@ -549,7 +549,7 @@ function ota_finalize_payload_package() {
     tar -tzf "${ota_output_path}" | head -20 | while read -r file; do
         display_alert "  - ${file}" "" "info"
     done
-    checksum_file="${DEST}/images/$(ota_image_checksum_name "${base_image_name}")"
+    checksum_file="${DEST}/images/ota/$(ota_image_checksum_name "${base_image_name}")"
     ota_write_package_checksums "${ota_output_path}" "${checksum_file}" "${ota_package_name}"
     display_alert "Checksums generated" "${checksum_file}" "info"
     display_alert "OTA package creation completed" "Package: ${ota_package_name}" "info"
