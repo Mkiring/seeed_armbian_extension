@@ -31,7 +31,7 @@ RK_COMPILE_USBPLUG="yes"
 CRYPTROOT_PASSPHRASE="${CRYPTROOT_PASSPHRASE:-}"
 
 # Valid option values
-VALID_BOARDS="recomputer-rk3576-devkit recomputer-rk3588-devkit"
+VALID_BOARDS="recomputer-rk3576-devkit recomputer-rk3588-devkit recomputer-rk3576-module-devkit"
 VALID_DESKTOPS="gnome xfce kde-plasma mate cinnamon"
 VALID_TIERS="minimal mid full"
 
@@ -54,7 +54,8 @@ Options:
 
   Build config:
   -b, --board BOARD           Board name (default: recomputer-rk3576-devkit)
-                              Options: recomputer-rk3576-devkit, recomputer-rk3588-devkit
+                              Options: recomputer-rk3576-devkit, recomputer-rk3588-devkit,
+                                       recomputer-rk3576-module-devkit
   -R, --release RELEASE       Release/distro (default: bookworm)
                               Debian:  trixie, bookworm, bullseye, buster, sid, forky, resolute
                               Ubuntu:  plucky, oracular, noble, jammy, focal, questing

@@ -55,8 +55,11 @@ Any later build with the same profile **also** emits an OTA package next to
 the image:
 
 ```text
-output/images/Armbian_*_RECOVERY_*_OTA.tar.gz
+output/images/<BOARD>/ota/Armbian_*_OTA.tar.gz
 ```
+
+Stock image names — no `_RECOVERY` suffix; the OTA mode is recorded in
+`package.env`.
 
 Contents (assembled by [`package-create.sh`](../armbian-ota/common/build-hooks/package-create.sh)):
 
@@ -76,7 +79,7 @@ Transfer the package to the device any way you like (scp, USB, download).
 **On device:**
 
 ```bash
-armbian-ota start /path/to/Armbian_..._RECOVERY_..._OTA.tar.gz
+armbian-ota start /path/to/Armbian_..._OTA.tar.gz
 reboot
 ```
 

@@ -46,7 +46,7 @@ Parsed in [`build.sh:231-302`](../scripts/build.sh#L231).
 
 | Option | Effect |
 |---|---|
-| `-b, --board <name>` | Board, e.g. `recomputer-rk3576-devkit`, `recomputer-rk3588-devkit` |
+| `-b, --board <name>` | Board, e.g. `recomputer-rk3576-devkit`, `recomputer-rk3588-devkit`, `recomputer-rk3576-module-devkit` |
 | `-R, --release <name>` | Distribution release (default `bookworm`) |
 | `-d, --desktop <env>` | Desktop environment choice (e.g. `gnome`) — takes a value |
 | `-t, --tier <tier>` | Desktop tier choice — takes a value |

@@ -28,7 +28,7 @@ CRYPTROOT_PASSPHRASE='<64-char-passphrase>' \
 ```
 
 Update packages are built the same way as for Recovery — every build emits
-`*_AB_PART_OTA.tar.gz` next to the image.
+`*_AB_PART_OTA.tar.gz` under `output/images/<BOARD>/ota/`.
 
 ## 2. Partition layout
 

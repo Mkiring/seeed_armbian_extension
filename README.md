@@ -17,7 +17,8 @@ Want a ready-made image without building anything? Download it here:
 **<https://github.com/Seeed-Studio/armbian-build/releases>**
 
 1. Open the **newest** release (it is rebuilt on every CI run).
-2. Find your board in the download table: **rk3576-devkit** or **rk3588-devkit**.
+2. Find your board in the download table: **rk3576-devkit**, **rk3588-devkit**
+   or **rk3576-module-devkit**.
 3. Pick a row — Debian 13 / Ubuntu 26.04, Gnome / Minimal (CLI), AB / Recovery —
    and click **IMAGE** for the flashable system image (`.img.xz`, `.sha256`
    next to it on OneDrive for verification). **OTA** in the same row is the

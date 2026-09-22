@@ -4,7 +4,8 @@ Goal of this chapter: from a clean machine to a flashed, booting image.
 
 > **Skip the build?** CI-built images are published at
 > [Seeed-Studio/armbian-build releases](https://github.com/Seeed-Studio/armbian-build/releases).
-> Each release carries a download table per board (rk3576 / rk3588 devkit):
+> Each release carries a download table per board (rk3576 / rk3588 /
+> rk3576 module devkits):
 > one row per distribution (Debian 13 / Ubuntu 26.04) × variant (Gnome /
 > Minimal CLI) × type (**AB** / **RECOVERY**), with an **IMAGE** link
 > (`.img.xz`, flash-ready GPT) and an **OTA** link (update payload for the
@@ -73,7 +74,8 @@ The simplest useful image — Recovery OTA, plain (unencrypted), rk3576 devkit:
 What happens: the wrapper resolves the profile into environment variables
 (`OTA_ENABLE=yes` …), runs `compile.sh` in Docker, and produces:
 
-- image: `output/images/Armbian_*_RECOVERY_*.img.xz` (GPT, write-ready)
+- image: `output/images/Armbian_*.img.xz` (GPT, write-ready, stock name —
+  no `_RECOVERY` suffix)
 - logs: `output/logs/`
 
 First run downloads toolchains/sources and can take an hour or more;

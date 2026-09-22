@@ -12,6 +12,10 @@ on:
         description: "Board: reComputer rk3588 DevKit"
         type: boolean
         default: false
+      board_rk3576_module:
+        description: "Board: reComputer rk3576 Module DevKit"
+        type: boolean
+        default: false
 
       # ── Releases ──────────────────────────────────────────────────────
       release_trixie:
@@ -206,6 +210,7 @@ jobs:
           boards = []
           if flag("BOARD_RK3576"): boards.append("recomputer-rk3576-devkit")
           if flag("BOARD_RK3588"): boards.append("recomputer-rk3588-devkit")
+          if flag("BOARD_RK3576_MODULE"): boards.append("recomputer-rk3576-module-devkit")
 
           # Releases
           releases = []
@@ -268,6 +273,7 @@ jobs:
         env:
           BOARD_RK3576: ${{ inputs.board_rk3576 }}
           BOARD_RK3588: ${{ inputs.board_rk3588 }}
+          BOARD_RK3576_MODULE: ${{ inputs.board_rk3576_module }}
           REL_TRIXIE:   ${{ inputs.release_trixie }}
           REL_RESOLUTE:  ${{ inputs.release_resolute }}
           TIER_CLI:     ${{ inputs.tier_cli }}
@@ -380,7 +386,7 @@ jobs:
       - name: Add trailing blank line to vendor defconfigs
         run: |
           cd armbian-build
-          for f in patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk35{76,88}-devkit_defconfig; do
+          for f in patch/u-boot/legacy/u-boot-radxa-rk35xx/defconfig/recomputer-rk35*-devkit_defconfig; do
             [[ -f "$f" ]] || continue
             echo "" >> "$f"
             echo "Added trailing blank line to $f"
@@ -562,11 +568,16 @@ jobs:
         # OneDrive layout (seeed-storage:armbian-images/<board>/pre-release/):
         #   rec/ | ab/              — images without security profile
         #   "rec sec/" | "ab sec/"  — secure-boot images
+        #   ota/ inside each dir    — OTA packages + checksums. Locally
+        #                             they sit under output/images/<BOARD>/ota/
+        #                             (bfb8fce2 mirror layout); the board
+        #                             segment is stripped on upload because
+        #                             the OneDrive path already carries it.
         #   fit/ inside sec dirs is NOT touched by CI — signed FIT images
         #   are uploaded manually.
         # No CI-side filename renaming: the extension already bakes the
-        # OTA mode into the image name (RECOVERY / AB_PART) and the
-        # directory layout carries the rest.
+        # layout into the image name (_AB_PART for A/B; recovery images
+        # use stock names) and the directory layout carries the rest.
         # The release/ channel is also manual: tested images are moved
         # from pre-release by hand. Retention: the cleanup job deletes
         # pre-release files from previous runs after the matrix
@@ -586,8 +597,13 @@ jobs:
           else
             DEST="seeed-storage:armbian-images/${BOARD_DIR}/pre-release/${OTA_DIR}"
           fi
-          echo "Uploading output/images/ -> ${DEST}"
-          rclone copy -P --stats 1m output/images/ "${DEST}"
+          # --max-depth 1 keeps the copy to top-level files only, so the
+          # <BOARD>/ota/ subtree is not nested again under DEST (uploaded
+          # separately below).
+          echo "Uploading output/images/ (top-level images) -> ${DEST}"
+          rclone copy -P --stats 1m --max-depth 1 output/images/ "${DEST}"
+          echo "Uploading output/images/${{ matrix.board }}/ota/ -> ${DEST}/ota"
+          rclone copy -P --stats 1m "output/images/${{ matrix.board }}/ota" "${DEST}/ota"
           echo "=== Remote listing ==="
           rclone lsl "${DEST}"
 
@@ -637,7 +653,9 @@ jobs:
         # Deletes direct-child files whose modtime predates this run
         # (= previous runs' leftovers). --max-depth 1 keeps it
         # non-recursive, so fit/ (manual signed FIT uploads) is never
-        # touched. release/, uboot/ are not scanned at all.
+        # touched. release/, uboot/ are not scanned at all. The ota/
+        # entries cover the OTA-package subfolder (stock naming change)
+        # so old packages don't accumulate there.
         env:
           RUN_STARTED_AT: ${{ github.run_started_at }}
         run: |
@@ -649,7 +667,8 @@ jobs:
           fi
           short=$(echo "${{ matrix.board }}" | sed -E 's/recomputer-//; s/-devkit//')
           BASE="seeed-storage:armbian-images/${short}-devkit/pre-release"
-          for d in "rec" "ab" "rec sec" "ab sec"; do
+          for d in "rec" "ab" "rec sec" "ab sec" \
+                   "rec/ota" "ab/ota" "rec sec/ota" "ab sec/ota"; do
             echo "=== ${BASE}/${d}: before ==="
             rclone lsl "${BASE}/${d}" 2>/dev/null || true
             echo "=== deleting files older than $(( AGE / 60 )) min ==="
@@ -660,11 +679,11 @@ jobs:
 
   release:
     needs: [plan, build, cleanup]
-    # ONE release covering ALL boards. Body = Note (IMAGE/OTA one-liners)
-    # + IMAGES with one table per board — the hand-tuned format from
-    # v20260901-0433-rk3576. Links are generated live from the OneDrive
-    # listing after retention cleanup, so they always match what is
-    # published. No repo checkout needed: everything comes from OneDrive.
+    # ONE release covering ALL boards. The static prose (Note / IMAGES
+    # headers) lives in .github/release-body.md — CI reads that template
+    # and only concatenates the per-board tables + OneDrive links, which
+    # are generated live after retention cleanup so they always match
+    # what is published.
     if: ${{ inputs.publish_release && inputs.upload_onedrive && !cancelled() && needs.build.result == 'success' && needs.cleanup.result == 'success' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -690,10 +709,18 @@ jobs:
           rclone_config: ${{ secrets.RCLONE_CONFIG }}
           disable_base64: true
 
+      - name: Checkout release body template
+        # Sparse checkout of this repo (.github only) for
+        # .github/release-body.md; the rest of the job works off OneDrive.
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+          fetch-depth: 1
+
       # Each row pairs an .img.xz with its _OTA.tar.gz (matched by
       # filename stem) and links both via rclone share links; the Type
       # column comes from the OneDrive directory (rec/ab/sec).
-      - name: Generate release document from OneDrive listing
+      - name: Generate release document from template + OneDrive listing
         env:
           BOARDS: ${{ needs.plan.outputs.boards }}
         run: |
@@ -751,12 +778,17 @@ jobs:
               for sub, typ in DIRS:
                   d = f"seeed-storage:armbian-images/{short}-devkit/pre-release/{sub}"
                   files = lsjson(d)
+                  # OTA packages live in the ota/ subfolder (stock image
+                  # naming change); they no longer sit next to the images.
+                  ota_files = lsjson(f"{d}/ota")
                   for name in sorted(files):
                       if not name.endswith(".img.xz"):
                           continue
                       stem = name[: -len(".img.xz")]
-                      # ..._<release>_vendor_<ver>_<variant>_<RECOVERY|AB_PART>
-                      m = re.search(r"_([a-z]+)_vendor_[0-9.]+_(.*)_(RECOVERY|AB_PART)$", stem)
+                      # ..._<release>_vendor_<ver>_<variant>[_AB_PART] —
+                      # recovery images use stock names (no _RECOVERY
+                      # suffix), A/B keeps _AB_PART.
+                      m = re.search(r"_([a-z]+)_vendor_[0-9.]+_(.*?)(?:_AB_PART)?$", stem)
                       if not m:
                           print(f"::warning::unparsed filename {name}")
                           continue
@@ -766,8 +798,8 @@ jobs:
                       img_i = ref(link(f"{d}/{name}"))
                       cell = f"[IMAGE][{img_i}]"
                       ota = stem + "_OTA.tar.gz"
-                      if ota in files:
-                          ota_i = ref(link(f"{d}/{ota}"))
+                      if ota in ota_files:
+                          ota_i = ref(link(f"{d}/ota/{ota}"))
                           cell = f"[IMAGE][{img_i}] \\| [OTA][{ota_i}]"
                       rows.append(f'|<img src="{icon}" width="20" height="20"> '
                                   f'<span>{dist}</span>|{var_txt}|{typ}|{human(files[name])}|{cell} |')
@@ -776,25 +808,36 @@ jobs:
               return head + sorted(rows)
 
           today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-          out = [
-              "## Armbian images — pre-release", "",
-              f"Built from CI run {os.environ.get('GITHUB_RUN_ID', '')} on {today}. "
-              "Hosted on OneDrive; pre-release keeps only the latest CI run.", "",
-              "### Note", "",
-              "**IMAGE**: xz-compressed system image — verify with the matching `.sha256` sidecar on OneDrive",
-              "**OTA**: full-system OTA update payload for the paired image", "",
-              "### IMAGES", "",
-          ]
+
+          tpl_path = ".github/release-body.md"
+          with open(tpl_path, encoding="utf-8") as f:
+              tpl = f.read()
+          for marker in ("{{RUN_ID}}", "{{DATE}}", "{{BOARD_TABLES}}", "{{LINK_REFS}}"):
+              if marker not in tpl:
+                  raise SystemExit(f"ERROR: {marker} missing from {tpl_path}")
+
+          sections = []
           for b in boards:
               short = b.replace("recomputer-", "").replace("-devkit", "")
-              out += [f"#### {short}-devkit", ""] + board_table(b) + [""]
-          for i, url in enumerate(refs, 1):
-              out.append(f"[{i}]:{url}")
+              sections.append("\n".join([f"#### {short}-devkit", ""] + board_table(b)))
 
-          md = "\n".join(out)
+          refs_md = "\n".join(f"[{i}]:{url}" for i, url in enumerate(refs, 1))
+
+          md = (tpl
+                .replace("{{RUN_ID}}", os.environ.get("GITHUB_RUN_ID", ""))
+                .replace("{{DATE}}", today)
+                .replace("{{BOARD_TABLES}}", "\n\n".join(sections))
+                .replace("{{LINK_REFS}}", refs_md))
+
+          leftover = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", md)))
+          if leftover:
+              raise SystemExit(f"ERROR: unresolved placeholders in release body: {leftover}")
+
+          if not md.endswith("\n"):
+              md += "\n"
           os.makedirs("release-out", exist_ok=True)
           with open("release-out/CHANGELOG.md", "w", encoding="utf-8") as f:
-              f.write(md + "\n")
+              f.write(md)
           print("=== Generated release-out/CHANGELOG.md ===")
           print(md)
           PY
