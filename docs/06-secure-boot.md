@@ -46,6 +46,23 @@ build (`RK_COMPILE_USBPLUG`, opt out with `--no-usbplug`). The build fails if
 any signature step does not verify — a signed image that boots is already
 proof the chain is intact (build-time `fit_check_sign` gate).
 
+Every secure-boot build also emits the signed U-Boot as a standalone deb in
+`output/debs/linux-u-boot-<board>-<branch>-secure_*.deb` — the `-secure`
+suffix gives it a package namespace of its own, apart from the unsigned
+build ([`uboot-package-name.sh`](../rk_secure-disk-encryption/build-hooks/uboot-package-name.sh)).
+To flash the signed U-Boot by hand (e.g. Maskrom recovery with RKDevTool),
+unpack it:
+
+```bash
+dpkg -x output/debs/linux-u-boot-*-secure_*.deb uboot-secure
+ls uboot-secure/usr/lib/linux-u-boot-*/
+# idbloader.img  u-boot.itb  rkspi_loader.img  spl_loader_maskrom.bin
+```
+
+`./build.sh --uboot secure-boot` rebuilds only this deb — keep
+`UBOOT_FIT_KEYS_BACKUP_DIR` pointed at the fleet keys
+([§3](#3-signing-keys-keep-them-or-regenerate-them)).
+
 ## 3. Signing keys: keep them or regenerate them
 
 Without configuration, **fresh RSA keys are generated per build** — every
