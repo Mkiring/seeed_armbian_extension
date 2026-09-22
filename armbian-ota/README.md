@@ -122,7 +122,7 @@ Logs land in `/run/initramfs/ota.log` (carried into the running system via `/run
 
 ```bash
 # On target system
-armbian-ota start Armbian_xxx_RECOVERY.tar.gz
+armbian-ota start Armbian_xxx_OTA.tar.gz
 reboot
 ```
 
@@ -210,10 +210,10 @@ AB_PART_OTA=yes              # A/B only; leave unset for Recovery
 OTA_BOOT_SIZE=512            # Boot partition(s) in MiB (default 512, per slot for A/B)
 OTA_SECURITY_SIZE=4          # Security partition in MiB (encrypted images, default 4)
 # OTA_ROOTFS_SIZE=4096       # Optional rootfs partition size override (per slot for A/B)
-OTA_USERDATA_SIZE=1024       # Userdata partition in MiB (default 1024)
+OTA_USERDATA_SIZE=512        # Userdata partition in MiB (default 512, grows to full disk on first boot)
 ```
 
-When unset, `OTA_ROOTFS_SIZE` is calculated from the built rootfs size plus `EXTRA_ROOTFS_MIB_SIZE`, then adds 30% headroom.
+When unset, `OTA_ROOTFS_SIZE` is calculated from the built rootfs size plus `EXTRA_ROOTFS_MIB_SIZE`, then adds 20% headroom.
 
 Both OTA modes require a GPT partition table. Their boot, rootfs, userdata, and security partitions are located by GPT partition labels. Both OTA layouts boot through U-Boot and do not include BIOS or UEFI partitions.
 
@@ -223,13 +223,14 @@ At build time `uboot-default-env.sh` extracts U-Boot's compiled default environm
 
 ## OTA Package Contents
 
-The OTA package (`*_OTA.tar.gz`, suffix `_AB_PART` or `_RECOVERY` in the name) contains:
+The OTA package (`*_OTA.tar.gz`; A/B adds an `_AB_PART` marker, Recovery uses stock image names — the mode lives in `package.env`) contains:
 
 - `rootfs.tar.gz` + `rootfs.sha256` — root filesystem payload (required)
 - `boot.tar.gz` + `boot.sha256` — boot partition payload (plain/auto-decrypt with separate boot partition)
 - `boot.itb` — signed FIT boot image (secure boot), written directly to the raw boot partition; mutually exclusive with `boot.tar.gz`
 - `package.env` — `OTA_MODE` (ab|recovery), `OTA_ENCRYPTED`, `BOARD`, `RELEASE`, `BRANCH`, `VERSION`, `KERNEL`
 - `version.txt` — original image name, version, vendor, board, release, branch, kernel, build commit, extension commit
+- `<image>_OTA.checksums` — written next to the package (not inside): MD5 + SHA256 of the tarball
 - Encrypted builds additionally: `rootfs.tar.gz.enc` (AES-256-CBC; key = HKDF-SHA256 of the LUKS passphrase, info `armbian-ota-payload-v1`), `payload.manifest` (cipher, IV, plaintext sha256), `payload.manifest.sig` (RSA-PSS/SHA256 signature under the secure-boot FIT key; the public key is installed at `/usr/share/armbian-ota/keys/ota-payload.pub.pem` at build time)
 
 The package does not include an offline `ota_tools/` bundle; the required OTA runtime is installed into the firmware at image build time.
