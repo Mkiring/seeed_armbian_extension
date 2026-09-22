@@ -40,14 +40,27 @@ secure boot:   [ boot raw FIT ][ security 4M ][ rootfs LUKS+ext4 ][ userdata LUK
 | `userdata` | `armbi_usrdata` | overlay upper layer + OTA transaction store; auto-expands on first boot |
 
 Sizes: [`OTA_BOOT_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L31)
-(default 512 MiB), `OTA_ROOTFS_SIZE` (computed +30% headroom),
-[`OTA_USERDATA_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L34)
-(default 1024 MiB) — see [Build Reference](02-build-reference.md).
+(default 512 MiB), `OTA_ROOTFS_SIZE` (computed +20% headroom),
+[`OTA_USERDATA_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L36)
+(default 512 MiB — a build-time floor, expanded to the full disk on first
+boot) — see [Build Reference](02-build-reference.md).
 
-Because the rootfs is overlayed (`overlayroot` with `recurse=0`), runtime
-writes — installed packages, `/home`, `/var/lib` — land on `userdata` and
-survive updates. Only `/boot` is a direct mount, so kernel upgrades and
-`armbianEnv.txt` edits are seen by U-Boot.
+### Why updates keep your data
+
+`/` is an overlay mount ([`overlayroot.sh`](../armbian-ota/common/build-hooks/overlayroot.sh),
+`recurse=0`):
+
+```text
+/       lower: rootfs partition    read-only   replaced wholesale by an update
+        upper: userdata partition  writable    apt packages, /home, /var/lib
+/boot   direct mount               not overlaid  kernel/armbianEnv.txt visible to U-Boot
+```
+
+An update rewrites only the root and boot partitions; the writable upper
+layer is never touched, so everything installed or saved survives. On the
+first boot [`armbian-resize-userdata`](../armbian-ota/common/rootfs/usr/lib/armbian/armbian-resize-userdata)
+grows the userdata partition to fill the disk (encrypted images need one
+extra reboot to reopen the LUKS mapping before the filesystem grows).
 
 ## 3. Build the update package
 
@@ -72,6 +85,9 @@ Contents (assembled by [`package-create.sh`](../armbian-ota/common/build-hooks/p
 | `version.txt` | yes | image name, build commit, extension commit |
 | `rootfs.tar.gz.enc`, `payload.manifest`, `payload.manifest.sig` | encrypted images | see [below](#6-encrypted-images) |
 
+Next to the package the build also writes `<image>_OTA.checksums`
+(MD5 + SHA256 of the tarball) for distribution-side integrity checks.
+
 Transfer the package to the device any way you like (scp, USB, download).
 
 ## 4. Apply an update on the device
@@ -89,7 +105,9 @@ reboot
   `package.env` and must match the firmware (`OTA_MODE=recovery`),
 - refuses a package whose encryption state differs from the device
   (`OTA_ENCRYPTED` vs. actual),
-- verifies checksums (and, on encrypted images, the manifest signature),
+- verifies checksums (and, on encrypted images, the manifest signature —
+  secure-boot builds only, an unsigned manifest is accepted with a
+  warning; see [06-secure-boot.md](06-secure-boot.md)),
 - stages everything under `userdata/ota-recovery/ota_work/` and marks the
   state `prepared`.
 
@@ -131,8 +149,8 @@ On encrypted builds the update flow is identical from the user's perspective,
 but:
 
 - the package carries `rootfs.tar.gz.enc` instead of plaintext; the device
-  verifies `payload.manifest.sig` (RSA-PSS) before decrypting, then re-checks
-  digests — key derivation and verification in
+  verifies `payload.manifest.sig` (RSA-PSS, when present) before
+  decrypting, then re-checks digests — key derivation and verification in
   [`common.sh`](../armbian-ota/common/rootfs/usr/share/armbian-ota/common.sh);
 - the initramfs applies the payload through `/dev/mapper/armbian-root`;
 - the same passphrase/keys unlock everything — see

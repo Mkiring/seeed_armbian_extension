@@ -49,6 +49,9 @@ encrypted:   [ boot_a ][ boot_b ][ security 4M ][ rootfs_a LUKS+ext4 ][ rootfs_b
 Notes:
 
 - Boot is **two partitions** (not shared); `security` and `userdata` are shared.
+- Runtime writes land on the shared `userdata` overlay
+  ([`overlayroot.sh`](../armbian-ota/common/build-hooks/overlayroot.sh)) —
+  slot switches and updates never touch it.
 - Each slot's boot partition defaults to
   [`OTA_BOOT_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L31)
   (512 MiB) — an A/B image needs roughly twice the plain Recovery space.
@@ -69,8 +72,9 @@ reboot
 The backend ([`ab/backend.sh`](../armbian-ota/ab/rootfs/usr/share/armbian-ota/ab/backend.sh))
 then, still on the **old** system:
 
-1. Verifies the package (checksums; on encrypted images: signature, AES
-   decryption, digest re-check; `OTA_MODE=ab` and encryption state must match).
+1. Verifies the package (checksums; on encrypted images: signature when
+   present — secure-boot builds only — AES decryption, digest re-check;
+   `OTA_MODE=ab` and encryption state must match).
 2. Writes the full payload to the **inactive** slot — rootfs is extracted
    into the inactive root partition (LUKS opened with the same passphrase,
    header untouched), `boot.tar.gz` onto the inactive boot partition or the
