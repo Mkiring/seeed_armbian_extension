@@ -54,7 +54,7 @@ Parsed in [`build.sh:231-302`](../scripts/build.sh#L231).
 | `-r, --clear-rootfs-cache` | Clear rootfs cache before building |
 | `-n, --dry-run` | Print the `compile.sh` invocation, build nothing |
 | `--kernel` | Rebuild kernel only (ignores profiles) |
-| `--uboot` | Rebuild U-Boot only (forces `RK_COMPILE_USBPLUG=no`, ignores OTA profiles) |
+| `--uboot` | Rebuild U-Boot only (ignores OTA profiles; security profiles still apply — `--uboot secure-boot` emits the signed U-Boot deb) |
 | `--minimal` | CLI image, no desktop |
 | `--no-usbplug` | Skip the RK Maskrom usbplug loader build |
 | `-h, --help` | Usage |
