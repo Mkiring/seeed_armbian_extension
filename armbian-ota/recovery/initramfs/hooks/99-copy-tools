@@ -78,6 +78,7 @@ done <<'EOF'
 /usr/bin /usr/bin/mount /bin/mount
 /usr/bin /usr/bin/umount /bin/umount
 /usr/bin /usr/bin/mountpoint /bin/mountpoint
+/usr/sbin /usr/sbin/mkfs.ext4 /usr/sbin/mke2fs /sbin/mkfs.ext4 /sbin/mke2fs
 /usr/sbin /usr/sbin/blkid /sbin/blkid
 /usr/bin /usr/bin/udevadm /bin/udevadm
 /usr/bin /usr/bin/sleep /bin/sleep
@@ -89,6 +90,12 @@ copy_ota_lib find-userdata.sh
 copy_recovery_initramfs_lib log.sh
 copy_recovery_initramfs_lib device.sh
 copy_recovery_initramfs_lib payload.sh
+
+# Without this mke2fs falls back to compiled-in defaults; ship the config.
+if [ -f /etc/mke2fs.conf ]; then
+    mkdir -p "${DESTDIR}/etc"
+    cp -p /etc/mke2fs.conf "${DESTDIR}/etc/mke2fs.conf"
+fi
 
 # readlink is used by find-userdata.sh to walk sysfs parent links.
 copy_exec /usr/bin/readlink /usr/bin 2>/dev/null || \

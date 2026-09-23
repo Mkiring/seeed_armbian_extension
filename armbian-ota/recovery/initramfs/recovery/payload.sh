@@ -8,8 +8,8 @@
 #
 # Expects globals from the orchestrator: ROOT_MNT, BOOT_MNT, STATE_DIR,
 # STATE_FILE, OTA_DIR, ROOTFS_TAR, BOOT_TAR, BOOT_ITB.
-# Reads globals from ota_detect_devices: ROOT_UUID, BOOT_DEV, BOOT_UUID,
-# HAS_BOOT_PART, AUTO_DECRYPT_MODE.
+# Reads globals from ota_detect_devices: ROOT_DEV, ROOT_UUID, BOOT_DEV,
+# BOOT_UUID, HAS_BOOT_PART, AUTO_DECRYPT_MODE.
 # Sets globals: HAS_BOOT_TAR, HAS_BOOT_ITB, DO_BOOT_OTA, BOOT_MNT (reassigned).
 
 # ===== tar extract helper with stderr logging =====
@@ -130,38 +130,105 @@ ota_validate_recovery_state() {
     return 0
 }
 
-# ===== clean rootfs (except boot) + extract rootfs.tar.gz =====
-# Returns 1 (caller unmounts+aborts) on clean/extract failure.
-ota_apply_rootfs() {
-    log "cleaning ${ROOT_MNT} (except boot)..."
-    start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
-    (
-        cd "${ROOT_MNT}" || exit 1
-        for f in * .[!.]* ..?*; do
-            case "$f" in
-                "."|".."|"boot")
-                    continue
-                    ;;
-            esac
-            rm -rf "$f"
-        done
-    ) || {
-        stop_heartbeat
-        log "ERROR: failed to clean ${ROOT_MNT}, abort OTA"
+# ===== rebuild rootfs via mkfs (fast path over rm -rf clean) =====
+# Needs a separate boot partition. Returns 0 rebuilt, 1 fallback, 2 fatal.
+ota_reformat_rootfs() {
+    if [ "${HAS_BOOT_PART:-0}" -ne 1 ]; then
+        log "mkfs path skipped: no separate boot partition, /boot stays on rootfs"
         return 1
-    }
+    fi
+
+    if ! command -v mkfs.ext4 >/dev/null 2>&1; then
+        log "mkfs path skipped: mkfs.ext4 not available in initramfs"
+        return 1
+    fi
+
+    if [ -z "${ROOT_DEV}" ] || [ ! -b "${ROOT_DEV}" ]; then
+        log "mkfs path skipped: ROOT_DEV is not a block device: ${ROOT_DEV:-<empty>}"
+        return 1
+    fi
+
+    if ! umount "${ROOT_MNT}"; then
+        log "mkfs path skipped: failed to umount ${ROOT_MNT}, falling back to clean"
+        return 1
+    fi
+
+    # Point of no return: the old fs is now only on-disk data.
+    mkfs_opts="-F -q -L armbi_root"
+    # Replay the fs UUID so rootdev= keeps resolving (auto-decrypt skips it:
+    # ROOT_UUID is the LUKS container UUID, not the fs one).
+    if [ "${AUTO_DECRYPT_MODE:-0}" -eq 0 ] && [ -n "${ROOT_UUID}" ]; then
+        mkfs_opts="${mkfs_opts} -U ${ROOT_UUID}"
+    fi
+
+    start_heartbeat "mkfs rootfs at ${ROOT_DEV}"
+    if ! mkfs.ext4 ${mkfs_opts} "${ROOT_DEV}" 2>>"${LOGFILE}"; then
+        stop_heartbeat
+        log "ERROR: mkfs.ext4 ${ROOT_DEV} failed, rootfs unrecoverable, abort OTA"
+        return 2
+    fi
     stop_heartbeat
 
+    if ! mount -t ext4 "${ROOT_DEV}" "${ROOT_MNT}"; then
+        log "ERROR: cannot remount ${ROOT_DEV} after mkfs, abort OTA"
+        return 2
+    fi
+
+    # Refresh the fs UUID from disk (-p bypasses the blkid cache).
+    if [ "${AUTO_DECRYPT_MODE:-0}" -eq 0 ]; then
+        fresh_uuid="$(blkid -p -s UUID -o value "${ROOT_DEV}" 2>/dev/null || true)"
+        if [ -n "${fresh_uuid}" ]; then
+            ROOT_UUID="${fresh_uuid}"
+        fi
+        log "rootfs rebuilt via mkfs: ${ROOT_DEV}, label=armbi_root, UUID=${ROOT_UUID:-<empty>}"
+    else
+        log "rootfs rebuilt via mkfs on ${ROOT_DEV} (LUKS container untouched)"
+    fi
+    return 0
+}
+
+# ===== rebuild-or-clean rootfs + extract rootfs.tar.gz =====
+# Returns 1 (caller unmounts+aborts) on reformat/clean/extract failure.
+ota_apply_rootfs() {
     # Capture the pre-OTA env before the rootfs tar overwrites /boot content.
     # Only layouts without a boot.tar.gz payload keep the live env in rootfs
     # /boot; when a boot partition payload applies later, its capture in
     # ota_apply_boot is authoritative and overwrites this copy.
+    # Must run before the mkfs rebuild: formatting drops the old /boot.
     if [ "${HAS_BOOT_TAR:-0}" -ne 1 ] && [ -f "${ROOT_MNT}/boot/armbianEnv.txt" ]; then
         if cp "${ROOT_MNT}/boot/armbianEnv.txt" "${LOGDIR}/armbianEnv.pre-ota"; then
             log "captured pre-OTA armbianEnv.txt from rootfs /boot"
         else
             log "WARN: failed to capture pre-OTA armbianEnv.txt from rootfs /boot"
         fi
+    fi
+
+    ota_reformat_rootfs
+    fmt_rc=$?
+    if [ "${fmt_rc}" -eq 2 ]; then
+        log "ERROR: rootfs reformat failed irrecoverably, abort OTA"
+        return 1
+    fi
+
+    if [ "${fmt_rc}" -ne 0 ]; then
+        log "cleaning ${ROOT_MNT} (except boot)..."
+        start_heartbeat "cleaning rootfs at ${ROOT_MNT}"
+        (
+            cd "${ROOT_MNT}" || exit 1
+            for f in * .[!.]* ..?*; do
+                case "$f" in
+                    "."|".."|"boot")
+                        continue
+                        ;;
+                esac
+                rm -rf "$f"
+            done
+        ) || {
+            stop_heartbeat
+            log "ERROR: failed to clean ${ROOT_MNT}, abort OTA"
+            return 1
+        }
+        stop_heartbeat
     fi
 
     log "extracting ${ROOTFS_TAR} -> ${ROOT_MNT} ..."

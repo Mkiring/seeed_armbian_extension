@@ -62,14 +62,52 @@ ab_write_target_state() {
     ) || error_exit "Failed to write target OTA state"
 }
 
+# Rebuild the target root fs via mkfs (fast path over empty_mount_dir).
+# Plain targets replay fs label+UUID so slot addressing and boot config stay
+# valid; crypto_LUKS targets mkfs the opened mapper only (LUKS header
+# untouched). Returns 0 rebuilt, 1 fallback, 2 fatal.
+ab_reformat_target_root() {
+    local mount_dev="$1"
+    local label="$2"
+    local root_type="$3"
+    local mkfs_opts="-F -q"
+    local old_uuid
+
+    if ! command -v mkfs.ext4 >/dev/null 2>&1; then
+        log_info "Target root mkfs path skipped: mkfs.ext4 not available, falling back to file cleanup"
+        return 1
+    fi
+
+    if [ -n "${label}" ]; then
+        mkfs_opts="${mkfs_opts} -L ${label}"
+    fi
+
+    if [ "${root_type}" != "crypto_LUKS" ]; then
+        old_uuid="$(ab_get_uuid_by_dev "${mount_dev}" 2>/dev/null || true)"
+        if [ -n "${old_uuid}" ]; then
+            mkfs_opts="${mkfs_opts} -U ${old_uuid}"
+        fi
+    fi
+
+    log_info "Rebuilding target root filesystem via mkfs.ext4 on ${mount_dev}"
+    if ! mkfs.ext4 ${mkfs_opts} "${mount_dev}"; then
+        log_error "mkfs.ext4 ${mount_dev} failed, target slot unusable"
+        return 2
+    fi
+    return 0
+}
+
 ab_apply_target_rootfs() {
     local temp_work="$1"
     local root_mnt="$2"
     local package_path="$3"
     local current_slot="$4"
     local target_slot="$5"
+    local rootfs_prebuilt="${6:-0}"
 
-    empty_mount_dir "${root_mnt}" || return 1
+    if [ "${rootfs_prebuilt}" -ne 1 ]; then
+        empty_mount_dir "${root_mnt}" || return 1
+    fi
     ab_extract_tar_gz_payload "${temp_work}/${OTA_PAYLOAD_ROOTFS_TAR}" "${root_mnt}" "rootfs" || return 1
     ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
 }
@@ -394,6 +432,7 @@ ab_update_target_partition() {
     local target_root_uuid target_boot_uuid
     local target_root_type target_root_mount_dev target_root_luks_uuid
     local security_dev key_file luks_mapper luks_opened
+    local rootfs_prebuilt fmt_rc
 
     target_slot="$(ab_get_slot_by_label "${target_root_label}")" ||
         error_exit "Invalid target root partition label: ${target_root_label}"
@@ -439,12 +478,21 @@ ab_update_target_partition() {
     fi
 
     root_mnt="$(make_ota_work_dir "ab-root-mnt")"
+    rootfs_prebuilt=0
+    ab_reformat_target_root "${target_root_mount_dev}" "${target_root_label}" "${target_root_type}"
+    fmt_rc=$?
+    if [ "${fmt_rc}" -eq 2 ]; then
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+        error_exit "Failed to rebuild target root filesystem"
+    fi
+    [ "${fmt_rc}" -eq 0 ] && rootfs_prebuilt=1
+
     mount -t ext4 -o rw "${target_root_mount_dev}" "${root_mnt}" || {
         ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
         error_exit "Failed to mount target root partition"
     }
 
-    ab_apply_target_rootfs "${temp_work}" "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}" || {
+    ab_apply_target_rootfs "${temp_work}" "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}" "${rootfs_prebuilt}" || {
         ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
         error_exit "Failed to apply rootfs payload"
     }
