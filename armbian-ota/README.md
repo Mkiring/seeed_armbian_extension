@@ -11,6 +11,73 @@ Note: When `OTA_ENABLE=yes`, OTA runtime is installed into the firmware by mode:
 - `AB_PART_OTA=yes`: install AB OTA runtime/tools.
 - without `AB_PART_OTA`: install Recovery OTA runtime/tools.
 
+## How OTA Works
+
+One principle, two strategies.
+
+**Principle — updates never touch user data.** The firmware rootfs is
+mounted read-only under overlayroot; every runtime write (installed
+packages, `/home`, `/var/lib`) lands on the writable `userdata`
+partition, which no update path rewrites. An update replaces only the
+read-only base, so `userdata` carries your data across every update in
+both modes (details: `docs/03-ota-recovery.md` §2).
+
+| | Recovery | A/B |
+|---|---|---|
+| Systems on disk | one | two complete slots |
+| Update written to | userdata staging area | the inactive slot, while the device keeps running |
+| Applied by | initramfs hook, at next boot | runtime backend, before reboot |
+| Failure handling | retried on every boot until it succeeds (no counter) | health check + automatic rollback, two layers |
+| Cost | minimal disk | ~2× boot/rootfs space |
+
+### Recovery lifecycle
+
+State lives in `userdata/ota-recovery/state/ota-state.env` — written by
+`armbian-ota start`, validated and advanced by the initramfs hook:
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> prepared: armbian-ota start (verify + stage)
+    prepared --> success: reboot, initramfs applies rootfs + boot
+    prepared --> prepared: apply failed, retried next boot
+    success --> idle
+```
+
+There is **no rollback** in Recovery mode: the old rootfs is overwritten
+by the (verified) new one, and a failed apply is retried forever, not
+reverted — bounded retries and rollback are A/B-only.
+
+### A/B lifecycle and the two rollback layers
+
+The U-Boot environment — not Linux — is the source of truth
+(`boot_slot`, `boot_success`, `ota_in_progress`, `slot_retry_left`):
+
+```mermaid
+flowchart TD
+    A["armbian-ota start"] --> B["verify package"]
+    B --> C["write inactive slot: root + boot, patch slot UUIDs"]
+    C --> D["boot_slot=new · ota_in_progress=1 · retry=3, reboot"]
+    D --> E{"ab_preboot: retry budget left?"}
+    E -- no --> U["U-Boot rollback to boot_success (layer 2)"]
+    E -- yes --> F["boot the new slot"]
+    F --> G{"systemd firstboot health check (layer 1)"}
+    G -- pass --> H["boot_success=new · ota_in_progress=0"]
+    G -- fail --> I["rollback.service, previous slot, reboot"]
+```
+
+Layer 1 (systemd health check) catches a slot that boots but is
+unhealthy; layer 2 (U-Boot retry counter) catches a slot that never
+reaches systemd. Together they make a bad update unable to brick an
+A/B device.
+
+### Where the state lives
+
+| Mode | State | Written by |
+|---|---|---|
+| Recovery | `userdata/ota-recovery/state/ota-state.env` (`STATUS=idle/prepared/success`) + staged payload | runtime `start`, initramfs apply |
+| A/B | per-slot `/var/lib/armbian-ota/ota-state.env` + persistent U-Boot env at raw offset `0x3f8000` | runtime `start`, firstboot units, `ab_preboot` |
+
 ## Directory Structure
 
 ```text
@@ -122,7 +189,7 @@ Logs land in `/run/initramfs/ota.log` (carried into the running system via `/run
 
 ```bash
 # On target system
-armbian-ota start Armbian_xxx_RECOVERY.tar.gz
+armbian-ota start Armbian_xxx_OTA.tar.gz
 reboot
 ```
 
@@ -210,10 +277,10 @@ AB_PART_OTA=yes              # A/B only; leave unset for Recovery
 OTA_BOOT_SIZE=512            # Boot partition(s) in MiB (default 512, per slot for A/B)
 OTA_SECURITY_SIZE=4          # Security partition in MiB (encrypted images, default 4)
 # OTA_ROOTFS_SIZE=4096       # Optional rootfs partition size override (per slot for A/B)
-OTA_USERDATA_SIZE=1024       # Userdata partition in MiB (default 1024)
+OTA_USERDATA_SIZE=512        # Userdata partition in MiB (default 512, grows to full disk on first boot)
 ```
 
-When unset, `OTA_ROOTFS_SIZE` is calculated from the built rootfs size plus `EXTRA_ROOTFS_MIB_SIZE`, then adds 30% headroom.
+When unset, `OTA_ROOTFS_SIZE` is calculated from the built rootfs size plus `EXTRA_ROOTFS_MIB_SIZE`, then adds 20% headroom.
 
 Both OTA modes require a GPT partition table. Their boot, rootfs, userdata, and security partitions are located by GPT partition labels. Both OTA layouts boot through U-Boot and do not include BIOS or UEFI partitions.
 
@@ -223,13 +290,14 @@ At build time `uboot-default-env.sh` extracts U-Boot's compiled default environm
 
 ## OTA Package Contents
 
-The OTA package (`*_OTA.tar.gz`, suffix `_AB_PART` or `_RECOVERY` in the name) contains:
+The OTA package (`*_OTA.tar.gz`; A/B adds an `_AB_PART` marker, Recovery uses stock image names — the mode lives in `package.env`) contains:
 
 - `rootfs.tar.gz` + `rootfs.sha256` — root filesystem payload (required)
 - `boot.tar.gz` + `boot.sha256` — boot partition payload (plain/auto-decrypt with separate boot partition)
 - `boot.itb` — signed FIT boot image (secure boot), written directly to the raw boot partition; mutually exclusive with `boot.tar.gz`
 - `package.env` — `OTA_MODE` (ab|recovery), `OTA_ENCRYPTED`, `BOARD`, `RELEASE`, `BRANCH`, `VERSION`, `KERNEL`
 - `version.txt` — original image name, version, vendor, board, release, branch, kernel, build commit, extension commit
+- `<image>_OTA.checksums` — written next to the package (not inside): MD5 + SHA256 of the tarball
 - Encrypted builds additionally: `rootfs.tar.gz.enc` (AES-256-CBC; key = HKDF-SHA256 of the LUKS passphrase, info `armbian-ota-payload-v1`), `payload.manifest` (cipher, IV, plaintext sha256), `payload.manifest.sig` (RSA-PSS/SHA256 signature under the secure-boot FIT key; the public key is installed at `/usr/share/armbian-ota/keys/ota-payload.pub.pem` at build time)
 
 The package does not include an offline `ota_tools/` bundle; the required OTA runtime is installed into the firmware at image build time.

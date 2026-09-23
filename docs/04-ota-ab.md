@@ -49,6 +49,9 @@ encrypted:   [ boot_a ][ boot_b ][ security 4M ][ rootfs_a LUKS+ext4 ][ rootfs_b
 Notes:
 
 - Boot is **two partitions** (not shared); `security` and `userdata` are shared.
+- Runtime writes land on the shared `userdata` overlay
+  ([`overlayroot.sh`](../armbian-ota/common/build-hooks/overlayroot.sh)) —
+  slot switches and updates never touch it.
 - Each slot's boot partition defaults to
   [`OTA_BOOT_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L31)
   (512 MiB) — an A/B image needs roughly twice the plain Recovery space.
@@ -69,8 +72,9 @@ reboot
 The backend ([`ab/backend.sh`](../armbian-ota/ab/rootfs/usr/share/armbian-ota/ab/backend.sh))
 then, still on the **old** system:
 
-1. Verifies the package (checksums; on encrypted images: signature, AES
-   decryption, digest re-check; `OTA_MODE=ab` and encryption state must match).
+1. Verifies the package (checksums; on encrypted images: signature when
+   present — secure-boot builds only — AES decryption, digest re-check;
+   `OTA_MODE=ab` and encryption state must match).
 2. Writes the full payload to the **inactive** slot — rootfs is extracted
    into the inactive root partition (LUKS opened with the same passphrase,
    header untouched), `boot.tar.gz` onto the inactive boot partition or the
@@ -87,18 +91,20 @@ slot is marked good. `armbian-ota status` shows slot + OTA state at any time.
 
 **Layer 1 — systemd** (needs a booting userspace):
 [`armbian-ota-firstboot.service`](../armbian-ota/ab/rootfs/etc/systemd/system/armbian-ota-firstboot.service)
-runs on the first boot of a pending slot and executes
-[`armbian-ota-health-check`](../armbian-ota/ab/rootfs/usr/lib/armbian/armbian-ota-health-check):
-correct slot active, kernel version readable, virtual filesystems mounted,
-root writable. Pass → `mark-success` (`boot_success=<slot>`,
-`ota_in_progress=0`). Fail → the unit's `OnFailure=` pulls in
-`armbian-ota-rollback.service`, which restores the previous slot and reboots.
+runs
+[`armbian-ota-health-check`](../armbian-ota/ab/rootfs/usr/lib/armbian/armbian-ota-health-check)
+on the first boot of a pending slot — correct slot active, kernel
+version readable, virtual filesystems mounted, root writable. Pass →
+`mark-success` (`boot_success=<slot>`, `ota_in_progress=0`); fail → the
+unit's `OnFailure=` restores the previous slot and reboots.
 
-**Layer 2 — U-Boot** (works even when userspace never starts): the
-`ab_preboot` script decrements `slot_retry_left` on every boot of a pending
+**Layer 2 — U-Boot** (works even when userspace never starts):
+`ab_preboot` decrements `slot_retry_left` on every boot of a pending
 slot; when the budget (default 3, set by `slot_retry_max`) is exhausted,
-U-Boot itself resets `boot_slot` to `boot_success`. A slot that cannot even
-reach systemd is rolled back after three attempts.
+U-Boot itself resets `boot_slot` to `boot_success`.
+
+Full lifecycle diagram:
+[`armbian-ota/README.md`](../armbian-ota/README.md#how-ota-works).
 
 ## 5. Slot maintenance
 
