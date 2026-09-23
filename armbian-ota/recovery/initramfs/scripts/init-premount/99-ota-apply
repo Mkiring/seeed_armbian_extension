@@ -145,7 +145,7 @@ ota_validate_recovery_state || {
 ota_log_init
 log "OTA confirmed, applying..."
 
-# 3) apply rootfs (clean + extract + first-login markers)
+# 3) apply rootfs (mkfs rebuild or rm -rf clean, then extract + first-login markers)
 ota_apply_rootfs || {
     umount "${ROOT_MNT}" 2>/dev/null || true
     unmount_recovery_transaction_store
