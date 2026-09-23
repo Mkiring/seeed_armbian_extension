@@ -145,18 +145,7 @@ ota_validate_recovery_state || {
 ota_log_init
 log "OTA confirmed, applying..."
 
-# Magic-close the hardware watchdog: the pre-OTA reboot arms it with
-# RebootWatchdogSec, nothing pings it in initramfs, and the multi-GB
-# extract below far exceeds that budget. systemd re-arms after switch_root.
-for wdt_dev in /dev/watchdog /dev/watchdog0; do
-    [ -c "${wdt_dev}" ] || continue
-    if echo V > "${wdt_dev}" 2>/dev/null; then
-        log "hardware watchdog ${wdt_dev} disarmed for OTA apply"
-        break
-    fi
-done
-
-# 3) apply rootfs (clean + extract + first-login markers)
+# 3) apply rootfs (mkfs rebuild or rm -rf clean, then extract + first-login markers)
 ota_apply_rootfs || {
     umount "${ROOT_MNT}" 2>/dev/null || true
     unmount_recovery_transaction_store
