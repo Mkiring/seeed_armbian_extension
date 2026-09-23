@@ -54,7 +54,7 @@ Parsed in [`build.sh:231-302`](../scripts/build.sh#L231).
 | `-r, --clear-rootfs-cache` | Clear rootfs cache before building |
 | `-n, --dry-run` | Print the `compile.sh` invocation, build nothing |
 | `--kernel` | Rebuild kernel only (ignores profiles) |
-| `--uboot` | Rebuild U-Boot only (forces `RK_COMPILE_USBPLUG=no`, ignores OTA profiles) |
+| `--uboot` | Rebuild U-Boot only (ignores OTA profiles; security profiles still apply — `--uboot secure-boot` emits the signed U-Boot deb) |
 | `--minimal` | CLI image, no desktop |
 | `--no-usbplug` | Skip the RK Maskrom usbplug loader build |
 | `-h, --help` | Usage |
@@ -78,12 +78,13 @@ boot and two rootfs partitions).
 |---|---|---|
 | [`OTA_BOOT_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L31) | 512 | Boot partition(s), MiB |
 | [`OTA_SECURITY_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L32) | 4 | Security partition (encrypted images), MiB |
-| [`OTA_ROOTFS_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L33) | computed | Rootfs partition, MiB — `(built rootfs + EXTRA_ROOTFS_MIB_SIZE) + 30%` headroom |
-| [`OTA_USERDATA_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L34) | 1024 | Userdata partition, MiB |
+| [`OTA_ROOTFS_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L34) | computed | Rootfs partition, MiB — `(built rootfs + EXTRA_ROOTFS_MIB_SIZE) + 20%` headroom |
+| [`OTA_USERDATA_SIZE`](../armbian-ota/common/build-hooks/partitions.sh#L36) | 512 | Userdata partition, MiB — build-time floor, expanded to the full disk on first boot |
 | `EXTRA_ROOTFS_MIB_SIZE` | 0 | Extra rootfs MiB added before headroom |
 
-Secure boot pins the raw boot partition to the same default:
-[`rk-secure-boot.sh:103`](../rk_secure-disk-encryption/rk-secure-boot.sh#L103).
+Boot size precedence is `OTA_BOOT_SIZE` > `BOOTSIZE` > 512 on every
+layout; secure boot applies the same rule to its raw boot partition
+([`rk-secure-boot.sh:104`](../rk_secure-disk-encryption/rk-secure-boot.sh#L104)).
 
 ### Encryption / secure boot
 

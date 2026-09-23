@@ -85,16 +85,26 @@ local build environment.
 **Trigger**: Actions → *Seeed Build* → *Run workflow*. Select via checkboxes:
 
 - boards (rk3576 / rk3588 / rk3576 module devkits), releases (trixie / resolute), tier (cli / mid)
-- OTA mode (recovery / ab), security (plain / **secure-boot** — requires the
-  `DEV_CRT` + `PRIVATE_KEY_PEM` repository secrets for signing)
+- OTA mode (recovery / ab), security (plain / **secure-boot**)
 - desktop environment, full/minimal mode, extension ref (default `main`)
+
+Repository secrets — a preflight job validates everything your selection
+needs **before** the multi-hour build starts:
+
+| Secret | Purpose | Required when |
+|---|---|---|
+| `PRIVATE_KEY_PEM` | FIT signing private key; staged into `cache/sources/fit-keys` and fed to the build via `UBOOT_FIT_KEYS_BACKUP_DIR` ([06 §3](06-secure-boot.md#3-signing-keys-keep-them-or-regenerate-them)) | `secure-boot` |
+| `DEV_CRT` | matching signing certificate (`dev.crt`); preflight checks it matches the private key | `secure-boot` |
+| `CRYPTROOT_PASSPHRASE` | LUKS rootfs passphrase, exactly 64 chars ([05](05-encryption.md)) | `secure-boot` |
+| `ARMBIAN_BUILD_RELEASE_TOKEN` | GitHub token for publishing the Release | `publish_release` |
+| `RCLONE_CONFIG` | rclone remote config for the OneDrive upload | `upload_onedrive` |
 
 Optional: `publish_release` creates a GitHub Release with download tables;
 the release page prose lives in [`.github/release-body.md`](../.github/release-body.md)
 — CI fills in the per-board tables and OneDrive links.
-OneDrive upload is available via the `upload_onedrive` input and
-`RCLONE_CONFIG` secret. Artifacts are attached to the workflow run
-(`actions/upload-artifact`) — download from the run page, flash as usual.
+OneDrive upload is available via the `upload_onedrive` input. Artifacts are
+attached to the workflow run (`actions/upload-artifact`) — download from the
+run page, flash as usual.
 
 Everything CI does is the documented local flow — the wrapper staging step,
 profiles, and secrets map 1:1 to [02-build-reference.md](02-build-reference.md).
