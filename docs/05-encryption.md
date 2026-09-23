@@ -33,6 +33,12 @@ CRYPTROOT_PASSPHRASE='<exactly-64-characters>' \
 ./build.sh ab secure-rootfs -b recomputer-rk3576-devkit
 ```
 
+Generate and store one before your first encrypted build:
+
+```bash
+openssl rand -base64 48    # 48 random bytes -> exactly 64 characters
+```
+
 **Why exactly 64 characters:** the build only checks the passphrase is
 non-empty ([`build.sh:153`](../scripts/build.sh#L153)); the initramfs later
 raw-reads **64 bytes** from the security partition
@@ -65,6 +71,29 @@ CRYPTROOT_PASSPHRASE ──┬── LUKS headers (rootfs, userdata, both A/B sl
 - On every later boot the passphrase is read back from OP-TEE; a tmpfs copy
   at `/run/armbian-luks-passphrase` (mode 600, gone on power loss) feeds
   runtime OTA key derivation.
+
+### How the OTA payload is encrypted
+
+The AES key never ships in the package — both sides derive it
+independently from the passphrase
+([`package-create.sh`](../armbian-ota/common/build-hooks/package-create.sh) /
+[`common.sh`](../armbian-ota/common/rootfs/usr/share/armbian-ota/common.sh)):
+
+| | Build host | Device |
+|---|---|---|
+| Key | HKDF-SHA256(passphrase, info `armbian-ota-payload-v1`) → 32-byte AES-256 key | same derivation → same key |
+| Payload | `rootfs.tar.gz` → AES-256-CBC → `rootfs.tar.gz.enc` (random IV, plaintext deleted) | verify `payload.manifest` signature (when present) → decrypt → re-check SHA256 |
+
+Encryption keeps the payload confidential in transit; the RSA-PSS manifest
+signature (secure-boot builds only — it reuses the FIT signing key,
+[06-secure-boot.md](06-secure-boot.md)) proves it was not tampered with.
+
+**TrustZone in one paragraph:** OP-TEE is a tiny secure OS running in the
+SoC's isolated TrustZone world (BL32, booted alongside ATF). The keybox
+lives inside it, reachable only through `keybox_app` over `/dev/tee0`
+([`install-optee`](../rk_secure-disk-encryption/initramfs/install-optee)).
+NVMe boards have no RPMB to back it, which is why the initramfs hands the
+passphrase to userspace via `/run` instead of re-reading it there.
 
 ## 4. What happens at boot
 
