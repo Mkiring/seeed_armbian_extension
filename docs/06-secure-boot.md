@@ -15,11 +15,13 @@ attacker can physically touch.
 
 ## 1. What gets signed
 
-```text
-ROM → loader (idbloader, signed by rk_sign_tool cc/lk/sb/vb)
-    → SPL ── verifies ──> U-Boot FIT u-boot.itb (ATF BL31 + OP-TEE BL32, RSA)
-    → U-Boot ── verifies ──> kernel FIT boot.itb (kernel + dtb + initrd, RSA-PSS)
-    → kernel unlocks LUKS root (see 05-encryption.md)
+```mermaid
+flowchart TD
+    ROM["Boot ROM"] --> L["idbloader (TPL + SPL)<br/>signed via rk_sign_tool cc/lk/sb/vb"]
+    L --> SPL["SPL"]
+    SPL -- "verifies · RSA, pubkey baked into the SPL dtb" --> UB["U-Boot FIT u-boot.itb<br/>ATF BL31 + OP-TEE BL32"]
+    UB -- "verifies · RSA-PSS" --> K["kernel FIT boot.itb<br/>kernel + dtb + initrd"]
+    K --> LU["kernel unlocks LUKS root<br/>(05-encryption.md)"]
 ```
 
 - The public key is embedded into the SPL device tree at build time — the

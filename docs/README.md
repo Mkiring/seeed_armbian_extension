@@ -24,6 +24,7 @@ Read in order for a full walkthrough, or jump to what you need.
 - **"I need updates that cannot brick the device"** → [A/B OTA](04-ota-ab.md) (dual slot, automatic rollback).
 - **"The data on the device must be unreadable if it is stolen"** → [Encryption](05-encryption.md).
 - **"The bootchain must resist tampering"** → [Secure Boot](06-secure-boot.md).
+- **"What is my image already protected against?"** → [Hardening](08-hardening.md).
 - **"I want to change device-tree overlays on a signed image without rebuilding"** → [Tools & CI](07-tools-and-ci.md) (`repack-fit.sh`).
 
 ## Conventions
