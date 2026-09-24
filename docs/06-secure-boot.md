@@ -84,20 +84,36 @@ All self-signed — there is no CA/PKI chain anywhere. The OTA public key is
 installed into the image at `/usr/share/armbian-ota/keys/ota-payload.pub.pem`
 ([`ota-payload-security.sh`](../armbian-ota/common/build-hooks/ota-payload-security.sh)).
 
-For reproducible signing across builds, point the build at a persistent key
-directory:
+For reproducible signing, keep the key pair in the build tree. The path is
+resolved **inside the Docker container**, where the build tree is mounted
+at `/armbian` — a host directory `<build-tree>/userpatches/uboot-fit-keys`
+is `/armbian/userpatches/uboot-fit-keys` to the build:
 
 ```bash
-export UBOOT_FIT_KEYS_BACKUP_DIR=/secure/place/fit-keys   # passed through, never copied by the build
+cd <your-build-tree>
+mkdir -p userpatches/uboot-fit-keys
+cp /path/to/{dev.crt,private_key.pem} userpatches/uboot-fit-keys/
+chmod 600 userpatches/uboot-fit-keys/*
+
+export UBOOT_FIT_KEYS_BACKUP_DIR=/armbian/userpatches/uboot-fit-keys
 ```
 
-Rules ([`secure-boot-uboot.sh`](../rk_secure-disk-encryption/build-hooks/secure-boot-uboot.sh)):
+Rules ([`secure-boot-uboot.sh:444-480`](../rk_secure-disk-encryption/build-hooks/secure-boot-uboot.sh#L444)):
 
-- The directory must already contain `private_key.pem` (created once via
-  `rk_sign_tool kk`); the build restores keys from it and saves newly
-  generated keys back.
+- The directory **must** contain `private_key.pem`; `dev.crt` and
+  `public_key.pem` are optional — both are regenerated from the private
+  key when absent. Take the pair from an earlier build or from your CI
+  secrets ([07](07-tools-and-ci.md#3-ci-builds-seeed-build-workflow)).
 - Only the **path** crosses into the build container — the key material
-  itself stays on the host.
+  itself stays on the host. The build restores keys from the directory;
+  it never writes back to it.
+- Without this directory every build generates fresh keys: two builds of
+  the same profile cannot update each other, and each new image forces a
+  U-Boot re-flash on the device before any OTA payload verifies.
+- Boards that boot U-Boot from SPI flash keep the verifying SPL — with
+  the embedded public key — on the SPI. After a key change (or any
+  signed-U-Boot change), re-flash the SPI loader (`rkspi_loader.img`,
+  [§2](#2-build-a-secure-boot-image)) to match.
 - Lose the keys → future updates cannot be signed for already-flashed
   devices. Back the directory up like the
   [passphrase](05-encryption.md#2-build-an-encrypted-image).

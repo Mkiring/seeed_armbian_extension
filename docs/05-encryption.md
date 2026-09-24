@@ -37,6 +37,7 @@ Generate and store one before your first encrypted build:
 
 ```bash
 openssl rand -base64 48    # 48 random bytes -> exactly 64 characters
+openssl rand -hex 32       # equivalent: 32 bytes as 64 hex characters
 ```
 
 **Why exactly 64 characters:** the build only checks the passphrase is
