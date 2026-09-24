@@ -74,7 +74,7 @@ needs **before** the multi-hour build starts:
 |---|---|---|
 | `PRIVATE_KEY_PEM` | FIT signing private key; staged into `cache/sources/fit-keys` and fed to the build via `UBOOT_FIT_KEYS_BACKUP_DIR` ([06 §3](06-secure-boot.md#3-signing-keys-keep-them-or-regenerate-them)) | `secure-boot` |
 | `DEV_CRT` | matching signing certificate (`dev.crt`); preflight checks it matches the private key | `secure-boot` |
-| `CRYPTROOT_PASSPHRASE` | LUKS rootfs passphrase, exactly 64 chars ([05](05-encryption.md)) | `secure-boot` |
+| `CRYPTROOT_PASSPHRASE` | LUKS rootfs passphrase, exactly 64 *hex* characters ([05](05-encryption.md)); preflight checks length only | `secure-boot` |
 | `ARMBIAN_BUILD_RELEASE_TOKEN` | GitHub token for publishing the Release | `publish_release` |
 | `RCLONE_CONFIG` | rclone remote config for the OneDrive upload | `upload_onedrive` |
 

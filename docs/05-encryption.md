@@ -37,19 +37,16 @@ Generate and store one before your first encrypted build — either fully
 random, or derived from a password you can remember:
 
 ```bash
-openssl rand -base64 48    # random: 48 bytes -> exactly 64 characters
-openssl rand -hex 32       # random: equivalent, 32 bytes as 64 hex characters
+openssl rand -hex 32   # random: exactly 64 hex characters
 
-# or turn your own password into a qualified 64-char key (deterministic):
-echo -n 'a-long-unique-passphrase' | openssl dgst -sha384 -binary | openssl base64 -A
+# or turn your own password into a qualified key (deterministic):
 echo -n 'a-long-unique-passphrase' | openssl dgst -sha256 -r | cut -d' ' -f1
 ```
 
 About password-derived keys:
 
-- Both piped forms always emit exactly 64 characters regardless of the
-  password length (SHA-384 → 48 bytes → 64 base64 chars; SHA-256 → 64 hex
-  chars). Keep the `-n` — a trailing newline changes the key.
+- The digest is always exactly 64 lowercase hex characters, whatever the
+  password length. Keep the `-n` — a trailing newline changes the key.
 - The same password always yields the same key, so every build (and every
   machine deriving it) stays consistent across the fleet.
 - The key is only as strong as the password — use a long, unique phrase;
@@ -57,13 +54,24 @@ About password-derived keys:
 - The example leaves the password in your shell history — clear it or
   type it into an interactive `read` instead.
 
-**Why exactly 64 characters:** the build only checks the passphrase is
-non-empty ([`build.sh:153`](../scripts/build.sh#L153)); the initramfs later
-raw-reads **64 bytes** from the security partition
-([`decryption-disk.sh`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh)).
-A longer passphrase is silently truncated at unlock — the device would run
-fine, but you no longer know the effective secret. 64 chars, stored safely
-(password manager), once per product line is the sane default.
+**Why exactly 64 *hexadecimal* characters** (not merely 64 characters):
+
+- The initramfs raw-reads **64 bytes** from the security partition
+  ([`decryption-disk.sh`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh));
+  a longer passphrase is silently truncated at unlock.
+- The OP-TEE keybox stores the passphrase as **32 bytes decoded from
+  those 64 hex characters** and re-encodes it on every read-back
+  (Rockchip `keybox_app`, `KEY_SIZE 32`). A 64-character string with
+  non-hex characters — a base64 key containing `+` or `/`, for example —
+  is silently decoded to garbage: after the first-boot migration the
+  keybox returns a different key and the next unlock fails. Hex keys
+  round-trip; base64 keys corrupt most of the stored bytes.
+- Neither the build ([`build.sh:153`](../scripts/build.sh#L153) — non-empty
+  only) nor the CI preflight (length only) validates the charset; this
+  constraint is enforced only by this document.
+
+64 hex chars, stored safely (password manager), once per product line is
+the sane default.
 
 > [!IMPORTANT]
 > Losing the passphrase loses the data — by design. It is also the OTA

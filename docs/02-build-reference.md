@@ -91,7 +91,7 @@ layout; secure boot applies the same rule to its raw boot partition
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CRYPTROOT_PASSPHRASE` | required | The single secret. **Use 64 characters** — see [05-encryption.md](05-encryption.md). Validated non-empty at [`build.sh:153`](../scripts/build.sh#L153) |
+| `CRYPTROOT_PASSPHRASE` | required | The single secret. **Use exactly 64 hexadecimal characters** — see [05-encryption.md](05-encryption.md). Validated non-empty at [`build.sh:153`](../scripts/build.sh#L153) |
 | `RK_OPTEE_BOOT_ENABLE` | unset | secure-rootfs tier (unsigned bootchain) |
 | `RK_SECURE_UBOOT_ENABLE` | unset | secure-boot tier (signed chain + usbplug) |
 | `RK_COMPILE_USBPLUG` | yes | Build the Maskrom usbplug loader |
