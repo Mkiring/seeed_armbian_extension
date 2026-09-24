@@ -12,6 +12,7 @@ Read in order for a full walkthrough, or jump to what you need.
 | 5 | [Encryption](05-encryption.md) | LUKS rootfs with automatic unlock |
 | 6 | [Secure Boot](06-secure-boot.md) | Signed bootchain and signing keys |
 | 7 | [Tools & CI](07-tools-and-ci.md) | Offline FIT re-signing, deb release, CI builds |
+| 8 | [Hardening](08-hardening.md) | Always-on brute-force defense and ssh-protect |
 
 ## Pick your path
 

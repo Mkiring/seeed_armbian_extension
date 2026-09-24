@@ -1,13 +1,12 @@
 # 7. Tools and CI
 
 The utility belt around the firmware: offline FIT re-signing, the deb
-release chain, CI builds — plus the always-on `ssh-protect` robustness
-feature.
+release chain, CI builds. The always-on hardening features live in
+[08-hardening.md](08-hardening.md).
 
 1. [repack-fit.sh — offline FIT re-signing](#1-repack-fitsh--offline-fit-re-signing)
-2. [ssh-protect — SSH power-loss recovery](#2-ssh-protect--ssh-power-loss-recovery)
-3. [Deb packaging and release chain](#3-deb-packaging-and-release-chain)
-4. [CI builds (Seeed Build workflow)](#4-ci-builds-seeed-build-workflow)
+2. [Deb packaging and release chain](#2-deb-packaging-and-release-chain)
+3. [CI builds (Seeed Build workflow)](#3-ci-builds-seeed-build-workflow)
 
 ## 1. repack-fit.sh — offline FIT re-signing
 
@@ -40,29 +39,9 @@ place; it prefers the Rockchip prebuilt `mkimage` for signing (the
 warns before falling back to a tree mkimage; the result is verified with
 `fit_check_sign` when available.
 
-## 2. ssh-protect — SSH power-loss recovery
+## 2. Deb packaging and release chain
 
-Included in **every** image (enabled unconditionally in
-[`seeed_armbian_extension.sh`](../seeed_armbian_extension.sh)). Power loss
-during first boot can zero-fill or truncate `/etc/ssh` files (ext4 delayed
-allocation); sshd then refuses to start and the board is unreachable.
-
-The fix ([`ssh-protect/rootfs`](../ssh-protect/ssh-protect.sh)): a systemd
-drop-in runs
-[`/usr/lib/armbian/ssh-protect`](../ssh-protect/rootfs/usr/lib/armbian/ssh-protect)
-as `ExecStartPre` of `ssh.service`. It repairs, before sshd starts:
-
-- broken host keys — missing/empty/unparseable keys are removed and
-  regenerated (`ssh-keygen -A`);
-- a broken `sshd_config` — restored from the distro default with the Armbian
-  essentials re-applied, written atomically (temp file + rename + sync) so a
-  power loss during the repair itself cannot corrupt it again.
-
-Healthy systems: complete no-op. Nothing to configure.
-
-## 3. Deb packaging and release chain
-
-Three scripts, normally driven by CI ([below](#4-ci-builds-seeed-build-workflow)):
+Three scripts, normally driven by CI ([below](#3-ci-builds-seeed-build-workflow)):
 
 | Script | Purpose |
 |---|---|
@@ -76,7 +55,7 @@ Local use example:
 ./scripts/build-all-debs.sh out/debs
 ```
 
-## 4. CI builds (Seeed Build workflow)
+## 3. CI builds (Seeed Build workflow)
 
 [`.github/workflows/seeed-build.yml`](../.github/workflows/seeed-build.yml)
 builds firmware on GitHub Actions — useful when you want images without a

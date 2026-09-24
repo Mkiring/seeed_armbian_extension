@@ -87,6 +87,7 @@ OTA flags combine freely with the encryption tiers (plain / secure-rootfs / secu
 | [docs/05-encryption.md](docs/05-encryption.md) | LUKS + automatic unlock: how the secret flows, what to guard |
 | [docs/06-secure-boot.md](docs/06-secure-boot.md) | Signed bootchain, signing keys, the mkimage/PSS salt pitfall |
 | [docs/07-tools-and-ci.md](docs/07-tools-and-ci.md) | Offline FIT re-signing, deb release chain, CI builds |
+| [docs/08-hardening.md](docs/08-hardening.md) | Always-on image hardening: brute-force defense layers, ssh-protect |
 | [`armbian-ota/README.md`](armbian-ota/README.md) | OTA internals reference (developer-oriented) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Notable changes |
 
