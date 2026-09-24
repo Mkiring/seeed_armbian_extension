@@ -53,6 +53,7 @@ Local use example:
 
 ```bash
 ./scripts/build-all-debs.sh out/debs
+ARMBIAN_APT_GPG_KEY_ID=<gpg-key-id> ./scripts/publish-aptly.sh out/debs
 ```
 
 ## 3. CI builds (Seeed Build workflow)

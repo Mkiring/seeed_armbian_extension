@@ -169,6 +169,16 @@ in order:
 If anything in this chain fails the boot stops in initramfs — an encrypted
 device never falls back to booting from some other disk.
 
+**Verify on the running device:**
+
+```bash
+lsblk -o NAME,TYPE,FSTYPE                        # rootfs/userdata show crypto_LUKS
+sudo cryptsetup isLuks "$(findfs PARTLABEL=rootfs)" && echo LUKS-OK
+sudo dd if="$(findfs PARTLABEL=security)" bs=1 count=4 status=none; echo
+#   → "SSKR" once the first-boot keybox migration has run
+ls -l /run/armbian-luks-passphrase               # mode 600, tmpfs — gone on power loss
+```
+
 ## 5. Rules and pitfalls
 
 - **One passphrase per fleet.** OTA packages are encrypted with a key derived
@@ -183,5 +193,18 @@ device never falls back to booting from some other disk.
 - What this protects: data at rest on a removed disk, tampered update
   payloads (on secure-boot). What it does not: an attacker with the running
   system or the passphrase.
+
+**Unlock a disk on another host** (data recovery, inspection) — the same
+passphrase opens the partitions anywhere (A/B disks: use `rootfs_a` /
+`rootfs_b` for the slot you need):
+
+```bash
+sudo cryptsetup luksOpen "$(findfs PARTLABEL=rootfs)" rescue-root
+sudo cryptsetup luksOpen "$(findfs PARTLABEL=userdata)" rescue-userdata
+sudo mount /dev/mapper/rescue-root /mnt
+# ... when done:
+sudo umount /mnt
+sudo cryptsetup luksClose rescue-root rescue-userdata
+```
 
 Next: a signed bootchain on top — [06-secure-boot.md](06-secure-boot.md).

@@ -88,7 +88,12 @@ Contents (assembled by [`package-create.sh`](../armbian-ota/common/build-hooks/p
 Next to the package the build also writes `<image>_OTA.checksums`
 (MD5 + SHA256 of the tarball) for distribution-side integrity checks.
 
-Transfer the package to the device any way you like (scp, USB, download).
+Transfer the package to the device any way you like — scp, USB stick,
+download:
+
+```bash
+scp output/images/<BOARD>/ota/Armbian_*_OTA.tar.gz root@<device>:/root/
+```
 
 ## 4. Apply an update on the device
 

@@ -65,6 +65,27 @@ ls uboot-secure/usr/lib/linux-u-boot-*/
 `UBOOT_FIT_KEYS_BACKUP_DIR` pointed at the fleet keys
 ([§3](#3-signing-keys-keep-them-or-regenerate-them)).
 
+On a **running device** the same deb can update the loaders in place:
+
+```bash
+# 1) install (places the artifacts under /usr/lib/linux-u-boot-*/)
+sudo apt install ./linux-u-boot-<board>-<branch>-secure_*.deb
+
+# 2) write idbloader + u-boot.itb to the boot disk (postinst writes only
+#    when asked to):
+sudo FORCE_UBOOT_UPDATE=yes apt install --reinstall ./linux-u-boot-<board>-<branch>-secure_*.deb
+
+# 3) SPI-boot boards — flash the SPI loader to match:
+sudo bash -c 'source /usr/lib/u-boot/platform_install.sh && \
+  write_uboot_platform_mtd /usr/lib/linux-u-boot-<branch>-<board> /dev/mtd0'
+```
+
+Step 3 does exactly what Armbian's SPI install does — the deb's own
+`/usr/lib/u-boot/platform_install.sh` provides
+`write_uboot_platform_mtd`, which `dd`s the `rkspi_loader.img` (shipped
+into the deb by [`rk-uboot-postprocess.sh`](../rk-uboot-postprocess/rk-uboot-postprocess.sh))
+to the mtd device. Reboot afterwards.
+
 ## 3. Signing keys: keep them or regenerate them
 
 Without configuration, **fresh RSA keys are generated per build** — every
