@@ -33,12 +33,29 @@ CRYPTROOT_PASSPHRASE='<exactly-64-characters>' \
 ./build.sh ab secure-rootfs -b recomputer-rk3576-devkit
 ```
 
-Generate and store one before your first encrypted build:
+Generate and store one before your first encrypted build — either fully
+random, or derived from a password you can remember:
 
 ```bash
-openssl rand -base64 48    # 48 random bytes -> exactly 64 characters
-openssl rand -hex 32       # equivalent: 32 bytes as 64 hex characters
+openssl rand -base64 48    # random: 48 bytes -> exactly 64 characters
+openssl rand -hex 32       # random: equivalent, 32 bytes as 64 hex characters
+
+# or turn your own password into a qualified 64-char key (deterministic):
+echo -n 'a-long-unique-passphrase' | openssl dgst -sha384 -binary | openssl base64 -A
+echo -n 'a-long-unique-passphrase' | openssl dgst -sha256 -r | cut -d' ' -f1
 ```
+
+About password-derived keys:
+
+- Both piped forms always emit exactly 64 characters regardless of the
+  password length (SHA-384 → 48 bytes → 64 base64 chars; SHA-256 → 64 hex
+  chars). Keep the `-n` — a trailing newline changes the key.
+- The same password always yields the same key, so every build (and every
+  machine deriving it) stays consistent across the fleet.
+- The key is only as strong as the password — use a long, unique phrase;
+  random keys remain the recommendation for production fleets.
+- The example leaves the password in your shell history — clear it or
+  type it into an interactive `read` instead.
 
 **Why exactly 64 characters:** the build only checks the passphrase is
 non-empty ([`build.sh:153`](../scripts/build.sh#L153)); the initramfs later
