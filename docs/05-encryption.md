@@ -72,6 +72,36 @@ CRYPTROOT_PASSPHRASE ──┬── LUKS headers (rootfs, userdata, both A/B sl
   at `/run/armbian-luks-passphrase` (mode 600, gone on power loss) feeds
   runtime OTA key derivation.
 
+### Where the keybox physically lives
+
+```mermaid
+flowchart TD
+    B[boot, initramfs] --> M{"security partition<br/>starts with SSKR?"}
+    M -- "no — raw 64-byte passphrase" --> W["keybox_app write:<br/>passphrase into the TEE keybox"]
+    W --> S["partition becomes an SSKR-marked<br/>encrypted container"]
+    M -- "yes — container present" --> R["keybox_app read:<br/>passphrase out of the keybox"]
+    R --> U["stash at /run/armbian-luks-passphrase<br/>(tmpfs, RAM-only) for runtime OTA"]
+```
+
+- The keybox TA (Rockchip `rk_tee_user`, from the
+  [`rockchip_sdk_tools`](../rk_secure-disk-encryption/build-hooks/common.sh#L10)
+  fork) stores the passphrase as an encrypted persistent object. Our
+  scripts select the REE-FS backend (`SECURITY_STORAGE=SECURITY`,
+  [`decryption-disk.sh:5`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh#L5)):
+  the ciphertext lands **on the security partition itself** as the
+  `SSKR`-marked container, wrapped with keys derived from the SoC. The
+  eMMC-only RPMB backend exists in the app but is never selected here.
+- Reads are gated inside the TA: a caller must first complete an
+  RNG-then-hash handshake; one that skips it receives hardware-random
+  bytes, never the stored key.
+- The OP-TEE stack reaches the partition through
+  `/dev/block/by-name/security` — a path mainline Armbian does not
+  provide, so the initramfs creates the symlink itself
+  ([`decryption-disk.sh:209`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh#L209)).
+  After `switch_root` the path is gone; with no eMMC RPMB to fall back
+  on, NVMe boards cannot re-read the keybox from the running system —
+  which is why the passphrase is handed to userspace via `/run`.
+
 ### How the OTA payload is encrypted
 
 The AES key never ships in the package — both sides derive it
@@ -91,9 +121,8 @@ signature (secure-boot builds only — it reuses the FIT signing key,
 **TrustZone in one paragraph:** OP-TEE is a tiny secure OS running in the
 SoC's isolated TrustZone world (BL32, booted alongside ATF). The keybox
 lives inside it, reachable only through `keybox_app` over `/dev/tee0`
-([`install-optee`](../rk_secure-disk-encryption/initramfs/install-optee)).
-NVMe boards have no RPMB to back it, which is why the initramfs hands the
-passphrase to userspace via `/run` instead of re-reading it there.
+([`install-optee`](../rk_secure-disk-encryption/initramfs/install-optee));
+its physical storage is the SSKR container described above.
 
 ## 4. What happens at boot
 
