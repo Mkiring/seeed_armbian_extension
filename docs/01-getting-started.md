@@ -72,14 +72,19 @@ The simplest useful image — Recovery OTA, plain (unencrypted), rk3576 devkit:
 ```
 
 What happens: the wrapper resolves the profile into environment variables
-(`OTA_ENABLE=yes` …), runs `compile.sh` in Docker, and produces:
+(`OTA_ENABLE=yes` …), runs `compile.sh` in Docker, and produces under
+`output/`:
 
-- image: `output/images/Armbian_*.img.xz` (GPT, write-ready, stock name —
-  no `_RECOVERY` suffix)
-- logs: `output/logs/`
+| Artifact | Path | Purpose |
+|---|---|---|
+| image | `output/images/Armbian_*.img.xz` | flash-ready GPT, stock name (no `_RECOVERY` suffix) |
+| OTA package | `output/images/<BOARD>/ota/*_OTA.tar.gz` | update payload for the image above |
+| checksums | `<artifact>.sha256` / `<image>_OTA.checksums` | verify downloads |
+| U-Boot deb | `output/debs/linux-u-boot-<board>-<branch>[-secure]_*.deb` | signed loaders for hand-flashing (secure-boot builds, [06 §2](06-secure-boot.md)) |
 
-First run downloads toolchains/sources and can take an hour or more;
-subsequent builds reuse the cache.
+Logs land in `output/logs/`. First run downloads toolchains/sources and can
+take an hour or more; subsequent builds reuse the cache
+([02 §6](02-build-reference.md#6-caches-and-rebuild-cost)).
 
 **Verification checkpoint** — the build log ends with the image path and no
 `error` lines:
@@ -103,15 +108,44 @@ The full option/variable reference is [02-build-reference.md](02-build-reference
 
 ## 5. Flash and boot
 
-Flash the `.img`/`.img.xz` with your usual Rockchip tooling (rkdevtool from
-Maskrom/RKDevTool, USB boot, or plain `dd` to the target disk). The image is a
-complete GPT layout — no partition math required.
+Verify the download first, then flash the complete GPT image with your
+usual Rockchip tooling — no partition math required:
 
-**On device, first boot:**
+```bash
+sha256sum -c Armbian_*.img.xz.sha256          # verify
+xzcat Armbian_*.img.xz | sudo dd of=<target-disk> bs=4M conv=fsync status=progress
+```
 
-- The rootfs is overlayed (`overlayroot`); runtime writes persist on the
-  `userdata` partition, which auto-expands to fill the disk on first boot.
-- Log in with the Armbian default credentials of your release, then change them.
+Maskrom path: hold the board's recovery button while powering on, attach
+it to a host running RKDevTool, and write the image with the Maskrom
+loader. Signed builds additionally ship
+[`spl_loader_maskrom.bin`](06-secure-boot.md#2-build-a-secure-boot-image)
+for exactly this flow.
+
+**First boot on device:**
+
+```mermaid
+flowchart TD
+    A[U-Boot loads kernel] --> B["initramfs"]
+    B --> C{"encrypted image?"}
+    C -- "yes" --> D["unlock LUKS<br/>(keybox / raw passphrase)"]
+    C -- "no" --> E
+    D --> E["mount rootfs read-only<br/>+ userdata overlay"]
+    E --> F["systemd"]
+    F --> G["armbian-resize-userdata:<br/>grow userdata to full disk"]
+    F --> H["ssh-protect: repair /etc/ssh<br/>if power-loss corrupted it"]
+    G --> I[ready]
+    H --> I
+```
+
+After login (Armbian default credentials of your release — change them):
+
+- runtime writes persist on `userdata`; the rootfs stays read-only
+  ([why](03-ota-recovery.md#why-updates-keep-your-data));
+- SSH is **disabled by default** — enable it after first local login with
+  `sudo systemctl enable --now ssh` ([08-hardening.md](08-hardening.md));
+- encrypted images silently migrated the passphrase into OP-TEE on this
+  boot ([05 §3](05-encryption.md#3-where-the-secret-lives)).
 
 Verify the OTA runtime is present (**on device**):
 
@@ -124,3 +158,4 @@ armbian-ota status    # prints mode + status; "unknown" before any OTA is fine
 - Deliver updates: [03-ota-recovery.md](03-ota-recovery.md)
 - Or switch to rollback-safe dual-slot firmware: [04-ota-ab.md](04-ota-ab.md)
 - Need confidentiality or a signed bootchain? [05-encryption.md](05-encryption.md) / [06-secure-boot.md](06-secure-boot.md)
+- What every image already protects against: [08-hardening.md](08-hardening.md)

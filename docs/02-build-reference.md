@@ -8,6 +8,7 @@ extension reads. Each entry links to the source that consumes it.
 3. [Options](#3-options)
 4. [Conflict rules](#4-conflict-rules)
 5. [Environment variables](#5-environment-variables)
+6. [Caches and rebuild cost](#6-caches-and-rebuild-cost)
 
 ## 1. Command line
 
@@ -116,3 +117,22 @@ layout; secure boot applies the same rule to its raw boot partition
 `CRYPTROOT_PASSPHRASE` reaches the build container via Docker `--env`, never
 on the command line, so it stays out of `argv`/logs
 ([`build.sh:155`](../scripts/build.sh#L155)).
+
+## 6. Caches and rebuild cost
+
+| Cache | Contents | Cleared by |
+|---|---|---|
+| Kernel | `output/debs/linux-*-vendor-*.deb`, `output/packages-hashed/kernel-*`, `cache/sources/linux-kernel-worktree` | `-c, --clear-kernel-cache` ([`build.sh:358`](../scripts/build.sh#L358)) |
+| Rootfs | `cache/rootfs/rootfs-arm64-*.tar.zst` | `-r, --clear-rootfs-cache` ([`build.sh:366`](../scripts/build.sh#L366)) |
+| U-Boot | `output/debs/linux-u-boot-<board>-<branch>[-secure]_*.deb` + hashed artifacts | automatic on every usbplug build ([`build.sh:375`](../scripts/build.sh#L375)) |
+
+Notes:
+
+- The first build populates all caches (~1 h+); cached rebuilds skip the
+  heavy steps entirely.
+- The secure U-Boot lives in its own `-secure` package namespace, so one
+  tree can produce and keep both variants
+  ([`build.sh:105-121`](../scripts/build.sh#L105)).
+- usbplug builds always clear the U-Boot cache: a cache hit would skip
+  `uboot_custom_postprocess`, and `spl_loader_maskrom.bin` would never be
+  regenerated ([`build.sh:372-375`](../scripts/build.sh#L372)).
