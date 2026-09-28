@@ -33,19 +33,45 @@ CRYPTROOT_PASSPHRASE='<exactly-64-characters>' \
 ./build.sh ab secure-rootfs -b recomputer-rk3576-devkit
 ```
 
-Generate and store one before your first encrypted build:
+Generate and store one before your first encrypted build — either fully
+random, or derived from a password you can remember:
 
 ```bash
-openssl rand -base64 48    # 48 random bytes -> exactly 64 characters
+openssl rand -hex 32   # random: exactly 64 hex characters
+
+# or turn your own password into a qualified key (deterministic):
+echo -n 'a-long-unique-passphrase' | openssl dgst -sha256 -r | cut -d' ' -f1
 ```
 
-**Why exactly 64 characters:** the build only checks the passphrase is
-non-empty ([`build.sh:153`](../scripts/build.sh#L153)); the initramfs later
-raw-reads **64 bytes** from the security partition
-([`decryption-disk.sh`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh)).
-A longer passphrase is silently truncated at unlock — the device would run
-fine, but you no longer know the effective secret. 64 chars, stored safely
-(password manager), once per product line is the sane default.
+About password-derived keys:
+
+- The digest is always exactly 64 lowercase hex characters, whatever the
+  password length. Keep the `-n` — a trailing newline changes the key.
+- The same password always yields the same key, so every build (and every
+  machine deriving it) stays consistent across the fleet.
+- The key is only as strong as the password — use a long, unique phrase;
+  random keys remain the recommendation for production fleets.
+- The example leaves the password in your shell history — clear it or
+  type it into an interactive `read` instead.
+
+**Why exactly 64 *hexadecimal* characters** (not merely 64 characters):
+
+- The initramfs raw-reads **64 bytes** from the security partition
+  ([`decryption-disk.sh`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh));
+  a longer passphrase is silently truncated at unlock.
+- The OP-TEE keybox stores the passphrase as **32 bytes decoded from
+  those 64 hex characters** and re-encodes it on every read-back
+  (Rockchip `keybox_app`, `KEY_SIZE 32`). A 64-character string with
+  non-hex characters — a base64 key containing `+` or `/`, for example —
+  is silently decoded to garbage: after the first-boot migration the
+  keybox returns a different key and the next unlock fails. Hex keys
+  round-trip; base64 keys corrupt most of the stored bytes.
+- Neither the build ([`build.sh:153`](../scripts/build.sh#L153) — non-empty
+  only) nor the CI preflight (length only) validates the charset; this
+  constraint is enforced only by this document.
+
+64 hex chars, stored safely (password manager), once per product line is
+the sane default.
 
 > [!IMPORTANT]
 > Losing the passphrase loses the data — by design. It is also the OTA
@@ -72,6 +98,36 @@ CRYPTROOT_PASSPHRASE ──┬── LUKS headers (rootfs, userdata, both A/B sl
   at `/run/armbian-luks-passphrase` (mode 600, gone on power loss) feeds
   runtime OTA key derivation.
 
+### Where the keybox physically lives
+
+```mermaid
+flowchart TD
+    B[boot, initramfs] --> M{"security partition<br/>starts with SSKR?"}
+    M -- "no — raw 64-byte passphrase" --> W["keybox_app write:<br/>passphrase into the TEE keybox"]
+    W --> S["partition becomes an SSKR-marked<br/>encrypted container"]
+    M -- "yes — container present" --> R["keybox_app read:<br/>passphrase out of the keybox"]
+    R --> U["stash at /run/armbian-luks-passphrase<br/>(tmpfs, RAM-only) for runtime OTA"]
+```
+
+- The keybox TA (Rockchip `rk_tee_user`, from the
+  [`rockchip_sdk_tools`](../rk_secure-disk-encryption/build-hooks/common.sh#L10)
+  fork) stores the passphrase as an encrypted persistent object. Our
+  scripts select the REE-FS backend (`SECURITY_STORAGE=SECURITY`,
+  [`decryption-disk.sh:5`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh#L5)):
+  the ciphertext lands **on the security partition itself** as the
+  `SSKR`-marked container, wrapped with keys derived from the SoC. The
+  eMMC-only RPMB backend exists in the app but is never selected here.
+- Reads are gated inside the TA: a caller must first complete an
+  RNG-then-hash handshake; one that skips it receives hardware-random
+  bytes, never the stored key.
+- The OP-TEE stack reaches the partition through
+  `/dev/block/by-name/security` — a path mainline Armbian does not
+  provide, so the initramfs creates the symlink itself
+  ([`decryption-disk.sh:209`](../rk_secure-disk-encryption/initramfs/decryption-disk.sh#L209)).
+  After `switch_root` the path is gone; with no eMMC RPMB to fall back
+  on, NVMe boards cannot re-read the keybox from the running system —
+  which is why the passphrase is handed to userspace via `/run`.
+
 ### How the OTA payload is encrypted
 
 The AES key never ships in the package — both sides derive it
@@ -91,9 +147,8 @@ signature (secure-boot builds only — it reuses the FIT signing key,
 **TrustZone in one paragraph:** OP-TEE is a tiny secure OS running in the
 SoC's isolated TrustZone world (BL32, booted alongside ATF). The keybox
 lives inside it, reachable only through `keybox_app` over `/dev/tee0`
-([`install-optee`](../rk_secure-disk-encryption/initramfs/install-optee)).
-NVMe boards have no RPMB to back it, which is why the initramfs hands the
-passphrase to userspace via `/run` instead of re-reading it there.
+([`install-optee`](../rk_secure-disk-encryption/initramfs/install-optee));
+its physical storage is the SSKR container described above.
 
 ## 4. What happens at boot
 
@@ -114,6 +169,16 @@ in order:
 If anything in this chain fails the boot stops in initramfs — an encrypted
 device never falls back to booting from some other disk.
 
+**Verify on the running device:**
+
+```bash
+lsblk -o NAME,TYPE,FSTYPE                        # rootfs/userdata show crypto_LUKS
+sudo cryptsetup isLuks "$(findfs PARTLABEL=rootfs)" && echo LUKS-OK
+sudo dd if="$(findfs PARTLABEL=security)" bs=1 count=4 status=none; echo
+#   → "SSKR" once the first-boot keybox migration has run
+ls -l /run/armbian-luks-passphrase               # mode 600, tmpfs — gone on power loss
+```
+
 ## 5. Rules and pitfalls
 
 - **One passphrase per fleet.** OTA packages are encrypted with a key derived
@@ -128,5 +193,18 @@ device never falls back to booting from some other disk.
 - What this protects: data at rest on a removed disk, tampered update
   payloads (on secure-boot). What it does not: an attacker with the running
   system or the passphrase.
+
+**Unlock a disk on another host** (data recovery, inspection) — the same
+passphrase opens the partitions anywhere (A/B disks: use `rootfs_a` /
+`rootfs_b` for the slot you need):
+
+```bash
+sudo cryptsetup luksOpen "$(findfs PARTLABEL=rootfs)" rescue-root
+sudo cryptsetup luksOpen "$(findfs PARTLABEL=userdata)" rescue-userdata
+sudo mount /dev/mapper/rescue-root /mnt
+# ... when done:
+sudo umount /mnt
+sudo cryptsetup luksClose rescue-root rescue-userdata
+```
 
 Next: a signed bootchain on top — [06-secure-boot.md](06-secure-boot.md).

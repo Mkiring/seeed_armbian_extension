@@ -78,6 +78,18 @@ A/B device.
 | Recovery | `userdata/ota-recovery/state/ota-state.env` (`STATUS=idle/prepared/success`) + staged payload | runtime `start`, initramfs apply |
 | A/B | per-slot `/var/lib/armbian-ota/ota-state.env` + persistent U-Boot env at raw offset `0x3f8000` | runtime `start`, firstboot units, `ab_preboot` |
 
+### Boot-disk anchoring
+
+Every device lookup — root, boot, security, userdata — is anchored to the
+disk U-Boot actually loaded the boot payload from, identified by the
+`armbian.bootdev` / `armbian.bootdevnum` kernel cmdline tokens. In the
+initramfs,
+[`armbian-bootdev-root`](../initramfs/scripts/init-top/armbian-bootdev-root)
+rewrites the `root=` resolution to that disk (via `/conf/param.conf`,
+leaving single-disk boots untouched). Identical cloned images attached as
+additional disks therefore cannot capture the boot, the LUKS unlock, or
+the update.
+
 ## Directory Structure
 
 ```text
