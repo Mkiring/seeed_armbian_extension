@@ -127,7 +127,19 @@ detect_ab_root_partitions() {
 }
 
 detect_ab_boot_configuration() {
-    read -r BOOT_DEVTYPE BOOT_DEVNUM <<< "$(get_uboot_bootdev_from_part "${boot_a_dev}" || true)"
+    # Prefer U-Boot's own boot-device report from the kernel command line: the
+    # boot script appends armbian.bootdev/armbian.bootdevnum using U-Boot's
+    # device numbering, which is exactly what ab_select_boot_part compares
+    # against. Linux device names follow the kernel DT alias order, which does
+    # not match U-Boot's numbering on every platform (rk3572: kernel and
+    # U-Boot DTs order the mmc aliases differently, so Linux mmcblk0 is U-Boot
+    # mmc1) - deriving from the name pins the wrong device there and every
+    # slot switch dies in ab_select_boot_part's mismatch fallback.
+    BOOT_DEVTYPE="$(sed -n 's/.*[[:space:]]armbian\.bootdev=\([^[:space:]]*\).*/\1/p' /proc/cmdline)"
+    BOOT_DEVNUM="$(sed -n 's/.*[[:space:]]armbian\.bootdevnum=\([^[:space:]]*\).*/\1/p' /proc/cmdline)"
+    if [ -z "${BOOT_DEVTYPE}" ] || [ -z "${BOOT_DEVNUM}" ]; then
+        read -r BOOT_DEVTYPE BOOT_DEVNUM <<< "$(get_uboot_bootdev_from_part "${boot_a_dev}" || true)"
+    fi
     if [ -z "${BOOT_DEVTYPE}" ] || [ -z "${BOOT_DEVNUM}" ]; then
         log_error "Unsupported boot_a device for U-Boot bootcmd generation: ${boot_a_dev}"
         exit 1
