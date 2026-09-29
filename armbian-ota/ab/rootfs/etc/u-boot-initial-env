@@ -19,7 +19,10 @@ ab_select_boot_part=if test "${devtype}" = "${ab_boot_devtype}" && test "${devnu
 # call stomps android_dev_desc, which boot_fit later uses as its device
 # pointer — a scan over mtd/spi repointed it and boot_fit died with
 # "No boot partition" (RK3588 SD boot, 2026-09-03).
-scan_dev_for_boot_part=run ab_select_boot_part; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then run scan_dev_for_boot; fi; done
+# No fstype guard here: the v2025.04 vendor tree ships no fstype command, and
+# the load inside scan_dev_for_boot already fails cleanly on unsupported
+# filesystems, so the guard was redundant even where fstype exists.
+scan_dev_for_boot_part=run ab_select_boot_part; for distro_bootpart in ${devplist}; do run scan_dev_for_boot; done
 
 # Raw FIT boot path
 ab_select_fit_slot=if test "${boot_slot}" = "b"; then setenv boot_fit_part boot_b; else setenv boot_fit_part boot_a; fi
