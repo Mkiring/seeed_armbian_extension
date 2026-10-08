@@ -85,6 +85,15 @@ done <<'EOF'
 /usr/sbin /usr/sbin/reboot /sbin/reboot
 EOF
 
+# e2fsprogs ships mkfs.ext4 as a symlink to mke2fs. The initramfs busybox
+# already installs its own mke2fs applet hardlink at that path, and busybox
+# has no "mkfs.ext4" applet name, so the copied symlink dispatches into
+# busybox and dies with "applet not found" at OTA time (observed on the
+# rk3572 recovery initramfs). Drop the busybox hardlink and copy the real
+# mke2fs binary in its place; copy_exec brings its shared libraries too.
+rm -f "${DESTDIR}/usr/sbin/mke2fs" "${DESTDIR}/sbin/mke2fs"
+copy_exec_first /usr/sbin /usr/sbin/mke2fs /sbin/mke2fs
+
 copy_ota_lib state.sh
 copy_ota_lib find-userdata.sh
 copy_recovery_initramfs_lib log.sh
