@@ -94,9 +94,24 @@ mount_recovery_transaction_store() {
     STATE_DIR="${RECOVERY_TRANSACTION_DIR}/state"
     STATE_FILE="${STATE_DIR}/ota-state.env"
     OTA_DIR="${RECOVERY_TRANSACTION_DIR}/ota_work"
-    ROOTFS_TAR="${OTA_DIR}/rootfs.tar.gz"
-    BOOT_TAR="${OTA_DIR}/boot.tar.gz"
+    ROOTFS_TAR="$(ota_resolve_payload "${OTA_DIR}" rootfs)"
+    BOOT_TAR="$(ota_resolve_payload "${OTA_DIR}" boot)"
     BOOT_ITB="${OTA_DIR}/boot.itb"
+}
+
+# Return the payload file actually staged for $2 (rootfs|boot); xz packages
+# win over legacy gz. Prints the path, empty when nothing is staged.
+ota_resolve_payload() {
+    mnt_dir="$1"
+    base="$2"
+
+    for suffix in tar.xz tar.gz; do
+        if [ -f "${mnt_dir}/${base}.${suffix}" ]; then
+            printf '%s\n' "${mnt_dir}/${base}.${suffix}"
+            return 0
+        fi
+    done
+    return 0
 }
 
 unmount_recovery_transaction_store() {
