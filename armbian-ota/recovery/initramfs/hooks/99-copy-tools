@@ -61,6 +61,7 @@ done <<'EOF'
 /usr/bin /usr/bin/tar /bin/tar
 /usr/bin /usr/bin/gzip /bin/gzip
 /usr/bin /usr/bin/gunzip /bin/gunzip
+/usr/bin /usr/bin/xz /bin/xz
 /usr/bin /usr/bin/sed /bin/sed
 /usr/bin /usr/bin/find /bin/find
 /usr/bin /usr/bin/grep /bin/grep

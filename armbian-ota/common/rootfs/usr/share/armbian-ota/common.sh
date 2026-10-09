@@ -10,6 +10,9 @@ OTA_LOG_DIR="${OTA_LOG_DIR:-/var/log/armbian-ota}"
 OTA_LOG_FILE="${OTA_LOG_FILE:-${OTA_LOG_DIR}/ota.log}"
 
 # OTA package payload file names shared by A/B and recovery modes.
+# Defaults are the legacy gz names; ota_resolve_payload_names() rebinds them
+# to the payload files actually present in an extracted package (xz builds
+# ship rootfs.tar.xz / boot.tar.xz).
 OTA_PAYLOAD_ROOTFS_TAR="rootfs.tar.gz"
 OTA_PAYLOAD_ROOTFS_SHA="rootfs.sha256"
 OTA_PAYLOAD_BOOT_TAR="boot.tar.gz"
@@ -18,6 +21,30 @@ OTA_PAYLOAD_BOOT_SHA="boot.sha256"
 # Encrypted-payload artifacts (present when the package was built with
 # CRYPTROOT_ENABLE=yes). Mirrors package-create.sh on the build side.
 OTA_PAYLOAD_ROOTFS_ENC="rootfs.tar.gz.enc"
+
+# Rebind OTA_PAYLOAD_ROOTFS_TAR / OTA_PAYLOAD_BOOT_TAR / OTA_PAYLOAD_ROOTFS_ENC
+# to the payload files actually staged in $1 (an extracted OTA work dir).
+# The xz suffix wins over legacy gz so the layout cannot be mis-detected.
+ota_resolve_payload_names() {
+    local work_dir="$1" suffix
+
+    OTA_PAYLOAD_ROOTFS_TAR=""
+    OTA_PAYLOAD_BOOT_TAR=""
+    for suffix in tar.xz tar.gz; do
+        if [ -z "${OTA_PAYLOAD_ROOTFS_TAR}" ] && [ -f "${work_dir}/rootfs.${suffix}" ]; then
+            OTA_PAYLOAD_ROOTFS_TAR="rootfs.${suffix}"
+        fi
+        if [ -z "${OTA_PAYLOAD_BOOT_TAR}" ] && [ -f "${work_dir}/boot.${suffix}" ]; then
+            OTA_PAYLOAD_BOOT_TAR="boot.${suffix}"
+        fi
+    done
+
+    [ -n "${OTA_PAYLOAD_ROOTFS_TAR}" ] ||
+        error_exit "No rootfs payload in ${work_dir} (expected rootfs.tar.xz or rootfs.tar.gz)"
+    OTA_PAYLOAD_ROOTFS_ENC="${OTA_PAYLOAD_ROOTFS_TAR}.enc"
+    return 0
+}
+
 OTA_PAYLOAD_MANIFEST="payload.manifest"
 OTA_PAYLOAD_MANIFEST_SIG="payload.manifest.sig"
 OTA_PAYLOAD_KDF_INFO="armbian-ota-payload-v1"
@@ -119,7 +146,7 @@ load_package_env_metadata() {
 
     log_info "Reading OTA package metadata from ${package_path}" >&2
     manifest_entry="$(
-        tar -tzf "${package_path}" 2>/dev/null \
+        tar -tf "${package_path}" 2>/dev/null \
             | awk '/(^|\/)package\.env$/ { print; exit }'
     )"
     if [ -z "${manifest_entry}" ]; then
@@ -192,7 +219,10 @@ extract_ota_package() {
 
     rm -rf "${dest_dir}"
     mkdir -p "${dest_dir}"
-    tar -xzf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+    # GNU tar auto-detects compression: handles both the legacy tar.gz
+    # package and the xz-layout plain outer tar.
+    tar -xf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+    ota_resolve_payload_names "${dest_dir}"
 }
 
 verify_sha256() {
