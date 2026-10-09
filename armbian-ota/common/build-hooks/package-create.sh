@@ -1,8 +1,21 @@
 # OTA Package Creation Helpers
 
+# Payload compression selector. "xz" (default) archives the inner payload as
+# multi-block .tar.xz (xz -T0) and ships the final package as an uncompressed
+# tar: compression happens exactly once, decode parallelizes on device
+# (xz >= 5.7 threaded decompression), and metadata members are readable
+# without decompression. "gz" reproduces the legacy double-gzip layout.
+OTA_PAYLOAD_COMP="${OTA_PAYLOAD_COMP:-xz}"
+if [[ "${OTA_PAYLOAD_COMP}" == "xz" ]]; then
+    OTA_PAYLOAD_TAR_SUFFIX="tar.xz"
+else
+    OTA_PAYLOAD_COMP="gz"
+    OTA_PAYLOAD_TAR_SUFFIX="tar.gz"
+fi
+
 # Encrypted-payload artifact names (present only when ota_payload_encryption_enabled).
 # These mirror the on-device names in common/rootfs/usr/share/armbian-ota/common.sh.
-OTA_PAYLOAD_ROOTFS_ENC="rootfs.tar.gz.enc"
+OTA_PAYLOAD_ROOTFS_ENC="rootfs.${OTA_PAYLOAD_TAR_SUFFIX}.enc"
 OTA_PAYLOAD_MANIFEST="payload.manifest"
 OTA_PAYLOAD_MANIFEST_SIG="payload.manifest.sig"
 # HKDF info string binding the derived key to the OTA payload use case. Must be
@@ -49,11 +62,13 @@ function ota_verify_sha256_file() {
 function ota_verify_extracted_archives() {
     local ota_temp_dir="$1"
     local ota_security_mode="$2"
-    local rootfs_tar="${ota_temp_dir}/rootfs.tar.gz"
+    local rootfs_tar="${ota_temp_dir}/rootfs.${OTA_PAYLOAD_TAR_SUFFIX}"
     local enc_tar="${ota_temp_dir}/${OTA_PAYLOAD_ROOTFS_ENC}"
     local rootfs_sha_file="${ota_temp_dir}/rootfs.sha256"
-    local boot_tar="${ota_temp_dir}/boot.tar.gz"
+    local boot_tar="${ota_temp_dir}/boot.${OTA_PAYLOAD_TAR_SUFFIX}"
     local boot_sha_file="${ota_temp_dir}/boot.sha256"
+    local tar_list_flag="-tzf"
+    [[ "${OTA_PAYLOAD_TAR_SUFFIX}" == "tar.xz" ]] && tar_list_flag="-tJf"
 
     if ota_payload_encryption_enabled; then
         # rootfs.tar.gz has been replaced by the encrypted blob; its integrity
@@ -70,12 +85,12 @@ function ota_verify_extracted_archives() {
             return 1
         fi
 
-        if ! tar -tzf "${rootfs_tar}" >/dev/null 2>&1; then
-            display_alert "Error: rootfs.tar.gz is corrupted or invalid" "" "err"
+        if ! tar "${tar_list_flag}" "${rootfs_tar}" >/dev/null 2>&1; then
+            display_alert "Error: rootfs.${OTA_PAYLOAD_TAR_SUFFIX} is corrupted or invalid" "" "err"
             return 1
         fi
 
-        ota_verify_sha256_file "${ota_temp_dir}" "${rootfs_sha_file}" "rootfs.tar.gz" || return 1
+        ota_verify_sha256_file "${ota_temp_dir}" "${rootfs_sha_file}" "rootfs.${OTA_PAYLOAD_TAR_SUFFIX}" || return 1
     fi
 
     if [[ "${ota_security_mode}" == "secure-boot-encrypted-rootfs" ]]; then
@@ -91,29 +106,29 @@ function ota_verify_extracted_archives() {
         ota_verify_sha256_file "${ota_temp_dir}" "${boot_sha_file}" "boot.itb" || return 1
         display_alert "Archive verification completed" "boot.itb and rootfs.tar.gz are valid" "info"
     elif [[ -f "${boot_tar}" ]]; then
-        if ! tar -tzf "${boot_tar}" >/dev/null 2>&1; then
-            display_alert "Error: boot.tar.gz is corrupted or invalid" "" "err"
+        if ! tar "${tar_list_flag}" "${boot_tar}" >/dev/null 2>&1; then
+            display_alert "Error: boot.${OTA_PAYLOAD_TAR_SUFFIX} is corrupted or invalid" "" "err"
             return 1
         fi
 
-        ota_verify_sha256_file "${ota_temp_dir}" "${boot_sha_file}" "boot.tar.gz" || return 1
-        display_alert "Archive verification completed" "boot.tar.gz and rootfs.tar.gz are valid" "info"
+        ota_verify_sha256_file "${ota_temp_dir}" "${boot_sha_file}" "boot.${OTA_PAYLOAD_TAR_SUFFIX}" || return 1
+        display_alert "Archive verification completed" "boot.${OTA_PAYLOAD_TAR_SUFFIX} and rootfs.${OTA_PAYLOAD_TAR_SUFFIX} are valid" "info"
     else
-        display_alert "Archive verification completed" "rootfs.tar.gz is valid (no boot partition found)" "info"
+        display_alert "Archive verification completed" "rootfs.${OTA_PAYLOAD_TAR_SUFFIX} only (no boot partition found)" "info"
     fi
 }
 
 function ota_extraction_summary() {
     local ota_temp_dir="$1"
     local ota_security_mode="$2"
-    local boot_tar="${ota_temp_dir}/boot.tar.gz"
+    local boot_tar="${ota_temp_dir}/boot.${OTA_PAYLOAD_TAR_SUFFIX}"
 
     if [[ "${ota_security_mode}" == "secure-boot-encrypted-rootfs" && -f "${ota_temp_dir}/boot.itb" ]]; then
-        echo "boot.itb + rootfs.tar.gz (secure boot)"
+        echo "boot.itb + rootfs.${OTA_PAYLOAD_TAR_SUFFIX} (secure boot)"
     elif [[ -f "${boot_tar}" ]]; then
-        echo "boot.tar.gz + rootfs.tar.gz"
+        echo "boot.${OTA_PAYLOAD_TAR_SUFFIX} + rootfs.${OTA_PAYLOAD_TAR_SUFFIX}"
     else
-        echo "rootfs.tar.gz only"
+        echo "rootfs.${OTA_PAYLOAD_TAR_SUFFIX} only"
     fi
 }
 
@@ -165,13 +180,19 @@ EOF
 function ota_create_final_tarball() {
     local ota_temp_dir="$1"
     local ota_output_path="$2"
+    local tar_compress_flag="-czf"
+
+    # xz payload mode ships an uncompressed outer tar: the payload members are
+    # already compressed, so a second compression pass is wasted work, and the
+    # plain tar lets metadata members be read without decoding anything.
+    [[ "${OTA_PAYLOAD_COMP}" == "xz" ]] && tar_compress_flag="-cf"
 
     (
         cd "${ota_temp_dir}" &&
         {
             printf '%s\0' "package.env"
             find . -mindepth 1 ! -path "./package.env" ! -type d -printf '%P\0' | LC_ALL=C sort -z
-        } | tar --null -czf "${ota_output_path}" -T -
+        } | tar --null ${tar_compress_flag} "${ota_output_path}" -T -
     )
 }
 
@@ -318,7 +339,15 @@ function ota_archive_directory() {
     fi
 
     display_alert "Extracting ${label}" "${source_dir} -> ${archive_name}" "info"
-    if (cd "${source_dir}" && tar -czf "${archive}" "$@" .); then
+    local archive_ok=0
+    if [[ "${archive}" == *.tar.xz ]]; then
+        # -T0 makes xz emit multiple independent blocks so device-side decode
+        # parallelizes (threaded .xz decompression, xz >= 5.7).
+        (cd "${source_dir}" && tar -cf - "$@" . | xz -6 -T0 > "${archive}") || archive_ok=1
+    else
+        (cd "${source_dir}" && tar -czf "${archive}" "$@" .) || archive_ok=1
+    fi
+    if [[ "${archive_ok}" -eq 0 ]]; then
         local archive_size
         archive_size="$(stat -c%s "${archive}")"
         display_alert "${label} archived" "${archive_name} size: $((archive_size / 1024)) KB" "info"
@@ -390,7 +419,7 @@ function ota_derive_payload_key_hex() {
 # only the encrypted blob ships. Sets OTA_PAYLOAD_ENC_IV for the manifest step.
 function ota_encrypt_rootfs_payload() {
     local ota_temp_dir="$1"
-    local plaintext_tar="${ota_temp_dir}/rootfs.tar.gz"
+    local plaintext_tar="${ota_temp_dir}/rootfs.${OTA_PAYLOAD_TAR_SUFFIX}"
     local encrypted_tar="${ota_temp_dir}/${OTA_PAYLOAD_ROOTFS_ENC}"
     local sha_file="${ota_temp_dir}/rootfs.sha256"
     local expected_sha key_hex iv_hex roundtrip_sha
@@ -493,13 +522,13 @@ function ota_create_payload_archives() {
 
     mkdir -p "${boot_mount}"
     if [[ -n "${boot_partition}" && "${ota_security_mode}" != "secure-boot-encrypted-rootfs" ]]; then
-        if ! ota_archive_boot_partition "${boot_partition}" "${boot_mount}" "${ota_temp_dir}/boot.tar.gz" \
+        if ! ota_archive_boot_partition "${boot_partition}" "${boot_mount}" "${ota_temp_dir}/boot.${OTA_PAYLOAD_TAR_SUFFIX}" \
             "${ota_temp_dir}/boot.sha256" "boot partition" "warn"; then
             return 1
         fi
     fi
 
-    if ! ota_archive_directory "${MOUNT}" "${ota_temp_dir}/rootfs.tar.gz" \
+    if ! ota_archive_directory "${MOUNT}" "${ota_temp_dir}/rootfs.${OTA_PAYLOAD_TAR_SUFFIX}" \
         "${ota_temp_dir}/rootfs.sha256" "rootfs" "err" \
         --one-file-system \
         --exclude="./dev/*" --exclude="./proc/*" --exclude="./sys/*" --exclude="./tmp/*" --exclude="./run/*"; then
@@ -546,7 +575,7 @@ function ota_finalize_payload_package() {
     ota_size="$(stat -c%s "${ota_output_path}")"
     display_alert "OTA package created successfully" "${ota_package_name} ($((ota_size / 1024 / 1024)) MB)" "info"
     display_alert "OTA package contents" "" "info"
-    tar -tzf "${ota_output_path}" | head -20 | while read -r file; do
+    tar -tf "${ota_output_path}" | head -20 | while read -r file; do
         display_alert "  - ${file}" "" "info"
     done
     checksum_file="${DEST}/images/${BOARD}/ota/$(ota_image_checksum_name "${base_image_name}")"
@@ -574,6 +603,10 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
     ota_require_host_tools \
         tar mount umount mountpoint lsblk grep sort blkid blockdev stat find wc \
         sha256sum md5sum awk cp head basename cat date mkdir rm || return 1
+
+    if [[ "${OTA_PAYLOAD_COMP}" == "xz" ]] && ! ota_require_host_tools xz; then
+        return 1
+    fi
 
     # Create a fresh temporary directory for OTA package building.
     local ota_temp_dir="${WORKDIR}/ota_package_build_$$"

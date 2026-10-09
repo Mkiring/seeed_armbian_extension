@@ -91,7 +91,10 @@ function ota_image_package_base_name() {
 
 function ota_image_ota_package_name() {
     local base_image_name="$1"
-    echo "${base_image_name}_OTA.tar.gz"
+    local suffix="tar.gz"
+    # xz payload mode ships an uncompressed outer tar (see package-create.sh).
+    [[ "${OTA_PAYLOAD_COMP:-gz}" == "xz" ]] && suffix="tar"
+    echo "${base_image_name}_OTA.${suffix}"
 }
 
 function ota_image_checksum_name() {

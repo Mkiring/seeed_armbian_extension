@@ -21,8 +21,16 @@ extract_tar() {
 
     rm -f "${err_file}" 2>/dev/null || true
 
-    log "${label}: run tar -xzf ${archive} -C ${target}"
-    if tar -xzf "${archive}" -C "${target}" 2>"${err_file}"; then
+    # xz payload packages are extracted with the real xz binary staged by the
+    # 99-copy-tools hook; busybox tar would fall back to its single-threaded
+    # xz applet. Real GNU tar -xJf dispatches to /usr/bin/xz.
+    case "${archive}" in
+        *.tar.xz) tar_extract="tar -xJf" ;;
+        *) tar_extract="tar -xzf" ;;
+    esac
+
+    log "${label}: run ${tar_extract} ${archive} -C ${target}"
+    if ${tar_extract} "${archive}" -C "${target}" 2>"${err_file}"; then
         log "${label}: extract succeeded"
         log_tail "${label}" "${err_file}" 20
         rm -f "${err_file}" 2>/dev/null || true

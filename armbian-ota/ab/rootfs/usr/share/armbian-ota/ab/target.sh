@@ -19,7 +19,7 @@ ab_log_extract_progress() {
     done
 }
 
-ab_extract_tar_gz_payload() {
+ab_extract_tar_payload() {
     local archive="$1"
     local target="$2"
     local label="$3"
@@ -31,9 +31,9 @@ ab_extract_tar_gz_payload() {
         size="$(stat -c '%s' "${archive}" 2>/dev/null || true)"
         if [ -n "${size}" ]; then
             pv -f -n -s "${size}" "${archive}" 2> >(ab_log_extract_progress "${label}" >&2) |
-                tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
+                tar --xattrs --acls --numeric-owner -xf - -C "${target}"
         else
-            pv -f "${archive}" | tar --xattrs --acls --numeric-owner -xzf - -C "${target}"
+            pv -f "${archive}" | tar --xattrs --acls --numeric-owner -xf - -C "${target}"
         fi
         return $?
     fi
@@ -108,7 +108,7 @@ ab_apply_target_rootfs() {
     if [ "${rootfs_prebuilt}" -ne 1 ]; then
         empty_mount_dir "${root_mnt}" || return 1
     fi
-    ab_extract_tar_gz_payload "${temp_work}/${OTA_PAYLOAD_ROOTFS_TAR}" "${root_mnt}" "rootfs" || return 1
+    ab_extract_tar_payload "${temp_work}/${OTA_PAYLOAD_ROOTFS_TAR}" "${root_mnt}" "rootfs" || return 1
     ab_write_target_state "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}"
 }
 
@@ -301,7 +301,7 @@ ab_update_target_bootfs() {
             if ! mountpoint -q "${boot_mnt}" 2>/dev/null; then rm -rf "${boot_mnt}"; fi
             return 1
         }
-        ab_extract_tar_gz_payload "${temp_work}/${OTA_PAYLOAD_BOOT_TAR}" "${boot_mnt}" "boot" || {
+        ab_extract_tar_payload "${temp_work}/${OTA_PAYLOAD_BOOT_TAR}" "${boot_mnt}" "boot" || {
             log_error "Failed to extract boot payload"
             umount "${boot_mnt}" 2>/dev/null || log_warn "Failed to unmount target boot partition after extraction failure"
             if ! mountpoint -q "${boot_mnt}" 2>/dev/null; then rm -rf "${boot_mnt}"; fi
