@@ -52,6 +52,18 @@ copy_recovery_initramfs_lib() {
     cp -p "${src}" "${dest}"
 }
 
+# initramfs-tools' copy_file() is a no-op when the destination already
+# exists, and by the time this hook runs the busybox hook has already
+# hard-linked every applet into usr/bin -- plain copy_exec therefore keeps
+# the busybox applet silently. Drop the busybox hardlinks for the tools the
+# OTA apply path depends on (GNU tar for -J, gzip, and the real xz so
+# payload decode is threaded instead of the single-threaded busybox applet)
+# and let the copy list below install the real binaries in their place.
+# Same pattern as the mke2fs fix further down.
+for bb_applet in tar gzip gunzip xz; do
+    rm -f "${DESTDIR}/usr/bin/${bb_applet}" "${DESTDIR}/bin/${bb_applet}"
+done
+
 while read -r dest candidates; do
     [ -n "${dest}" ] || continue
     copy_exec_first "${dest}" ${candidates}
