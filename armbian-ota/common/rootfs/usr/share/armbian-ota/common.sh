@@ -10,6 +10,9 @@ OTA_LOG_DIR="${OTA_LOG_DIR:-/var/log/armbian-ota}"
 OTA_LOG_FILE="${OTA_LOG_FILE:-${OTA_LOG_DIR}/ota.log}"
 
 # OTA package payload file names shared by A/B and recovery modes.
+# Defaults are the legacy gz names; ota_resolve_payload_names() rebinds them
+# to the payload files actually present in an extracted package (xz builds
+# ship rootfs.tar.xz / boot.tar.xz).
 OTA_PAYLOAD_ROOTFS_TAR="rootfs.tar.gz"
 OTA_PAYLOAD_ROOTFS_SHA="rootfs.sha256"
 OTA_PAYLOAD_BOOT_TAR="boot.tar.gz"
@@ -18,6 +21,123 @@ OTA_PAYLOAD_BOOT_SHA="boot.sha256"
 # Encrypted-payload artifacts (present when the package was built with
 # CRYPTROOT_ENABLE=yes). Mirrors package-create.sh on the build side.
 OTA_PAYLOAD_ROOTFS_ENC="rootfs.tar.gz.enc"
+
+# Rebind OTA_PAYLOAD_ROOTFS_TAR / OTA_PAYLOAD_BOOT_TAR / OTA_PAYLOAD_ROOTFS_ENC
+# to the payload files actually staged in $1 (an extracted OTA work dir).
+# The xz suffix wins over legacy gz so the layout cannot be mis-detected.
+ota_resolve_payload_names() {
+    local work_dir="$1" suffix
+
+    OTA_PAYLOAD_ROOTFS_TAR=""
+    OTA_PAYLOAD_BOOT_TAR=""
+    for suffix in tar.xz tar.gz; do
+        if [ -z "${OTA_PAYLOAD_ROOTFS_TAR}" ] && [ -f "${work_dir}/rootfs.${suffix}" ]; then
+            OTA_PAYLOAD_ROOTFS_TAR="rootfs.${suffix}"
+        fi
+        if [ -z "${OTA_PAYLOAD_BOOT_TAR}" ] && [ -f "${work_dir}/boot.${suffix}" ]; then
+            OTA_PAYLOAD_BOOT_TAR="boot.${suffix}"
+        fi
+    done
+
+    [ -n "${OTA_PAYLOAD_ROOTFS_TAR}" ] ||
+        error_exit "No rootfs payload in ${work_dir} (expected rootfs.tar.xz or rootfs.tar.gz)"
+    OTA_PAYLOAD_ROOTFS_ENC="${OTA_PAYLOAD_ROOTFS_TAR}.enc"
+    return 0
+}
+
+# Runtime identity and capability declaration. OTA_RUNTIME_VERSION tracks the
+# armbian-ota deb version; bump it whenever OTA_RUNTIME_FORMATS or the apply
+# hook contract changes. Packages declare PAYLOAD_FORMAT / MIN_RUNTIME_VERSION
+# in package.env and phase 1 negotiates against these (docs/10-ota-package-formats.md).
+OTA_RUNTIME_VERSION="1.1"
+OTA_RUNTIME_FORMATS="gz xz"
+OTA_HOOK_API="1"
+OTA_APPLY_HOOK_DEFAULT_NAME="ota-apply-hook.sh"
+
+# Single format map mirrored in package-create.sh (build side) and the
+# initramfs payload lib: fmt -> tar extract flag.
+ota_format_tar_extract_flag() {
+    case "${1}" in
+        *.tar.gz|*.tgz) echo "-xzf" ;;
+        *.tar.xz)       echo "-xJf" ;;
+        *.tar.zst)      echo "--zstd" ;;
+        *)              echo "" ;;
+    esac
+}
+
+# Magic-byte sniff: the payload's first bytes must match its suffix so a
+# renamed archive cannot bypass format negotiation.
+ota_verify_tar_magic() {
+    local file="$1" magic
+    [ -f "${file}" ] || return 1
+    magic="$(dd if="${file}" bs=6 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    case "${file}" in
+        *.tar.gz|*.tgz) [ "${magic#1f8b}" != "${magic}" ] ;;
+        *.tar.xz)       [ "${magic#fd377a585a00}" != "${magic}" ] ;;
+        *.tar.zst)      [ "${magic#28b52ffd}" != "${magic}" ] ;;
+        *)              return 0 ;;
+    esac
+}
+
+# Phase-1 negotiation: package declarations vs this runtime's capabilities.
+# Must fail fast with actionable errors (see docs/10-ota-package-formats.md).
+ota_check_package_requirements() {
+    local work_dir="$1" fmt min_ver hook_name
+
+    min_ver="$(package_env_get_value "MIN_RUNTIME_VERSION" || true)"
+    if [ -n "${min_ver}" ]; then
+        # sort -c -V with min_ver first: "required <= have" passes the check
+        if ! printf '%s\n%s\n' "${min_ver}" "${OTA_RUNTIME_VERSION}" | sort -c -V 2>/dev/null; then
+            error_exit "Device OTA runtime too old for this package (have ${OTA_RUNTIME_VERSION}, need ${min_ver}); upgrade the OTA tooling first"
+        fi
+    fi
+
+    fmt="$(package_env_get_value "PAYLOAD_FORMAT" || true)"
+    if [ -n "${fmt}" ]; then
+        case " ${OTA_RUNTIME_FORMATS} " in
+            *" ${fmt} "*) ;;
+            *) error_exit "Device OTA runtime cannot decode '${fmt}' payloads (supports: ${OTA_RUNTIME_FORMATS})" ;;
+        esac
+        case "${OTA_PAYLOAD_ROOTFS_TAR}" in
+            rootfs.tar.${fmt}) ;;
+            *) error_exit "Package declares PAYLOAD_FORMAT=${fmt} but payload is ${OTA_PAYLOAD_ROOTFS_TAR}" ;;
+        esac
+    fi
+
+    hook_name="$(ota_resolve_hook_name "${work_dir}")"
+    if [ -n "${hook_name}" ]; then
+        verify_sha256 "${work_dir}/${hook_name}" "${work_dir}/hook.sha256" "apply hook"
+    fi
+
+    ota_verify_tar_magic "${work_dir}/${OTA_PAYLOAD_ROOTFS_TAR}" ||
+        error_exit "Payload ${OTA_PAYLOAD_ROOTFS_TAR} contents do not match its suffix (magic mismatch)"
+    if [ -n "${OTA_PAYLOAD_BOOT_TAR}" ]; then
+        ota_verify_tar_magic "${work_dir}/${OTA_PAYLOAD_BOOT_TAR}" ||
+            error_exit "Payload ${OTA_PAYLOAD_BOOT_TAR} contents do not match its suffix (magic mismatch)"
+    fi
+}
+
+# Resolve the apply hook filename for a staged work dir: declared name wins,
+# conventional name is the fallback. Empty when the package carries no hook.
+ota_resolve_hook_name() {
+    local work_dir="$1" declared
+
+    # Read the staged package.env directly: this must not depend on the
+    # metadata cache being loaded (mirrors the initramfs implementation).
+    if [ -f "${work_dir}/package.env" ]; then
+        declared="$(sed -n 's/^OTA_APPLY_HOOK=//p' "${work_dir}/package.env" | head -n1)"
+    fi
+    if [ -n "${declared}" ] && [ -f "${work_dir}/${declared}" ]; then
+        printf '%s\n' "${declared}"
+        return 0
+    fi
+    if [ -f "${work_dir}/${OTA_APPLY_HOOK_DEFAULT_NAME}" ]; then
+        printf '%s\n' "${OTA_APPLY_HOOK_DEFAULT_NAME}"
+        return 0
+    fi
+    return 1
+}
+
 OTA_PAYLOAD_MANIFEST="payload.manifest"
 OTA_PAYLOAD_MANIFEST_SIG="payload.manifest.sig"
 OTA_PAYLOAD_KDF_INFO="armbian-ota-payload-v1"
@@ -119,7 +239,7 @@ load_package_env_metadata() {
 
     log_info "Reading OTA package metadata from ${package_path}" >&2
     manifest_entry="$(
-        tar -tzf "${package_path}" 2>/dev/null \
+        tar -tf "${package_path}" 2>/dev/null \
             | awk '/(^|\/)package\.env$/ { print; exit }'
     )"
     if [ -z "${manifest_entry}" ]; then
@@ -192,7 +312,20 @@ extract_ota_package() {
 
     rm -rf "${dest_dir}"
     mkdir -p "${dest_dir}"
-    tar -xzf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+    # GNU tar auto-detects compression: handles both the legacy tar.gz
+    # package and the xz-layout plain outer tar.
+    tar -xf "${package_path}" -C "${dest_dir}" || error_exit "Failed to extract OTA package: ${package_path}"
+    ota_resolve_payload_names "${dest_dir}"
+    # Rebind staged metadata so negotiation reads the extracted package.env
+    # (loads OTA_PACKAGE_ENV_CONTENT for package_env_get_value).
+    [ -f "${dest_dir}/package.env" ] && load_staged_package_env "${dest_dir}/package.env"
+}
+
+# Point the metadata cache at a staged package.env (no archive access needed).
+load_staged_package_env() {
+    OTA_PACKAGE_ENV_PATH="staged:${1}"
+    OTA_PACKAGE_ENV_CONTENT="$(cat "${1}" 2>/dev/null)" || return 1
+    return 0
 }
 
 verify_sha256() {

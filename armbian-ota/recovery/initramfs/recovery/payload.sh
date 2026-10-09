@@ -13,6 +13,10 @@
 # Sets globals: HAS_BOOT_TAR, HAS_BOOT_ITB, DO_BOOT_OTA, BOOT_MNT (reassigned).
 
 # ===== tar extract helper with stderr logging =====
+# Format map (initramfs mirror; keep in sync with common.sh and
+# package-create.sh -- docs/10-ota-package-formats.md). The real GNU tar +
+# decompressors are staged by the 99-copy-tools hook; busybox applets would
+# run single-threaded. Flags match the A/B extraction path.
 extract_tar() {
     archive="$1"
     target="$2"
@@ -21,8 +25,15 @@ extract_tar() {
 
     rm -f "${err_file}" 2>/dev/null || true
 
-    log "${label}: run tar -xzf ${archive} -C ${target}"
-    if tar -xzf "${archive}" -C "${target}" 2>"${err_file}"; then
+    case "${archive}" in
+        *.tar.xz)  tar_extract="tar -xJf" ;;
+        *.tar.zst) tar_extract="tar --zstd -xf" ;;
+        *)         tar_extract="tar -xzf" ;;
+    esac
+    tar_extract="${tar_extract} --xattrs --acls --numeric-owner"
+
+    log "${label}: run ${tar_extract} ${archive} -C ${target}"
+    if ${tar_extract} "${archive}" -C "${target}" 2>"${err_file}"; then
         log "${label}: extract succeeded"
         log_tail "${label}" "${err_file}" 20
         rm -f "${err_file}" 2>/dev/null || true
@@ -33,6 +44,82 @@ extract_tar() {
     log_tail "${label} stderr" "${err_file}" 80
     rm -f "${err_file}" 2>/dev/null || true
     return 1
+}
+
+# ===== package-provided apply hook (OTA_HOOK_API=1) =====
+# Resolve the hook staged by phase 1: declared OTA_APPLY_HOOK in the staged
+# package.env wins, conventional ota-apply-hook.sh is the fallback. Prints
+# the file path; returns 1 when the package carries no hook.
+ota_staged_hook_path() {
+    hook_name=""
+
+    if [ -f "${OTA_DIR}/package.env" ]; then
+        hook_name="$(sed -n 's/^OTA_APPLY_HOOK=//p' "${OTA_DIR}/package.env" | head -n1)"
+    fi
+    [ -n "${hook_name}" ] && [ -f "${OTA_DIR}/${hook_name}" ] || hook_name="ota-apply-hook.sh"
+    [ -f "${OTA_DIR}/${hook_name}" ] || return 1
+    printf '%s\n' "${OTA_DIR}/${hook_name}"
+}
+
+# Capture the pre-OTA armbianEnv before a hook can reformat anything, so
+# ota_patch_config's overlays merge keeps working when the built-in apply
+# (which owns this capture) is replaced by a hook.
+ota_capture_pre_ota_env() {
+    if [ -f "${ROOT_MNT}/boot/armbianEnv.txt" ]; then
+        cp "${ROOT_MNT}/boot/armbianEnv.txt" "${LOGDIR}/armbianEnv.pre-ota" &&
+            log "captured pre-OTA armbianEnv.txt from rootfs /boot"
+    fi
+    if [ "${HAS_BOOT_PART:-0}" -eq 1 ]; then
+        mkdir -p /mnt/preenv
+        if mount -t ext4 -o ro "${BOOT_DEV}" /mnt/preenv 2>/dev/null; then
+            if [ -f /mnt/preenv/armbianEnv.txt ]; then
+                cp /mnt/preenv/armbianEnv.txt "${LOGDIR}/armbianEnv.pre-ota" &&
+                    log "captured pre-OTA armbianEnv.txt from boot partition"
+            fi
+            umount /mnt/preenv 2>/dev/null || true
+        fi
+        rmdir /mnt/preenv 2>/dev/null || true
+    fi
+    return 0
+}
+
+# Run the package-provided apply hook. Contract (docs/10-ota-package-formats.md):
+# sourced, must define hook_main(); owns payload application only -- mounts,
+# state, config patching, unmount and reboot stay with this orchestrator.
+ota_run_apply_hook() {
+    hook_path="$(ota_staged_hook_path)" || {
+        log "ERROR: apply hook vanished from ${OTA_DIR}"
+        return 1
+    }
+
+    ota_capture_pre_ota_env
+
+    OTA_HOOK_API="1"
+    OTA_HOOK_MODE="recovery"
+    OTA_HOOK_PATH="${hook_path}"
+    export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
+
+    log "sourcing apply hook ${hook_path} (API ${OTA_HOOK_API})"
+    # shellcheck disable=SC1090
+    . "${hook_path}" || {
+        log "ERROR: failed to source apply hook ${hook_path}"
+        return 1
+    }
+    type hook_main >/dev/null 2>&1 || {
+        log "ERROR: apply hook ${hook_path} does not define hook_main()"
+        return 1
+    }
+
+    start_heartbeat "apply hook running (${hook_path##*/})"
+    hook_main
+    hook_rc=$?
+    stop_heartbeat
+    if [ "${hook_rc}" -ne 0 ]; then
+        log "ERROR: apply hook hook_main() failed rc=${hook_rc}"
+        return 1
+    fi
+    log "apply hook completed successfully"
+    return 0
 }
 
 set_env_key() {
@@ -232,10 +319,10 @@ ota_apply_rootfs() {
     fi
 
     log "extracting ${ROOTFS_TAR} -> ${ROOT_MNT} ..."
-    start_heartbeat "extracting rootfs.tar.gz to ${ROOT_MNT}"
+    start_heartbeat "extracting ${ROOTFS_TAR##*/} to ${ROOT_MNT}"
     if ! extract_tar "${ROOTFS_TAR}" "${ROOT_MNT}" "rootfs"; then
         stop_heartbeat
-        log "ERROR: extract rootfs.tar.gz failed, abort OTA"
+        log "ERROR: extract ${ROOTFS_TAR##*/} failed, abort OTA"
         return 1
     fi
     stop_heartbeat
@@ -278,7 +365,7 @@ ota_apply_boot() {
     [ "$HAS_BOOT_PART" -eq 1 ] && [ "$HAS_BOOT_TAR" -eq 1 ] && DO_BOOT_OTA=1
 
     if [ "$DO_BOOT_OTA" -eq 1 ]; then
-        log "boot OTA enabled (separate boot partition + boot.tar.gz present)"
+        log "boot OTA enabled (separate boot partition + ${BOOT_TAR##*/} present)"
 
         mkdir -p "${BOOT_MNT}"
         log "mounting ${BOOT_DEV} -> ${BOOT_MNT} ..."
@@ -288,7 +375,7 @@ ota_apply_boot() {
             DO_BOOT_OTA=0
         fi
     else
-        log "boot OTA disabled (no separate boot partition or no boot.tar.gz)"
+        log "boot OTA disabled (no separate boot partition or no boot payload)"
     fi
 
     if [ "$DO_BOOT_OTA" -eq 1 ]; then
@@ -303,10 +390,10 @@ ota_apply_boot() {
         fi
 
         log "extracting ${BOOT_TAR} -> ${BOOT_MNT} ..."
-        start_heartbeat "extracting boot.tar.gz to ${BOOT_MNT}"
+        start_heartbeat "extracting ${BOOT_TAR##*/} to ${BOOT_MNT}"
         if ! extract_tar "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
             stop_heartbeat
-            log "ERROR: extract boot.tar.gz failed, system may be broken"
+            log "ERROR: extract ${BOOT_TAR##*/} failed, system may be broken"
         fi
         stop_heartbeat
 
