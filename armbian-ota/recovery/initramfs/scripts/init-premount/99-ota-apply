@@ -160,22 +160,47 @@ ota_validate_recovery_state || {
 ota_log_init
 log "OTA confirmed, applying..."
 
-# 3) apply rootfs (mkfs rebuild or rm -rf clean, then extract + first-login markers)
-ota_apply_rootfs || {
-    umount "${ROOT_MNT}" 2>/dev/null || true
-    unmount_recovery_transaction_store
-    exit 0
-}
-
-# 4-6) apply boot (mount + extract boot.tar.gz, write boot.itb)
-ota_apply_boot || {
-    if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
-        umount "${BOOT_MNT}" 2>/dev/null || true
+# 3-6) apply: a package-provided apply hook (docs/10-ota-package-formats.md)
+# takes priority over the built-in payload application. Mounting, config
+# patching, state commit, unmount and reboot stay with this orchestrator.
+if ota_staged_hook_path >/dev/null 2>&1; then
+    log "apply hook present in ${OTA_DIR}, delegating payload application"
+    DO_BOOT_OTA="${DO_BOOT_OTA:-0}"
+    ota_run_apply_hook || {
+        umount "${ROOT_MNT}" 2>/dev/null || true
+        unmount_recovery_transaction_store
+        exit 0
+    }
+    # Expose the boot partition to the config patcher, mirroring the state
+    # ota_apply_boot would have left behind (hooks do not mount it themselves).
+    if [ "${HAS_BOOT_PART:-0}" -eq 1 ] && [ -z "${BOOT_MNT}" ]; then
+        BOOT_MNT="/mnt/boot"
+        mkdir -p "${BOOT_MNT}"
+        if mount -t ext4 -o rw "${BOOT_DEV}" "${BOOT_MNT}"; then
+            DO_BOOT_OTA=1
+        else
+            BOOT_MNT=""
+            log "WARN: cannot mount ${BOOT_DEV} for config patch after hook"
+        fi
     fi
-    umount "${ROOT_MNT}" 2>/dev/null || true
-    unmount_recovery_transaction_store
-    exit 0
-}
+else
+    # 3) apply rootfs (mkfs rebuild or rm -rf clean, then extract + first-login markers)
+    ota_apply_rootfs || {
+        umount "${ROOT_MNT}" 2>/dev/null || true
+        unmount_recovery_transaction_store
+        exit 0
+    }
+
+    # 4-6) apply boot (mount + extract boot payload, write boot.itb)
+    ota_apply_boot || {
+        if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
+            umount "${BOOT_MNT}" 2>/dev/null || true
+        fi
+        umount "${ROOT_MNT}" 2>/dev/null || true
+        unmount_recovery_transaction_store
+        exit 0
+    }
+fi
 
 # 7) fix UUIDs in armbianEnv.txt / fstab / crypttab
 ota_patch_config
