@@ -12,6 +12,16 @@ OTA_PAYLOAD_KDF_INFO="armbian-ota-payload-v1"
 # ota_write_signed_manifest. Global so the two steps can run in separate hooks.
 OTA_PAYLOAD_ENC_IV=""
 
+# Use parallel gzip when available. The output stays standard gzip,
+# so on-device "tar -xzf" reads it unchanged.
+function ota_gzip_prog() {
+    if command -v pigz >/dev/null 2>&1; then
+        echo pigz
+    else
+        echo gzip
+    fi
+}
+
 function ota_require_host_tools() {
     local tool
 
@@ -70,7 +80,7 @@ function ota_verify_extracted_archives() {
             return 1
         fi
 
-        if ! tar -tzf "${rootfs_tar}" >/dev/null 2>&1; then
+        if ! tar -I "$(ota_gzip_prog)" -tf "${rootfs_tar}" >/dev/null 2>&1; then
             display_alert "Error: rootfs.tar.gz is corrupted or invalid" "" "err"
             return 1
         fi
@@ -91,7 +101,7 @@ function ota_verify_extracted_archives() {
         ota_verify_sha256_file "${ota_temp_dir}" "${boot_sha_file}" "boot.itb" || return 1
         display_alert "Archive verification completed" "boot.itb and rootfs.tar.gz are valid" "info"
     elif [[ -f "${boot_tar}" ]]; then
-        if ! tar -tzf "${boot_tar}" >/dev/null 2>&1; then
+        if ! tar -I "$(ota_gzip_prog)" -tf "${boot_tar}" >/dev/null 2>&1; then
             display_alert "Error: boot.tar.gz is corrupted or invalid" "" "err"
             return 1
         fi
@@ -171,7 +181,7 @@ function ota_create_final_tarball() {
         {
             printf '%s\0' "package.env"
             find . -mindepth 1 ! -path "./package.env" ! -type d -printf '%P\0' | LC_ALL=C sort -z
-        } | tar --null -czf "${ota_output_path}" -T -
+        } | tar --null -I "$(ota_gzip_prog)" -cf "${ota_output_path}" -T -
     )
 }
 
@@ -318,7 +328,7 @@ function ota_archive_directory() {
     fi
 
     display_alert "Extracting ${label}" "${source_dir} -> ${archive_name}" "info"
-    if (cd "${source_dir}" && tar -czf "${archive}" "$@" .); then
+    if (cd "${source_dir}" && tar -I "$(ota_gzip_prog)" -cf "${archive}" "$@" .); then
         local archive_size
         archive_size="$(stat -c%s "${archive}")"
         display_alert "${label} archived" "${archive_name} size: $((archive_size / 1024)) KB" "info"
@@ -546,7 +556,7 @@ function ota_finalize_payload_package() {
     ota_size="$(stat -c%s "${ota_output_path}")"
     display_alert "OTA package created successfully" "${ota_package_name} ($((ota_size / 1024 / 1024)) MB)" "info"
     display_alert "OTA package contents" "" "info"
-    tar -tzf "${ota_output_path}" | head -20 | while read -r file; do
+    tar -I "$(ota_gzip_prog)" -tf "${ota_output_path}" | head -20 | while read -r file; do
         display_alert "  - ${file}" "" "info"
     done
     checksum_file="${DEST}/images/${BOARD}/ota/$(ota_image_checksum_name "${base_image_name}")"
