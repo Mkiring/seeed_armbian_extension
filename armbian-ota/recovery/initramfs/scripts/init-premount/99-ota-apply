@@ -159,6 +159,7 @@ ota_validate_recovery_state || {
 # for the extract/patch work below.
 ota_log_init
 log "OTA confirmed, applying..."
+log "tools: PATH=${PATH} tar=$(command -v tar 2>/dev/null) xz=$(command -v xz 2>/dev/null) tar-flavor=$(/usr/bin/tar --version 2>/dev/null | head -n1)"
 
 # 3-6) apply: a package-provided apply hook (docs/10-ota-package-formats.md)
 # takes priority over the built-in payload application. Mounting, config
