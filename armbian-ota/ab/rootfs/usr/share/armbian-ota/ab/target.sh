@@ -492,10 +492,38 @@ ab_update_target_partition() {
         error_exit "Failed to mount target root partition"
     }
 
-    ab_apply_target_rootfs "${temp_work}" "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}" "${rootfs_prebuilt}" || {
-        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
-        error_exit "Failed to apply rootfs payload"
-    }
+    # Package-provided apply hook (docs/10-ota-package-formats.md): when the
+    # staged package carries one, hook_main() replaces the payload-application
+    # section below. Slot/env bookkeeping, filesystem config, sync and cleanup
+    # stay with this function. Hooks must call ab_write_target_state so the
+    # firstboot dual gate still fires on the new slot.
+    ab_hook_name="$(ota_resolve_hook_name "${temp_work}" 2>/dev/null || true)"
+    if [ -n "${ab_hook_name}" ]; then
+        log_info "Apply hook present (${ab_hook_name}), delegating payload application"
+        OTA_HOOK_API="1"
+        OTA_HOOK_MODE="ab"
+        OTA_HOOK_PATH="${temp_work}/${ab_hook_name}"
+        export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
+        # shellcheck disable=SC1090
+        . "${OTA_HOOK_PATH}" || {
+            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+            error_exit "Failed to source apply hook ${OTA_HOOK_PATH}"
+        }
+        type hook_main >/dev/null 2>&1 || {
+            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+            error_exit "Apply hook does not define hook_main()"
+        }
+        hook_main || {
+            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+            error_exit "Apply hook hook_main() failed"
+        }
+        log_info "Apply hook completed successfully"
+    else
+        ab_apply_target_rootfs "${temp_work}" "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}" "${rootfs_prebuilt}" || {
+            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+            error_exit "Failed to apply rootfs payload"
+        }
+    fi
 
     if [ "${target_root_type}" = "crypto_LUKS" ]; then
         target_root_uuid="${target_root_luks_uuid}"
@@ -503,10 +531,14 @@ ab_update_target_partition() {
         target_root_uuid="$(ab_get_uuid_by_label "${target_root_label}")"
     fi
     target_boot_uuid="$(ab_get_uuid_by_label "${target_boot_label}")"
-    ab_update_target_boot "${temp_work}" "${root_mnt}" "${target_boot_dev}" "${target_slot}" "${target_root_type}" "${target_root_uuid}" || {
-        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
-        error_exit "Failed to update target boot partition"
-    }
+    if [ -n "${ab_hook_name}" ]; then
+        log_info "Apply hook owns target boot update as well"
+    else
+        ab_update_target_boot "${temp_work}" "${root_mnt}" "${target_boot_dev}" "${target_slot}" "${target_root_type}" "${target_root_uuid}" || {
+            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+            error_exit "Failed to update target boot partition"
+        }
+    fi
     ab_update_target_filesystem_config "${root_mnt}" "${target_root_label}" "${target_boot_label}" "${target_root_type}" "${target_root_uuid}" "${target_boot_uuid}" || {
         ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
         error_exit "Failed to update target filesystem configuration"
