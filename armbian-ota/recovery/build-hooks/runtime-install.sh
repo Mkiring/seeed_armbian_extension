@@ -8,6 +8,10 @@ function ota_install_recovery_runtime_to_rootfs() {
 
     ota_install_common_runtime_to_rootfs "${root_dir}" || return 1
     ota_sync_rootfs "Recovery OTA runtime" "${OTA_RECOVERY_ROOTFS}" "${root_dir}"
+
+    display_alert "Recovery OTA runtime" "Enabling firstboot hook service" "info"
+    chroot "${root_dir}" systemctl enable armbian-ota-firstboot-hook.service \
+        || display_alert "Recovery OTA runtime" "Failed to enable armbian-ota-firstboot-hook.service" "warn"
 }
 
 function ota_install_recovery_initramfs_file() {

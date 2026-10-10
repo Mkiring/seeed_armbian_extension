@@ -19,6 +19,8 @@ function ota_enable_ab_runtime_services() {
         || display_alert "${title}" "Failed to enable armbian-ota-init-uboot.service" "warn"
     chroot "${root_dir}" systemctl enable armbian-ota-firstboot.service \
         || display_alert "${title}" "Failed to enable armbian-ota-firstboot.service" "warn"
+    chroot "${root_dir}" systemctl enable armbian-ota-firstboot-hook.service \
+        || display_alert "${title}" "Failed to enable armbian-ota-firstboot-hook.service" "warn"
 }
 
 # Install the Seeed OTA common initramfs pieces (userdata resolver) into an
