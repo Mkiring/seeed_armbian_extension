@@ -16,7 +16,20 @@
 # Format map (initramfs mirror; keep in sync with common.sh and
 # package-create.sh -- docs/10-ota-package-formats.md). The real GNU tar +
 # decompressors are staged by the 99-copy-tools hook; busybox applets would
-# run single-threaded. Flags match the A/B extraction path.
+# run single-threaded. GNU tar gets the full attribute-preserving flag set
+# (matching the A/B extraction path); busybox tar understands only
+# --numeric-owner and dies on --xattrs/--acls, so probe once.
+ota_tar_gnu() {
+    if [ -z "${OTA_TAR_IS_GNU:-}" ]; then
+        if tar --version 2>/dev/null | head -n1 | grep -q "GNU tar"; then
+            OTA_TAR_IS_GNU=1
+        else
+            OTA_TAR_IS_GNU=0
+        fi
+    fi
+    [ "${OTA_TAR_IS_GNU}" = "1" ]
+}
+
 extract_tar() {
     archive="$1"
     target="$2"
@@ -30,7 +43,11 @@ extract_tar() {
         *.tar.zst) tar_extract="tar --zstd -xf" ;;
         *)         tar_extract="tar -xzf" ;;
     esac
-    tar_extract="${tar_extract} --xattrs --acls --numeric-owner"
+    if ota_tar_gnu; then
+        tar_extract="${tar_extract} --xattrs --acls --numeric-owner"
+    else
+        tar_extract="${tar_extract} --numeric-owner"
+    fi
 
     log "${label}: run ${tar_extract} ${archive} -C ${target}"
     if ${tar_extract} "${archive}" -C "${target}" 2>"${err_file}"; then
