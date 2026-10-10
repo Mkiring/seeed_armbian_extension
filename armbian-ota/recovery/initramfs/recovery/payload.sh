@@ -240,10 +240,10 @@ ota_apply_rootfs() {
     fi
 
     log "extracting ${ROOTFS_TAR} -> ${ROOT_MNT} ..."
-    start_heartbeat "extracting rootfs.tar.gz to ${ROOT_MNT}"
+    start_heartbeat "extracting ${ROOTFS_TAR##*/} to ${ROOT_MNT}"
     if ! extract_tar "${ROOTFS_TAR}" "${ROOT_MNT}" "rootfs"; then
         stop_heartbeat
-        log "ERROR: extract rootfs.tar.gz failed, abort OTA"
+        log "ERROR: extract ${ROOTFS_TAR##*/} failed, abort OTA"
         return 1
     fi
     stop_heartbeat
@@ -286,7 +286,7 @@ ota_apply_boot() {
     [ "$HAS_BOOT_PART" -eq 1 ] && [ "$HAS_BOOT_TAR" -eq 1 ] && DO_BOOT_OTA=1
 
     if [ "$DO_BOOT_OTA" -eq 1 ]; then
-        log "boot OTA enabled (separate boot partition + boot.tar.gz present)"
+        log "boot OTA enabled (separate boot partition + ${BOOT_TAR##*/} present)"
 
         mkdir -p "${BOOT_MNT}"
         log "mounting ${BOOT_DEV} -> ${BOOT_MNT} ..."
@@ -296,7 +296,7 @@ ota_apply_boot() {
             DO_BOOT_OTA=0
         fi
     else
-        log "boot OTA disabled (no separate boot partition or no boot.tar.gz)"
+        log "boot OTA disabled (no separate boot partition or no boot payload)"
     fi
 
     if [ "$DO_BOOT_OTA" -eq 1 ]; then
@@ -311,10 +311,10 @@ ota_apply_boot() {
         fi
 
         log "extracting ${BOOT_TAR} -> ${BOOT_MNT} ..."
-        start_heartbeat "extracting boot.tar.gz to ${BOOT_MNT}"
+        start_heartbeat "extracting ${BOOT_TAR##*/} to ${BOOT_MNT}"
         if ! extract_tar "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
             stop_heartbeat
-            log "ERROR: extract boot.tar.gz failed, system may be broken"
+            log "ERROR: extract ${BOOT_TAR##*/} failed, system may be broken"
         fi
         stop_heartbeat
 
