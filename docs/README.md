@@ -13,6 +13,8 @@ Read in order for a full walkthrough, or jump to what you need.
 | 6 | [Secure Boot](06-secure-boot.md) | Signed bootchain and signing keys |
 | 7 | [Tools & CI](07-tools-and-ci.md) | Offline FIT re-signing, deb release, CI builds |
 | 8 | [Hardening](08-hardening.md) | Always-on brute-force defense and ssh-protect |
+| 9 | [OTA Internals](09-ota-internals.md) | Developer reference: flow, payloads, state machines |
+| 10 | [OTA Package Formats](10-ota-package-formats.md) | Format negotiation, apply hooks, compatibility |
 
 ## Pick your path
 
