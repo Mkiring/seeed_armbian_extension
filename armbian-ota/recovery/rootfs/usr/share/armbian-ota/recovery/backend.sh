@@ -28,6 +28,7 @@ recovery_start_ota() {
     ota_verify_payload "${OTA_WORK_DIR}" \
         "${OTA_PAYLOAD_ROOTFS_TAR}" "${OTA_PAYLOAD_ROOTFS_SHA}" \
         "${OTA_PAYLOAD_BOOT_TAR}" "${OTA_PAYLOAD_BOOT_SHA}" "${OTA_PAYLOAD_BOOT_ITB}"
+    ota_check_package_requirements "${OTA_WORK_DIR}"
     state_mark_prepared "recovery" "prepared" "${package_path}"
 
     log_info "Recovery OTA prepared successfully"

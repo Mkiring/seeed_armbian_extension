@@ -5,13 +5,50 @@
 # tar: compression happens exactly once, decode parallelizes on device
 # (xz >= 5.7 threaded decompression), and metadata members are readable
 # without decompression. "gz" reproduces the legacy double-gzip layout.
+# "zstd" mirrors the xz layout with .tar.zst payloads (the target runtime
+# must list zstd in OTA_RUNTIME_FORMATS). See docs/10-ota-package-formats.md.
 OTA_PAYLOAD_COMP="${OTA_PAYLOAD_COMP:-xz}"
-if [[ "${OTA_PAYLOAD_COMP}" == "xz" ]]; then
-    OTA_PAYLOAD_TAR_SUFFIX="tar.xz"
-else
-    OTA_PAYLOAD_COMP="gz"
-    OTA_PAYLOAD_TAR_SUFFIX="tar.gz"
-fi
+case "${OTA_PAYLOAD_COMP}" in
+    xz)   OTA_PAYLOAD_TAR_SUFFIX="tar.xz" ;;
+    gz)   OTA_PAYLOAD_TAR_SUFFIX="tar.gz" ;;
+    zstd) OTA_PAYLOAD_TAR_SUFFIX="tar.zst" ;;
+    *)
+        display_alert "Error: invalid OTA_PAYLOAD_COMP '${OTA_PAYLOAD_COMP}' (expected xz, gz or zstd)" "" "err"
+        return 1
+        ;;
+esac
+
+# Single format map (build side). Keep in sync with the device-side map in
+# common/rootfs/usr/share/armbian-ota/common.sh and the initramfs payload lib.
+function ota_payload_compress_archive() {
+    # $1 = source dir, $2 = archive path, rest = extra tar flags
+    local source_dir="$1"
+    local archive="$2"
+    shift 2
+
+    case "${OTA_PAYLOAD_TAR_SUFFIX}" in
+        tar.xz)
+            # -T0 makes xz emit multiple independent blocks so device-side
+            # decode parallelizes (threaded .xz decompression, xz >= 5.7).
+            (cd "${source_dir}" && tar -cf - "$@" . | xz -6 -T0 > "${archive}")
+            ;;
+        tar.zst)
+            (cd "${source_dir}" && tar -cf - "$@" . | zstd -19 -T0 --long=27 -q > "${archive}")
+            ;;
+        *)
+            (cd "${source_dir}" && tar -czf "${archive}" "$@" .)
+            ;;
+    esac
+}
+
+function ota_payload_list_archive() {
+    # $1 = archive to integrity-check (tar -t)
+    case "${OTA_PAYLOAD_TAR_SUFFIX}" in
+        tar.xz)  tar -tJf "$1" ;;
+        tar.zst) tar --zstd -tf "$1" ;;
+        *)       tar -tzf "$1" ;;
+    esac
+}
 
 # Encrypted-payload artifact names (present only when ota_payload_encryption_enabled).
 # These mirror the on-device names in common/rootfs/usr/share/armbian-ota/common.sh.
@@ -67,13 +104,11 @@ function ota_verify_extracted_archives() {
     local rootfs_sha_file="${ota_temp_dir}/rootfs.sha256"
     local boot_tar="${ota_temp_dir}/boot.${OTA_PAYLOAD_TAR_SUFFIX}"
     local boot_sha_file="${ota_temp_dir}/boot.sha256"
-    local tar_list_flag="-tzf"
-    [[ "${OTA_PAYLOAD_TAR_SUFFIX}" == "tar.xz" ]] && tar_list_flag="-tJf"
 
     if ota_payload_encryption_enabled; then
-        # rootfs.tar.gz has been replaced by the encrypted blob; its integrity
-        # was already confirmed by the encryption round-trip, and the plaintext
-        # sha256 is re-checked on the device after decryption.
+        # The plaintext payload tar has been replaced by the encrypted blob; its
+        # integrity was already confirmed by the encryption round-trip, and the
+        # plaintext sha256 is re-checked on the device after decryption.
         [[ -f "${enc_tar}" ]] || {
             display_alert "Error: encrypted payload missing" "${OTA_PAYLOAD_ROOTFS_ENC}" "err"
             return 1
@@ -81,11 +116,11 @@ function ota_verify_extracted_archives() {
         display_alert "Archive verification completed" "Encrypted rootfs payload present (plaintext intentionally omitted)" "info"
     else
         if [[ ! -f "${rootfs_tar}" ]]; then
-            display_alert "Error: rootfs.tar.gz not found" "" "err"
+            display_alert "Error: rootfs.${OTA_PAYLOAD_TAR_SUFFIX} not found" "" "err"
             return 1
         fi
 
-        if ! tar "${tar_list_flag}" "${rootfs_tar}" >/dev/null 2>&1; then
+        if ! ota_payload_list_archive "${rootfs_tar}" >/dev/null 2>&1; then
             display_alert "Error: rootfs.${OTA_PAYLOAD_TAR_SUFFIX} is corrupted or invalid" "" "err"
             return 1
         fi
@@ -104,9 +139,9 @@ function ota_verify_extracted_archives() {
         fi
 
         ota_verify_sha256_file "${ota_temp_dir}" "${boot_sha_file}" "boot.itb" || return 1
-        display_alert "Archive verification completed" "boot.itb and rootfs.tar.gz are valid" "info"
+        display_alert "Archive verification completed" "boot.itb and rootfs.${OTA_PAYLOAD_TAR_SUFFIX} are valid" "info"
     elif [[ -f "${boot_tar}" ]]; then
-        if ! tar "${tar_list_flag}" "${boot_tar}" >/dev/null 2>&1; then
+        if ! ota_payload_list_archive "${boot_tar}" >/dev/null 2>&1; then
             display_alert "Error: boot.${OTA_PAYLOAD_TAR_SUFFIX} is corrupted or invalid" "" "err"
             return 1
         fi
@@ -145,7 +180,32 @@ RELEASE=${RELEASE}
 BRANCH=${BRANCH}
 VERSION=${IMAGE_VERSION:-"${REVISION}"}
 KERNEL=${KERNEL_VERSION:-"${IMAGE_INSTALLED_KERNEL_VERSION}"}
+PAYLOAD_FORMAT=${OTA_PAYLOAD_COMP}
 EOF
+
+    # Additive negotiation keys; only stamped when explicitly requested so
+    # transitional packages stay installable on legacy runtimes.
+    if [[ -n "${OTA_MIN_RUNTIME_VERSION:-}" ]]; then
+        echo "MIN_RUNTIME_VERSION=${OTA_MIN_RUNTIME_VERSION}" >> "${ota_mode_file}"
+    fi
+    if [[ -f "${ota_temp_dir}/ota-apply-hook.sh" ]]; then
+        echo "OTA_APPLY_HOOK=ota-apply-hook.sh" >> "${ota_mode_file}"
+    fi
+}
+
+# Stage a package-provided apply hook (OTA_APPLY_HOOK_SCRIPT build variable)
+# into the package as ota-apply-hook.sh + hook.sha256. No-op by default.
+function ota_stage_apply_hook() {
+    local ota_temp_dir="$1"
+
+    [[ -n "${OTA_APPLY_HOOK_SCRIPT:-}" ]] || return 0
+    [[ -f "${OTA_APPLY_HOOK_SCRIPT}" ]] || {
+        display_alert "Error: OTA_APPLY_HOOK_SCRIPT not found" "${OTA_APPLY_HOOK_SCRIPT}" "err"
+        return 1
+    }
+    cp "${OTA_APPLY_HOOK_SCRIPT}" "${ota_temp_dir}/ota-apply-hook.sh"
+    ota_write_sha256_file "${ota_temp_dir}" "ota-apply-hook.sh" "${ota_temp_dir}/hook.sha256"
+    display_alert "OTA package" "Staged apply hook from ${OTA_APPLY_HOOK_SCRIPT}" "info"
 }
 
 function ota_write_version_file() {
@@ -182,10 +242,11 @@ function ota_create_final_tarball() {
     local ota_output_path="$2"
     local tar_compress_flag="-czf"
 
-    # xz payload mode ships an uncompressed outer tar: the payload members are
-    # already compressed, so a second compression pass is wasted work, and the
-    # plain tar lets metadata members be read without decoding anything.
-    [[ "${OTA_PAYLOAD_COMP}" == "xz" ]] && tar_compress_flag="-cf"
+    # Compressed-payload layouts (xz/zstd) ship an uncompressed outer tar: the
+    # payload members are already compressed, so a second compression pass is
+    # wasted work, and the plain tar lets metadata members be read without
+    # decoding anything.
+    [[ "${OTA_PAYLOAD_COMP}" == "xz" || "${OTA_PAYLOAD_COMP}" == "zstd" ]] && tar_compress_flag="-cf"
 
     (
         cd "${ota_temp_dir}" &&
@@ -339,15 +400,7 @@ function ota_archive_directory() {
     fi
 
     display_alert "Extracting ${label}" "${source_dir} -> ${archive_name}" "info"
-    local archive_ok=0
-    if [[ "${archive}" == *.tar.xz ]]; then
-        # -T0 makes xz emit multiple independent blocks so device-side decode
-        # parallelizes (threaded .xz decompression, xz >= 5.7).
-        (cd "${source_dir}" && tar -cf - "$@" . | xz -6 -T0 > "${archive}") || archive_ok=1
-    else
-        (cd "${source_dir}" && tar -czf "${archive}" "$@" .) || archive_ok=1
-    fi
-    if [[ "${archive_ok}" -eq 0 ]]; then
+    if ota_payload_compress_archive "${source_dir}" "${archive}" "$@"; then
         local archive_size
         archive_size="$(stat -c%s "${archive}")"
         display_alert "${label} archived" "${archive_name} size: $((archive_size / 1024)) KB" "info"
@@ -489,12 +542,20 @@ OTA_PAYLOAD_IV=${iv_hex}
 OTA_PAYLOAD_ROOTFS=${OTA_PAYLOAD_ROOTFS_ENC}
 OTA_PAYLOAD_ROOTFS_SHA256=${rootfs_sha}
 OTA_PAYLOAD_BOOT_SHA256=${boot_sha}
+OTA_PAYLOAD_FORMAT=${OTA_PAYLOAD_COMP}
 OTA_MODE=${manifest_mode}
 BOARD=${BOARD}
 RELEASE=${RELEASE}
 VERSION=${IMAGE_VERSION:-${REVISION}}
 KERNEL=${KERNEL_VERSION:-${IMAGE_INSTALLED_KERNEL_VERSION}}
 EOF
+
+    # The apply hook runs as root at boot: in signed builds its identity must
+    # be covered by the manifest signature (docs/10-ota-package-formats.md).
+    if [[ -f "${ota_temp_dir}/ota-apply-hook.sh" ]]; then
+        printf 'OTA_PAYLOAD_HOOK=ota-apply-hook.sh\nOTA_PAYLOAD_HOOK_SHA256=%s\n' \
+            "$(awk '{print $1}' "${ota_temp_dir}/hook.sha256")" >> "${manifest}"
+    fi
 
     privkey="$(ota_resolve_signing_privkey 2>/dev/null)" || {
         display_alert "OTA payload security" "No signing key reachable; shipping encrypted payload WITHOUT signature" "warn"
@@ -544,6 +605,7 @@ function ota_finalize_payload_package() {
     local ota_security_mode="$2"
     local base_image_name ota_package_name ota_output_path manifest_mode checksum_file ota_size summary
 
+    ota_stage_apply_hook "${ota_temp_dir}" || return 1
     ota_verify_extracted_archives "${ota_temp_dir}" "${ota_security_mode}" || return 1
     summary="$(ota_extraction_summary "${ota_temp_dir}" "${ota_security_mode}")"
     display_alert "Extraction summary" "Created ${summary}" "info"
@@ -605,6 +667,9 @@ function pre_umount_final_image__901_create_ota_payload_pkg() {
         sha256sum md5sum awk cp head basename cat date mkdir rm || return 1
 
     if [[ "${OTA_PAYLOAD_COMP}" == "xz" ]] && ! ota_require_host_tools xz; then
+        return 1
+    fi
+    if [[ "${OTA_PAYLOAD_COMP}" == "zstd" ]] && ! ota_require_host_tools zstd; then
         return 1
     fi
 

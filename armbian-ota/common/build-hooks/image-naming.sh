@@ -92,8 +92,10 @@ function ota_image_package_base_name() {
 function ota_image_ota_package_name() {
     local base_image_name="$1"
     local suffix="tar.gz"
-    # xz payload mode ships an uncompressed outer tar (see package-create.sh).
-    [[ "${OTA_PAYLOAD_COMP:-gz}" == "xz" ]] && suffix="tar"
+    # Compressed payload layouts ship an uncompressed outer tar (package-create.sh).
+    case "${OTA_PAYLOAD_COMP:-gz}" in
+        xz|zstd) suffix="tar" ;;
+    esac
     echo "${base_image_name}_OTA.${suffix}"
 }
 
