@@ -161,19 +161,41 @@ ota_log_init
 log "OTA confirmed, applying..."
 log "tools: PATH=${PATH} tar=$(command -v tar 2>/dev/null) xz=$(command -v xz 2>/dev/null) tar-flavor=$(/usr/bin/tar --version 2>/dev/null | head -n1)"
 
-# 3-6) apply: a package-provided apply hook (docs/10-ota-package-formats.md)
-# takes priority over the built-in payload application. Mounting, config
-# patching, state commit, unmount and reboot stay with this orchestrator.
-if ota_staged_hook_path >/dev/null 2>&1; then
-    log "apply hook present in ${OTA_DIR}, delegating payload application"
-    DO_BOOT_OTA="${DO_BOOT_OTA:-0}"
-    ota_run_apply_hook || {
+# 3) source the staged OTA hook once (definition-only script), then run the
+# fixed call points around the built-in apply (docs/10-ota-package-formats.md).
+# Mounting, config patching, state commit, unmount and reboot stay here.
+DO_BOOT_OTA="${DO_BOOT_OTA:-0}"
+if ota_source_staged_hook; then
+    OTA_HOOK_MODE="recovery"
+    export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
+else
+    OTA_HOOK_PATH=""
+fi
+
+# hook_pre_apply: old rootfs is still readable/writable, nothing rebuilt yet.
+if ! ota_call_hook hook_pre_apply; then
+    log "ERROR: hook_pre_apply failed, abort OTA"
+    umount "${ROOT_MNT}" 2>/dev/null || true
+    unmount_recovery_transaction_store
+    exit 0
+fi
+
+# hook_apply (optional): replaces the built-in payload application entirely.
+if [ -n "${OTA_HOOK_PATH}" ] && type hook_apply >/dev/null 2>&1; then
+    log "hook_apply takes over payload application"
+    ota_capture_pre_ota_env
+    start_heartbeat "OTA hook hook_apply running"
+    hook_apply
+    hook_rc=$?
+    stop_heartbeat
+    if [ "${hook_rc}" -ne 0 ]; then
+        log "ERROR: hook_apply failed rc=${hook_rc}, abort OTA"
         umount "${ROOT_MNT}" 2>/dev/null || true
         unmount_recovery_transaction_store
         exit 0
-    }
+    fi
     # Expose the boot partition to the config patcher, mirroring the state
-    # ota_apply_boot would have left behind (hooks do not mount it themselves).
+    # ota_apply_boot would have left behind.
     if [ "${HAS_BOOT_PART:-0}" -eq 1 ] && [ -z "${BOOT_MNT}" ]; then
         BOOT_MNT="/mnt/boot"
         mkdir -p "${BOOT_MNT}"
@@ -185,14 +207,14 @@ if ota_staged_hook_path >/dev/null 2>&1; then
         fi
     fi
 else
-    # 3) apply rootfs (mkfs rebuild or rm -rf clean, then extract + first-login markers)
+    # built-in apply rootfs (mkfs rebuild or rm -rf clean, then extract)
     ota_apply_rootfs || {
         umount "${ROOT_MNT}" 2>/dev/null || true
         unmount_recovery_transaction_store
         exit 0
     }
 
-    # 4-6) apply boot (mount + extract boot payload, write boot.itb)
+    # built-in apply boot (mount + extract boot payload, write boot.itb)
     ota_apply_boot || {
         if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
             umount "${BOOT_MNT}" 2>/dev/null || true
@@ -205,6 +227,23 @@ fi
 
 # 7) fix UUIDs in armbianEnv.txt / fstab / crypttab
 ota_patch_config
+
+# 7.5) hook_post_apply: new rootfs is final and still mounted; last chance to
+# inject or migrate. Then carry hook_firstboot into the new system.
+if ! ota_call_hook hook_post_apply; then
+    log "ERROR: hook_post_apply failed, abort OTA"
+    ota_unmount_all
+    unmount_recovery_transaction_store
+    exit 0
+fi
+if [ -n "${OTA_HOOK_PATH}" ] && type hook_firstboot >/dev/null 2>&1; then
+    if mkdir -p "${ROOT_MNT}/usr/share/armbian-ota" && \
+       cp "${OTA_HOOK_PATH}" "${ROOT_MNT}/usr/share/armbian-ota/firstboot-hook.sh"; then
+        log "staged firstboot hook into new rootfs"
+    else
+        log "WARN: failed to stage firstboot hook"
+    fi
+fi
 
 # 8) cleanup payload
 log "  delete OTA payload directory ${OTA_DIR} ..."

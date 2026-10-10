@@ -24,7 +24,7 @@ Members at the package root (outer tar; see format map for compression):
 | `rootfs.sha256` | yes | checksum |
 | `rootfs.tar.<fmt>.enc` | encrypted builds | replaces plaintext rootfs tar |
 | `payload.manifest` + `.sig` | encrypted builds | cipher params + plaintext hashes, RSA-PSS signed |
-| `ota-apply-hook.sh` | no | package-provided apply logic (see §4) |
+| `ota-hook.sh` | no | package-provided OTA logic (see §4) |
 | `hook.sha256` | with hook | checksum |
 | `version.txt` | yes | provenance |
 
@@ -39,7 +39,7 @@ Phase 1 fails fast with actionable errors instead of dying in the initramfs.
 |---|---|---|
 | `PAYLOAD_FORMAT` | payload compression: `gz`, `xz`, `zstd` | inferred from the suffix actually staged (legacy behavior) |
 | `MIN_RUNTIME_VERSION` | minimum `OTA_RUNTIME_VERSION` required | no check |
-| `OTA_APPLY_HOOK` | filename of the apply hook at package root | conventional name `ota-apply-hook.sh` if present, else none |
+| `OTA_HOOK` | filename of the hook at package root | conventional name `ota-hook.sh` if present, else none (legacy `OTA_APPLY_HOOK`/`ota-apply-hook.sh` accepted) |
 
 Runtime constants (`common.sh`, mirrored in the initramfs lib):
 
@@ -82,58 +82,56 @@ zstd is wired through the map and the build selector, but `OTA_RUNTIME_FORMATS`
 only lists it once the image actually ships the zstd CLI (the initramfs hook
 copies zstd + libzstd into the initrd whenever the rootfs has them, ~2 MB).
 
-## 4. Apply hooks
+## 4. OTA hooks
 
-A package may carry its own application logic so that format or layout changes
-can ship to deployed runtimes without a tool upgrade first.
+A package may carry its own OTA logic (`ota-hook.sh`) so that format, layout
+or migration changes can ship to deployed runtimes without a tool upgrade.
+The hook is **sourced once per phase and must be definition-only** (nothing
+but function definitions -- top-level code would run at every phase). At
+fixed call points the runtime invokes a named function **only when the hook
+defined it**; otherwise the built-in flow is untouched. Contract version:
+`OTA_HOOK_API=1` (runtime 1.2+; packages may still use the pre-1.2
+`ota-apply-hook.sh` name and `OTA_APPLY_HOOK` declaration).
 
-### Trigger and priority
+### Call points
 
-Phase 1 validates the hook like any payload member (existence + `hook.sha256`;
-in encrypted builds the hook name and hash are covered by the signed
-`payload.manifest`). The hook rides the staging directory into phase 2.
+| Function | Phase / environment | When | Typical use | Non-zero return |
+|---|---|---|---|---|
+| `hook_after_unpack` | phase 1, live system (bash) | extraction + checksums + negotiation passed, before `state=prepared` | custom admission checks (version constraints, board compat), payload transcoding | cancels the OTA cleanly, nothing touched |
+| `hook_pre_apply` | phase 2 initramfs (busybox sh); A/B live system | mounts done, before mkfs / target-slot write — the **old system is still readable** | back up files beyond the built-in preserve list (databases, custom /etc) | abort; recovery retries on next boot, so the hook must be idempotent |
+| `hook_apply` | same | **replaces** the built-in payload application (rootfs + boot) | custom partition layout / format | abort, same retry semantics |
+| `hook_post_apply` | same | extraction + config patch done, before the state commit — the **new system is still writable** | inject files the payload cannot carry, migrate old config forward | abort, same retry semantics |
+| `hook_firstboot` | the **new system**, first boot | systemd oneshot (`armbian-ota-firstboot-hook.service`), runs once and removes itself | data migration, service notifications, telemetry | logged; on A/B it runs before the mark-success health check so the failure is visible in the same boot window |
 
-Phase 2 checks the staging directory for the declared (or conventional) hook
-name. **Hook present → `hook_main()` replaces the payload-application section.
-Absent → the built-in path runs unchanged.** Mounting, device detection, state
-commits, unmounting, and reboot stay with the orchestrator in both modes.
+When `hook_firstboot` is defined, the orchestrator automatically copies the
+hook script into the new rootfs (`/usr/share/armbian-ota/firstboot-hook.sh`)
+before the payload staging directory is deleted -- the service is gated by
+`ConditionPathExists` and stays inert once the file is gone.
 
-### Contract
+### Contract environment
 
-The hook is **sourced**, then `hook_main()` is called. It must be POSIX `sh`
-(recovery hooks execute under busybox in the initramfs; AB hooks under bash in
-the live system). Contract version: `OTA_HOOK_API=1`.
-
-Injected environment:
-
-| Variable | Recovery (initramfs) | AB (live system) |
+| Variable | Recovery (initramfs) | A/B (live system) |
 |---|---|---|
 | `OTA_HOOK_MODE` | `recovery` | `ab` |
+| `OTA_HOOK_PATH` | staged hook file | same |
 | `OTA_DIR` | staging dir on userdata | staging dir |
-| `ROOT_MNT`, `BOOT_MNT` | mounted root/boot targets | mounted target-slot root/boot |
 | `ROOTFS_TAR`, `BOOT_TAR`, `BOOT_ITB` | resolved payload paths | same |
-| `HAS_BOOT_PART`, `ROOT_UUID`, `BOOT_UUID`, `AUTO_DECRYPT_MODE` | device facts | same |
+| `ROOT_MNT` (+ `BOOT_MNT` post-apply) | mounted targets | mounted target-slot root |
 
-Callable helpers (recovery): `log`, `start_heartbeat`/`stop_heartbeat`,
-`extract_tar`, `write_raw_boot_itb`, `ota_patch_config`, the `device.sh`
-primitives. AB hooks use the `log_*` family and `ab_*` helpers.
-
-Rules:
-
-- `hook_main` returns 0 on success, non-zero on fatal failure (orchestrator
-  aborts exactly like a built-in failure)
-- hooks must **not** unmount anything, write the state file, or reboot — the
-  orchestrator owns teardown and state transitions in both success and failure
-  paths
-- scope is payload application only: rootfs/boot apply, raw FIT write, and any
-  custom partition layout the package brings
+Recovery hooks can call the orchestrator's helpers (`log`,
+`start_heartbeat`/`stop_heartbeat`, `extract_tar`, `ota_reformat_rootfs`,
+`ota_patch_config`, the `device.sh` primitives); A/B hooks use the `log_*`
+and `ab_*` families. Hooks must not unmount anything, write the state file,
+or reboot -- the orchestrator owns teardown and state in success and failure
+paths alike.
 
 ### Security
 
-Plain packages: the hook runs as root, but the package already ships an entire
-rootfs — no new trust boundary; the hook is checksummed like every member.
-Encrypted/secure-boot packages: the signed manifest covers the hook name and
-hash, so a tampered hook fails signature verification.
+Plain packages: the hook runs as root, but the package already ships an
+entire rootfs -- no new trust boundary; the hook is checksummed
+(`hook.sha256`) like every member. Encrypted/secure-boot packages: the signed
+manifest covers the hook name and hash, so a tampered hook fails signature
+verification.
 
 ## 5. Compatibility matrix and the transition train
 
@@ -159,5 +157,5 @@ can identify it.
 | Variable | Values | Effect |
 |---|---|---|
 | `OTA_PAYLOAD_COMP` | `xz` (default), `gz`, `zstd` | payload + outer package layout (see `package-create.sh`) |
-| `OTA_APPLY_HOOK_SCRIPT` | path | file shipped as `ota-apply-hook.sh` + `hook.sha256`; absent by default |
+| `OTA_HOOK_SCRIPT` | path | file shipped as `ota-hook.sh` + `hook.sha256`; absent by default (legacy `OTA_APPLY_HOOK_SCRIPT` still honored) |
 | `OTA_MIN_RUNTIME_VERSION` | version | stamped into `package.env` |

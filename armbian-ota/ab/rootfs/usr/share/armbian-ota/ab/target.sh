@@ -492,32 +492,32 @@ ab_update_target_partition() {
         error_exit "Failed to mount target root partition"
     }
 
-    # Package-provided apply hook (docs/10-ota-package-formats.md): when the
-    # staged package carries one, hook_main() replaces the payload-application
-    # section below. Slot/env bookkeeping, filesystem config, sync and cleanup
-    # stay with this function. Hooks must call ab_write_target_state so the
-    # firstboot dual gate still fires on the new slot.
-    ab_hook_name="$(ota_resolve_hook_name "${temp_work}" 2>/dev/null || true)"
-    if [ -n "${ab_hook_name}" ]; then
-        log_info "Apply hook present (${ab_hook_name}), delegating payload application"
-        OTA_HOOK_API="1"
-        OTA_HOOK_MODE="ab"
-        OTA_HOOK_PATH="${temp_work}/${ab_hook_name}"
-        export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
-        # shellcheck disable=SC1090
-        . "${OTA_HOOK_PATH}" || {
+    # OTA hook points (docs/10-ota-package-formats.md): the staged hook is
+    # sourced once (definition-only), then hook_pre_apply / hook_apply /
+    # hook_post_apply run at fixed points around the built-in flow. A defined
+    # hook_apply replaces payload application (rootfs + boot); slot/env
+    # bookkeeping, filesystem config, sync and cleanup stay here. Hooks that
+    # define hook_firstboot get the script carried into the target slot for
+    # the firstboot oneshot service.
+    ota_source_hook "${temp_work}" || true
+    OTA_HOOK_MODE="ab"
+    OTA_DIR="${temp_work}"
+    ROOTFS_TAR="${temp_work}/${OTA_PAYLOAD_ROOTFS_TAR}"
+    BOOT_TAR="${temp_work}/${OTA_PAYLOAD_BOOT_TAR}"
+    BOOT_ITB="${temp_work}/${OTA_PAYLOAD_BOOT_ITB}"
+    export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH OTA_DIR ROOTFS_TAR BOOT_TAR BOOT_ITB
+
+    if ! ota_call_hook hook_pre_apply; then
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+        error_exit "OTA hook hook_pre_apply failed"
+    fi
+
+    if type hook_apply >/dev/null 2>&1; then
+        log_info "OTA hook hook_apply takes over payload application"
+        hook_apply || {
             ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
-            error_exit "Failed to source apply hook ${OTA_HOOK_PATH}"
+            error_exit "OTA hook hook_apply failed"
         }
-        type hook_main >/dev/null 2>&1 || {
-            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
-            error_exit "Apply hook does not define hook_main()"
-        }
-        hook_main || {
-            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
-            error_exit "Apply hook hook_main() failed"
-        }
-        log_info "Apply hook completed successfully"
     else
         ab_apply_target_rootfs "${temp_work}" "${root_mnt}" "${package_path}" "${current_slot}" "${target_slot}" "${rootfs_prebuilt}" || {
             ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
@@ -531,8 +531,8 @@ ab_update_target_partition() {
         target_root_uuid="$(ab_get_uuid_by_label "${target_root_label}")"
     fi
     target_boot_uuid="$(ab_get_uuid_by_label "${target_boot_label}")"
-    if [ -n "${ab_hook_name}" ]; then
-        log_info "Apply hook owns target boot update as well"
+    if type hook_apply >/dev/null 2>&1; then
+        log_info "OTA hook hook_apply owns target boot update as well"
     else
         ab_update_target_boot "${temp_work}" "${root_mnt}" "${target_boot_dev}" "${target_slot}" "${target_root_type}" "${target_root_uuid}" || {
             ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
@@ -543,6 +543,20 @@ ab_update_target_partition() {
         ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
         error_exit "Failed to update target filesystem configuration"
     }
+
+    # Carry the hook into the target slot when it wants a firstboot run.
+    if type hook_firstboot >/dev/null 2>&1 && [ -n "${OTA_HOOK_PATH:-}" ]; then
+        mkdir -p "${root_mnt}/usr/share/armbian-ota"
+        cp "${OTA_HOOK_PATH}" "${root_mnt}/usr/share/armbian-ota/firstboot-hook.sh" || {
+            ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+            error_exit "Failed to stage firstboot hook into target slot"
+        }
+    fi
+
+    if ! ota_call_hook hook_post_apply; then
+        ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" || true
+        error_exit "OTA hook hook_post_apply failed"
+    fi
 
     sync
     ab_cleanup_target_root "${root_mnt}" "${luks_mapper}" "${luks_opened}" ||

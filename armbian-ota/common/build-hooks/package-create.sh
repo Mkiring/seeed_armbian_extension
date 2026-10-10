@@ -188,24 +188,26 @@ EOF
     if [[ -n "${OTA_MIN_RUNTIME_VERSION:-}" ]]; then
         echo "MIN_RUNTIME_VERSION=${OTA_MIN_RUNTIME_VERSION}" >> "${ota_mode_file}"
     fi
-    if [[ -f "${ota_temp_dir}/ota-apply-hook.sh" ]]; then
-        echo "OTA_APPLY_HOOK=ota-apply-hook.sh" >> "${ota_mode_file}"
+    if [[ -f "${ota_temp_dir}/ota-hook.sh" ]]; then
+        echo "OTA_HOOK=ota-hook.sh" >> "${ota_mode_file}"
     fi
 }
 
-# Stage a package-provided apply hook (OTA_APPLY_HOOK_SCRIPT build variable)
-# into the package as ota-apply-hook.sh + hook.sha256. No-op by default.
+# Stage a package-provided OTA hook (OTA_HOOK_SCRIPT build variable; the
+# legacy OTA_APPLY_HOOK_SCRIPT is still honored) into the package as
+# ota-hook.sh + hook.sha256. No-op by default.
 function ota_stage_apply_hook() {
     local ota_temp_dir="$1"
+    local hook_source="${OTA_HOOK_SCRIPT:-${OTA_APPLY_HOOK_SCRIPT:-}}"
 
-    [[ -n "${OTA_APPLY_HOOK_SCRIPT:-}" ]] || return 0
-    [[ -f "${OTA_APPLY_HOOK_SCRIPT}" ]] || {
-        display_alert "Error: OTA_APPLY_HOOK_SCRIPT not found" "${OTA_APPLY_HOOK_SCRIPT}" "err"
+    [[ -n "${hook_source}" ]] || return 0
+    [[ -f "${hook_source}" ]] || {
+        display_alert "Error: OTA hook script not found" "${hook_source}" "err"
         return 1
     }
-    cp "${OTA_APPLY_HOOK_SCRIPT}" "${ota_temp_dir}/ota-apply-hook.sh"
-    ota_write_sha256_file "${ota_temp_dir}" "ota-apply-hook.sh" "${ota_temp_dir}/hook.sha256"
-    display_alert "OTA package" "Staged apply hook from ${OTA_APPLY_HOOK_SCRIPT}" "info"
+    cp "${hook_source}" "${ota_temp_dir}/ota-hook.sh"
+    ota_write_sha256_file "${ota_temp_dir}" "ota-hook.sh" "${ota_temp_dir}/hook.sha256"
+    display_alert "OTA package" "Staged OTA hook from ${hook_source}" "info"
 }
 
 function ota_write_version_file() {
@@ -550,10 +552,10 @@ VERSION=${IMAGE_VERSION:-${REVISION}}
 KERNEL=${KERNEL_VERSION:-${IMAGE_INSTALLED_KERNEL_VERSION}}
 EOF
 
-    # The apply hook runs as root at boot: in signed builds its identity must
+    # The OTA hook runs as root at boot: in signed builds its identity must
     # be covered by the manifest signature (docs/10-ota-package-formats.md).
-    if [[ -f "${ota_temp_dir}/ota-apply-hook.sh" ]]; then
-        printf 'OTA_PAYLOAD_HOOK=ota-apply-hook.sh\nOTA_PAYLOAD_HOOK_SHA256=%s\n' \
+    if [[ -f "${ota_temp_dir}/ota-hook.sh" ]]; then
+        printf 'OTA_PAYLOAD_HOOK=ota-hook.sh\nOTA_PAYLOAD_HOOK_SHA256=%s\n' \
             "$(awk '{print $1}' "${ota_temp_dir}/hook.sha256")" >> "${manifest}"
     fi
 

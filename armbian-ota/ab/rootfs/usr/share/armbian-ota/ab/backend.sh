@@ -91,6 +91,7 @@ ab_start_ota() {
         "${OTA_PAYLOAD_ROOTFS_TAR}" "${OTA_PAYLOAD_ROOTFS_SHA}" \
         "${OTA_PAYLOAD_BOOT_TAR}" "${OTA_PAYLOAD_BOOT_SHA}" "${OTA_PAYLOAD_BOOT_ITB}"
     ota_check_package_requirements "${temp_work}"
+    ota_run_phase1_hooks "${temp_work}"
 
     ab_update_target_partition "${temp_work}" "${target_root_label}" "${target_boot_label}" "${package_path}" "${current_slot}"
     rm -rf "${temp_work}"

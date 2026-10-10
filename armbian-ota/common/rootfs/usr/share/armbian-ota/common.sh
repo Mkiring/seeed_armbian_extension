@@ -49,10 +49,12 @@ ota_resolve_payload_names() {
 # armbian-ota deb version; bump it whenever OTA_RUNTIME_FORMATS or the apply
 # hook contract changes. Packages declare PAYLOAD_FORMAT / MIN_RUNTIME_VERSION
 # in package.env and phase 1 negotiates against these (docs/10-ota-package-formats.md).
-OTA_RUNTIME_VERSION="1.1"
+OTA_RUNTIME_VERSION="1.2"
 OTA_RUNTIME_FORMATS="gz xz"
 OTA_HOOK_API="1"
-OTA_APPLY_HOOK_DEFAULT_NAME="ota-apply-hook.sh"
+OTA_HOOK_DEFAULT_NAME="ota-hook.sh"
+# Pre-1.2 packages may still carry the narrow "apply hook" name/declaration.
+OTA_HOOK_LEGACY_NAME="ota-apply-hook.sh"
 
 # Single format map mirrored in package-create.sh (build side) and the
 # initramfs payload lib: fmt -> tar extract flag.
@@ -106,7 +108,7 @@ ota_check_package_requirements() {
 
     hook_name="$(ota_resolve_hook_name "${work_dir}")"
     if [ -n "${hook_name}" ]; then
-        verify_sha256 "${work_dir}/${hook_name}" "${work_dir}/hook.sha256" "apply hook"
+        verify_sha256 "${work_dir}/${hook_name}" "${work_dir}/hook.sha256" "ota hook"
     fi
 
     ota_verify_tar_magic "${work_dir}/${OTA_PAYLOAD_ROOTFS_TAR}" ||
@@ -117,25 +119,79 @@ ota_check_package_requirements() {
     fi
 }
 
-# Resolve the apply hook filename for a staged work dir: declared name wins,
-# conventional name is the fallback. Empty when the package carries no hook.
+# Resolve the hook filename for a staged work dir: declared name wins (OTA_HOOK,
+# legacy OTA_APPLY_HOOK accepted), then conventional ota-hook.sh, then the
+# legacy ota-apply-hook.sh. Empty when the package carries no hook.
 ota_resolve_hook_name() {
     local work_dir="$1" declared
 
     # Read the staged package.env directly: this must not depend on the
     # metadata cache being loaded (mirrors the initramfs implementation).
     if [ -f "${work_dir}/package.env" ]; then
-        declared="$(sed -n 's/^OTA_APPLY_HOOK=//p' "${work_dir}/package.env" | head -n1)"
+        declared="$(sed -n 's/^OTA_HOOK=//p' "${work_dir}/package.env" | head -n1)"
+        if [ -z "${declared}" ]; then
+            declared="$(sed -n 's/^OTA_APPLY_HOOK=//p' "${work_dir}/package.env" | head -n1)"
+        fi
     fi
     if [ -n "${declared}" ] && [ -f "${work_dir}/${declared}" ]; then
         printf '%s\n' "${declared}"
         return 0
     fi
-    if [ -f "${work_dir}/${OTA_APPLY_HOOK_DEFAULT_NAME}" ]; then
-        printf '%s\n' "${OTA_APPLY_HOOK_DEFAULT_NAME}"
+    if [ -f "${work_dir}/${OTA_HOOK_DEFAULT_NAME}" ]; then
+        printf '%s\n' "${OTA_HOOK_DEFAULT_NAME}"
+        return 0
+    fi
+    if [ -f "${work_dir}/${OTA_HOOK_LEGACY_NAME}" ]; then
+        printf '%s\n' "${OTA_HOOK_LEGACY_NAME}"
         return 0
     fi
     return 1
+}
+
+# Source the staged hook (definition-only convention: hooks must contain
+# nothing but function definitions -- the script is sourced at every phase).
+# Sets OTA_HOOK_NAME/OTA_HOOK_PATH; returns 1 when the package has no hook.
+ota_source_hook() {
+    local work_dir="$1"
+
+    OTA_HOOK_NAME=""
+    OTA_HOOK_PATH=""
+    ota_resolve_hook_name "${work_dir}" >/dev/null 2>&1 || return 1
+    OTA_HOOK_NAME="$(ota_resolve_hook_name "${work_dir}")"
+    OTA_HOOK_PATH="${work_dir}/${OTA_HOOK_NAME}"
+    # shellcheck disable=SC1090
+    . "${OTA_HOOK_PATH}" 2>/dev/null || error_exit "Failed to source OTA hook ${OTA_HOOK_PATH}"
+    log_info "OTA hook loaded: ${OTA_HOOK_NAME}"
+    return 0
+}
+
+# Call the named hook function if the hook defined it; a no-op otherwise.
+# The function's return code is passed through.
+ota_call_hook() {
+    local fn="$1"
+    shift
+
+    if ! type "${fn}" >/dev/null 2>&1; then
+        return 0
+    fi
+    log_info "OTA hook point: ${fn}"
+    "${fn}" "$@"
+}
+
+# Phase-1 hook point (live system): hook_after_unpack runs once extraction,
+# checksum and negotiation all passed, before state=prepared is written.
+# Non-zero return cancels the OTA cleanly -- nothing has been touched yet.
+ota_run_phase1_hooks() {
+    local work_dir="$1"
+
+    ota_source_hook "${work_dir}" || return 0
+    OTA_HOOK_API="${OTA_HOOK_API}"
+    OTA_HOOK_MODE="$(state_get OTA_MODE 2>/dev/null || echo unknown)"
+    export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
+    if ! ota_call_hook hook_after_unpack; then
+        error_exit "OTA hook hook_after_unpack cancelled the update"
+    fi
+    return 0
 }
 
 OTA_PAYLOAD_MANIFEST="payload.manifest"
