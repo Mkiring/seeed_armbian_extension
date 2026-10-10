@@ -96,6 +96,73 @@ extract_tar() {
     return 1
 }
 
+# ===== package-provided OTA hook (OTA_HOOK_API=1) =====
+# Fixed call points around the built-in phase-2 flow (docs/10-ota-package-formats.md):
+# hook_pre_apply / hook_apply / hook_post_apply are invoked by 99-ota-apply.
+# Hook scripts are sourced in every phase and must be definition-only.
+OTA_HOOK_API="1"
+
+# Resolve the staged hook filename: declared OTA_HOOK (legacy OTA_APPLY_HOOK
+# accepted) wins, then conventional ota-hook.sh, then the legacy name.
+ota_hook_name_staged() {
+    hook_name=""
+
+    if [ -f "${OTA_DIR}/package.env" ]; then
+        hook_name="$(sed -n 's/^OTA_HOOK=//p' "${OTA_DIR}/package.env" | head -n1)"
+        [ -z "${hook_name}" ] && hook_name="$(sed -n 's/^OTA_APPLY_HOOK=//p' "${OTA_DIR}/package.env" | head -n1)"
+    fi
+    [ -n "${hook_name}" ] && [ -f "${OTA_DIR}/${hook_name}" ] || hook_name="ota-hook.sh"
+    [ -f "${OTA_DIR}/${hook_name}" ] || hook_name="ota-apply-hook.sh"
+    [ -f "${OTA_DIR}/${hook_name}" ] || return 1
+    printf '%s\n' "${hook_name}"
+}
+
+# Source the staged hook once; sets OTA_HOOK_PATH. rc 1 = package has no hook.
+ota_source_staged_hook() {
+    OTA_HOOK_PATH=""
+
+    hook_name="$(ota_hook_name_staged)" || return 1
+    OTA_HOOK_PATH="${OTA_DIR}/${hook_name}"
+    log "OTA hook loaded: ${hook_name} (API ${OTA_HOOK_API})"
+    # shellcheck disable=SC1090
+    . "${OTA_HOOK_PATH}" || {
+        log "ERROR: failed to source ${OTA_HOOK_PATH}"
+        return 1
+    }
+    return 0
+}
+
+# Call $1 if the hook defined it; no-op otherwise, rc passthrough.
+ota_call_hook() {
+    fn="$1"
+
+    type "${fn}" >/dev/null 2>&1 || return 0
+    log "OTA hook point: ${fn}"
+    "${fn}"
+}
+
+# Capture the pre-OTA armbianEnv before a hook can reformat anything, so
+# ota_patch_config's overlays merge keeps working when the built-in apply
+# (which owns this capture) is replaced by hook_apply.
+ota_capture_pre_ota_env() {
+    if [ -f "${ROOT_MNT}/boot/armbianEnv.txt" ]; then
+        cp "${ROOT_MNT}/boot/armbianEnv.txt" "${LOGDIR}/armbianEnv.pre-ota" &&
+            log "captured pre-OTA armbianEnv.txt from rootfs /boot"
+    fi
+    if [ "${HAS_BOOT_PART:-0}" -eq 1 ]; then
+        mkdir -p /mnt/preenv
+        if mount -t ext4 -o ro "${BOOT_DEV}" /mnt/preenv 2>/dev/null; then
+            if [ -f /mnt/preenv/armbianEnv.txt ]; then
+                cp /mnt/preenv/armbianEnv.txt "${LOGDIR}/armbianEnv.pre-ota" &&
+                    log "captured pre-OTA armbianEnv.txt from boot partition"
+            fi
+            umount /mnt/preenv 2>/dev/null || true
+        fi
+        rmdir /mnt/preenv 2>/dev/null || true
+    fi
+    return 0
+}
+
 set_env_key() {
     file="$1"
     key="$2"

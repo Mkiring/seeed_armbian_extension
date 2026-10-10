@@ -1,0 +1,23 @@
+[Unit]
+Description=Armbian OTA Firstboot Hook
+Documentation=file:///usr/share/armbian-ota
+DefaultDependencies=no
+# Run before the AB firstboot health check so a failing hook is visible in
+# the same boot window (the dual gate keeps protecting mark-success); on
+# recovery images the AB unit does not exist and this ordering is inert.
+After=local-fs.target
+Before=armbian-ota-firstboot.service
+ConditionPathExists=/usr/share/armbian-ota/firstboot-hook.sh
+
+[Service]
+Type=oneshot
+# Source the carried hook and run hook_firstboot once; the script removes
+# itself either way so the service stays inert on every later boot.
+ExecStart=/bin/sh -c '. /usr/share/armbian-ota/firstboot-hook.sh && hook_firstboot'
+ExecStartPost=/bin/rm -f /usr/share/armbian-ota/firstboot-hook.sh
+TimeoutStartSec=300
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
