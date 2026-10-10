@@ -195,8 +195,10 @@ if [ -n "${OTA_HOOK_PATH}" ] && type hook_apply >/dev/null 2>&1; then
         exit 0
     fi
     # Expose the boot partition to the config patcher, mirroring the state
-    # ota_apply_boot would have left behind.
-    if [ "${HAS_BOOT_PART:-0}" -eq 1 ] && [ -z "${BOOT_MNT}" ]; then
+    # ota_apply_boot would have left behind. BOOT_MNT is pre-initialized to
+    # "/mnt/boot" at the top, so test for an actual mount, not emptiness --
+    # otherwise the armbianEnv patch is silently skipped after hook_apply.
+    if [ "${HAS_BOOT_PART:-0}" -eq 1 ] && ! mountpoint -q "${BOOT_MNT:-/mnt/boot}"; then
         BOOT_MNT="/mnt/boot"
         mkdir -p "${BOOT_MNT}"
         if mount -t ext4 -o rw "${BOOT_DEV}" "${BOOT_MNT}"; then
