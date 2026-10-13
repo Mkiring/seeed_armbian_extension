@@ -76,15 +76,15 @@ needs **before** the multi-hour build starts:
 | `PRIVATE_KEY_PEM` | FIT signing private key; staged into `cache/sources/fit-keys` and fed to the build via `UBOOT_FIT_KEYS_BACKUP_DIR` ([06 §3](06-secure-boot.md#3-signing-keys-keep-them-or-regenerate-them)) | `secure-boot` |
 | `DEV_CRT` | matching signing certificate (`dev.crt`); preflight checks it matches the private key | `secure-boot` |
 | `CRYPTROOT_PASSPHRASE` | LUKS rootfs passphrase, exactly 64 *hex* characters ([05](05-encryption.md)); preflight checks length only | `secure-boot` |
-| `ARMBIAN_BUILD_RELEASE_TOKEN` | GitHub token for publishing the Release | `publish_release` |
-| `RCLONE_CONFIG` | rclone remote config for the OneDrive upload | `upload_onedrive` |
 
-Optional: `publish_release` creates a GitHub Release with download tables;
-the release page prose lives in [`.github/release-body.md`](../.github/release-body.md)
-— CI fills in the per-board tables and OneDrive links.
-OneDrive upload is available via the `upload_onedrive` input. Artifacts are
-attached to the workflow run (`actions/upload-artifact`) — download from the
-run page, flash as usual.
+Image hosting needs no secrets: build entries attach the images/OTA
+packages to a draft release on this repo via the workflow's
+`GITHUB_TOKEN` (`upload_release` input). `publish_release` then publishes
+that release with per-board download tables; the release page prose lives
+in [`.github/release-body.md`](../.github/release-body.md) — CI fills in
+the tables from the release's own asset list. Older releases are kept.
+Artifacts are also attached to the workflow run
+(`actions/upload-artifact`) — download from the run page, flash as usual.
 
 Everything CI does is the documented local flow — the wrapper staging step,
 profiles, and secrets map 1:1 to [02-build-reference.md](02-build-reference.md).

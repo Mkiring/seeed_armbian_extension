@@ -103,11 +103,13 @@ Covers the work against the initial import (merge base `9980aee`,
   artifact in place.
 - **`seeed-build` CI workflow.** A matrix image builder on GitHub Actions:
   preflight validates secrets before the multi-hour build (FIT key pair,
-  64-char passphrase, live rclone probe), the matrix is planned from dispatch
+  64-char passphrase), the matrix is planned from dispatch
   checkboxes (board × release × tier × OTA × security; plain and secure-boot
-  coexist), images upload to OneDrive pre-release storage with per-run
-  cleanup, and an optional single GitHub Release covers all boards with
-  per-board IMAGE|OTA tables. Board dkms packages (`maxio-phy`,
+  coexist), build entries attach images/OTA packages to a draft release on
+  the CI repo as prefixed assets (no hosting secrets — `GITHUB_TOKEN` only),
+  and `publish_release` turns it into a single pre-release covering all
+  boards with per-board IMAGE|OTA tables generated from the asset list;
+  previous releases are kept. Board dkms packages (`maxio-phy`,
   `wq9201s-wifi-bt`, `pcie-rkep`) joined the userspace build matrix.
 - **Board support.** `fcs960k-aic-bluez` installed with the common package
   set.
