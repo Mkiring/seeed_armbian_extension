@@ -62,16 +62,31 @@ function rk_autodecrypt_ensure_sdk_tools() {
 }
 
 function rk_autodecrypt_ensure_pycryptodome() {
-	# rk_tee_user/v2 signs OP-TEE TAs with Python Crypto/Cryptodome helpers.
+	# rk_tee_user/v2 signing scripts try the Cryptodome namespace first and
+	# fall back to Crypto. Debian's python3-pycryptodome ships Cryptodome only.
 	if python3 - <<'PY' >/dev/null 2>&1
-import Crypto
+try:
+	import Cryptodome
+except ImportError:
+	import Crypto
 PY
 	then
 		return 0
 	fi
 
+	# The build container ships without apt lists (pruned when the image is
+	# baked); refresh them or install fails with "Unable to locate package".
+	rk_run_host_command apt-get update ||
+		display_alert "optee" "apt-get update failed, trying install with existing lists" "warn"
 	rk_run_host_command apt-get install -y python3-pycryptodome ||
 		exit_with_error "failed to install python3-pycryptodome" "apt-get"
+
+	python3 - <<'PY' || exit_with_error "pycryptodome not importable after install" "python3"
+try:
+	import Cryptodome
+except ImportError:
+	import Crypto
+PY
 }
 function rk_autodecrypt_install_optee_client() {
     local root_dir="$1"
@@ -97,6 +112,27 @@ function rk_autodecrypt_install_optee_client() {
     done
 }
 
+function rk_autodecrypt_resolve_tee_toolchains() {
+	# build.sh's own discovery expects prebuilt toolchain dirs the sdk-tools
+	# repo does not ship, and its check_toolchain_* bail out with status 0
+	# (silent no-op build). Resolve host cross-toolchain prefixes instead and
+	# pass them through the env vars build.sh honors.
+	if [[ -n "${AARCH64_TOOLCHAIN:-}" && -n "${ARM32_TOOLCHAIN:-}" ]]; then
+		return 0
+	fi
+
+	local aarch64_gcc arm32_gcc
+	aarch64_gcc="$(type -P aarch64-none-linux-gnu-gcc || type -P aarch64-linux-gnu-gcc || true)"
+	arm32_gcc="$(type -P arm-none-linux-gnueabihf-gcc || type -P arm-linux-gnueabihf-gcc || true)"
+	if [[ -z "${aarch64_gcc}" || -z "${arm32_gcc}" ]]; then
+		return 1
+	fi
+
+	export AARCH64_TOOLCHAIN="${aarch64_gcc%gcc}"
+	export ARM32_TOOLCHAIN="${arm32_gcc%gcc}"
+	display_alert "optee" "rk_tee_user toolchains: aarch64=${AARCH64_TOOLCHAIN} arm32=${ARM32_TOOLCHAIN}" "info"
+}
+
 function rk_autodecrypt_build_and_install_tee_user() {
     local root_dir="$1"
     local sdk_tools="$2"
@@ -111,6 +147,8 @@ function rk_autodecrypt_build_and_install_tee_user() {
 
     (
         cd "${rk_tee_build_dir}" || exit 1
+        rk_autodecrypt_resolve_tee_toolchains ||
+            exit_with_error "no aarch64/arm32 cross toolchains found for rk_tee_user_v2 build"
         ./build.sh 6432
     ) || {
         display_alert "optee" "rk_tee_user_v2 compilation failed" "err"
