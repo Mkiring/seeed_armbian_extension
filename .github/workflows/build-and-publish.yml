@@ -141,6 +141,11 @@ jobs:
             build_deps: dh-sequence-dkms
             build_cmd: DEB_BUILD_OPTIONS="noddebs" dpkg-buildpackage -us -uc -b
 
+          - name: bluez-btattach
+            source_dir: bluez-btattach
+            build_deps: debhelper
+            build_cmd: DEB_BUILD_OPTIONS="noddebs" dpkg-buildpackage -us -uc -b
+
           - name: pcie-rkep-dkms
             source_dir: pcie-rkep-dkms
             build_deps: dh-sequence-dkms
