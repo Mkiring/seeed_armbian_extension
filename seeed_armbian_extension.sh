@@ -62,10 +62,16 @@ fi
 # Anchor root= resolution to the actual boot disk in every image flavor. The
 # init-top script is picked up by mkinitramfs from /etc/initramfs-tools and is
 # a no-op without the armbian.bootdev cmdline token (single-disk/legacy boots).
+#
+# post_customize_image runs in the rootfs stage, where the working rootfs is
+# ${SDCARD}; ${MOUNT} is only the loop-mounted final image later, during the
+# image stage. Writing to ${MOUNT} here dropped the file into an empty staging
+# dir and it never reached the image (rootfs-then-initrd rebuild both missed
+# it), so every multi-disk build silently shipped without the anchor.
 function post_customize_image__020_install_bootdev_root_anchor() {
 	install -D -m 0755 \
 		"${SEEED_EXTENSION_ROOT}/initramfs/scripts/init-top/armbian-bootdev-root" \
-		"${MOUNT}/etc/initramfs-tools/scripts/init-top/armbian-bootdev-root" ||
+		"${SDCARD}/etc/initramfs-tools/scripts/init-top/armbian-bootdev-root" ||
 		exit_with_error "Failed to install bootdev root anchor"
 
 	display_alert "Bootdev root anchor" "Installed init-top armbian-bootdev-root" "info"
@@ -73,12 +79,13 @@ function post_customize_image__020_install_bootdev_root_anchor() {
 
 # Add the PCIe ASPM workaround to the generated image's kernel command line.
 # Keep any board- or user-provided extraargs intact and make this hook idempotent.
+# Same rootfs-stage rule as above: ${SDCARD}, not ${MOUNT}.
 function post_customize_image__010_disable_pcie_aspm() {
-	local armbian_env="${MOUNT}/boot/armbianEnv.txt"
+	local armbian_env="${SDCARD}/boot/armbianEnv.txt"
 	local line
 	local extraargs=""
 
-	mkdir -p "${MOUNT}/boot"
+	mkdir -p "${SDCARD}/boot"
 	touch "${armbian_env}"
 
 	while IFS= read -r line; do
