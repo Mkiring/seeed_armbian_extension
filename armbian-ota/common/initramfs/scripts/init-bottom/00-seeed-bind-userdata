@@ -1,15 +1,19 @@
 #!/bin/sh
-# Initramfs init-bottom script: create a stable /dev/armbian-userdata symlink
-# pointing at the userdata partition that lives on the same physical disk as
-# the rootfs. Runs BEFORE the overlayroot init-bottom hook so the overlayroot
-# config can use dev=/dev/armbian-userdata and avoid the multi-disk label
-# race on /dev/disk/by-label/armbi_usrdata.
+# Initramfs init-bottom script: create stable /dev/armbian-userdata and
+# /dev/armbian-boot symlinks pointing at the userdata/boot partitions that
+# live on the same physical disk as the rootfs. Runs BEFORE the overlayroot
+# init-bottom hook so the overlayroot config can use dev=/dev/armbian-userdata
+# and fstab can mount /boot through /dev/armbian-boot, avoiding the multi-disk
+# duplicate-UUID/LABEL races on udev's /dev/disk/by-* symlinks.
 #
 # Behaviour:
 #   * If /dev/mapper/armbian-userdata already exists (encrypted case, unlocked
-#     earlier by init-top/0-decryption-disk), symlink to it and exit.
-#   * Otherwise (unencrypted), parse root= from /proc/cmdline, walk up to the
-#     parent disk, and find the PARTLABEL=userdata partition on that disk.
+#     earlier by init-top/0-decryption-disk), symlink to it, derive the boot
+#     anchor from the mapper's backing partition, and exit.
+#   * Otherwise (unencrypted), resolve the root from the initramfs ROOT
+#     variable (anchored to the boot disk by init-top/armbian-bootdev-root
+#     when the armbian.bootdev token is present), falling back to root= from
+#     /proc/cmdline; then anchor both partitions to that disk.
 #   * If anything fails, log loudly but do not abort boot: the overlayroot
 #     hook will fall back to its own dev= resolution, preserving current
 #     behaviour.
@@ -40,17 +44,60 @@ LINK=/dev/armbian-userdata
 log() { echo "[seeed-bind-userdata] $*"; }
 warn() { echo "[seeed-bind-userdata] WARN: $*" >&2; }
 
+# Create /dev/armbian-boot for the ext4 boot partition on the same physical
+# disk as $1 (a partition device). fstab mounts /boot through that symlink
+# instead of a UUID, so udev's duplicate-UUID symlink flipping cannot mount
+# the other clone's boot partition. Raw-FIT (secure boot) layouts carry no
+# ext4 boot partition and no /boot fstab entry, so a missing or non-ext4
+# candidate simply leaves the symlink absent.
+link_boot_anchor() {
+    anchor_root="$1"
+    [ -n "${anchor_root}" ] || return 0
+
+    boot_part="$(find_user_data__partlabel_on_root_disk "${anchor_root}" boot 2>/dev/null || true)"
+    if [ -n "${boot_part}" ] && [ "$(blkid -s TYPE -o value "${boot_part}" 2>/dev/null)" = "ext4" ]; then
+        ln -sf "${boot_part}" /dev/armbian-boot
+        log "linked /dev/armbian-boot -> ${boot_part}"
+    fi
+}
+
 # Encrypted case: mapper already set up by 0-decryption-disk in init-top.
+# The userdata mapper's backing partition names the boot disk, so the /boot
+# anchor is derived from it directly -- encrypted layouts also mount /boot
+# through fstab and are exposed to the same duplicate-UUID race.
 if [ -b /dev/mapper/armbian-userdata ]; then
     ln -sf /dev/mapper/armbian-userdata "${LINK}"
     log "linked ${LINK} -> /dev/mapper/armbian-userdata (encrypted)"
+    if command -v dmsetup >/dev/null 2>&1; then
+        enc_backing="$(dmsetup deps -o devname armbian-userdata 2>/dev/null | sed -n 's/.*(\([^ )]*\)).*/\1/p' | head -n1)"
+        [ -n "${enc_backing}" ] && link_boot_anchor "/dev/${enc_backing}"
+    fi
     exit 0
 fi
 
-root_dev="$(find_user_data__root_dev_from_cmdline)" || {
-    warn "could not resolve root= from cmdline; skipping"
-    exit 0
-}
+root_dev=""
+
+# Prefer the initramfs-resolved ROOT: after the init-top bootdev anchor wrote
+# /conf/param.conf, /init re-exports ROOT as the concrete partition on the
+# disk U-Boot booted from. Re-parsing root= from /proc/cmdline instead would
+# go through udev's /dev/disk/by-uuid symlink, which flips between cloned
+# disks with duplicate UUIDs and can put the overlay upper layer on another
+# disk than the anchored lower layer.
+case "${ROOT:-}" in
+    /dev/*)
+        root_dev="${ROOT}"
+        ;;
+    UUID=*|PARTUUID=*|LABEL=*)
+        root_dev="$(find_user_data__resolve_root_token "${ROOT}" 2>/dev/null || true)"
+        ;;
+esac
+
+if [ -z "${root_dev}" ]; then
+    root_dev="$(find_user_data__root_dev_from_cmdline)" || {
+        warn "could not resolve root= from cmdline; skipping"
+        exit 0
+    }
+fi
 
 # When root= resolves to a LUKS mapper (auto-decrypt case where the unlocked
 # ext4 is the root), the mapper's parent disk has to be found by looking at
@@ -83,3 +130,7 @@ fi
 
 ln -sf "${userdata_part}" "${LINK}"
 log "linked ${LINK} -> ${userdata_part} (root=${root_dev})"
+
+link_boot_anchor "${root_dev}"
+
+exit 0

@@ -52,10 +52,26 @@ find_user_data__partition_for_root() {
     root_part="$1"
     [ -n "${root_part}" ] || return 1
 
+    find_user_data__partlabel_on_root_disk "${root_part}" "userdata"
+}
+
+# Echo the partition carrying PARTLABEL=$label on the same physical disk as
+# the given root device. Same multi-disk rationale as above: cloned disks
+# duplicate every PARTLABEL, so an unfiltered blkid match is arbitrary.
+# Skips LUKS partitions so raw-FIT/secure layouts never surface a container.
+# Input: root partition device path, GPT partition label
+# Output: /dev/<rootdisk>p<N>
+# Returns 1 if not found.
+find_user_data__partlabel_on_root_disk() {
+    root_part="$1" label="$2"
+    [ -n "${root_part}" ] || return 1
+    [ -n "${label}" ] || return 1
+
     root_disk="$(find_user_data__parent_disk "${root_part}")" || return 1
     [ -n "${root_disk}" ] || return 1
 
-    for dev in $(blkid -t PARTLABEL=userdata -o device 2>/dev/null); do
+    for dev in $(blkid -t PARTLABEL=${label} -o device 2>/dev/null); do
+        [ "$(blkid -s TYPE -o value "${dev}" 2>/dev/null)" = "crypto_LUKS" ] && continue
         dev_disk="$(find_user_data__parent_disk "${dev}" 2>/dev/null)" || continue
         if [ "${dev_disk}" = "${root_disk}" ]; then
             printf '%s\n' "${dev}"
