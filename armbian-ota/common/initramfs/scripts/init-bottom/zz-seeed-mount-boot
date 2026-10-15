@@ -1,0 +1,65 @@
+#!/bin/sh
+# Initramfs init-bottom script (zz- prefix: runs AFTER overlayroot): mount
+# the boot partition anchored to the rootfs disk at ${rootmnt}/boot.
+#
+# 00-seeed-bind-userdata resolved the same-disk ext4 boot partition and
+# recorded it in /run/armbian-boot-part. Mounting here -- after overlayroot
+# assembled the overlay, before switch_root -- keeps /boot a direct mount on
+# top of overlayfs with NO fstab entry. An fstab source is unworkable for
+# this mount in multi-disk clone setups: a UUID flips between disks through
+# udev's duplicate-UUID symlinks, and a hand-made /dev symlink never
+# satisfies systemd's udev-backed device unit (observed as a ~90s stall in
+# "Expecting device dev-armbian-boot.device" and unbootable eMMC images).
+# Raw-FIT (secure boot) layouts record no anchor and mount nothing.
+
+PREREQ=""
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+log() { echo "[seeed-mount-boot] $*"; }
+warn() { echo "[seeed-mount-boot] WARN: $*" >&2; }
+
+ANCHOR_FILE=/run/armbian-boot-part
+
+if [ ! -r "${ANCHOR_FILE}" ]; then
+    log "no boot anchor recorded; skipping (raw-FIT or anchor failure)"
+    exit 0
+fi
+
+boot_part="$(cat "${ANCHOR_FILE}" 2>/dev/null)"
+case "${boot_part}" in
+    /dev/*) ;;
+    *)
+        warn "invalid anchor '${boot_part}'; skipping"
+        exit 0
+        ;;
+esac
+
+# The partition can trail init-bottom on slow links; retry briefly.
+i=0
+while [ "${i}" -lt 10 ]; do
+    [ -b "${boot_part}" ] && break
+    sleep 1
+    i=$((i + 1))
+done
+if [ ! -b "${boot_part}" ]; then
+    warn "${boot_part} never appeared; /boot left unmounted"
+    exit 0
+fi
+
+mkdir -p "${rootmnt}/boot" 2>/dev/null || true
+if mount -t ext4 -o rw "${boot_part}" "${rootmnt}/boot"; then
+    log "mounted ${boot_part} at /boot"
+else
+    warn "failed to mount ${boot_part} at /boot"
+fi
+
+exit 0

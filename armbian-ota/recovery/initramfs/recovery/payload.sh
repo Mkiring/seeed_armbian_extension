@@ -371,16 +371,15 @@ ota_patch_config() {
             fi
         fi
 
-        # /boot mounts through the boot-disk anchor symlink created by
-        # init-bottom/00-seeed-bind-userdata. A plain UUID duplicates across
-        # dd-cloned disks and udev's by-uuid symlink can mount the other
-        # clone's boot partition, so anchor regardless of BOOT_UUID; the
-        # value only stays relevant for the armbianEnv/crypttab patches.
-        # New packages already carry the anchored line (build hook 896), old
-        # packages still carry a UUID line -- both match the rewrite.
+        # Drop the /boot fstab entry: the initramfs mounts /boot anchored to
+        # the rootfs disk (zz-seeed-mount-boot). Any fstab source is racy on
+        # dd-cloned disks -- a UUID flips between clones through udev's
+        # duplicate-UUID symlinks, and a hand-made /dev symlink never
+        # satisfies systemd's udev-backed device unit. New packages already
+        # lack the line (build hook 896), older ones still carry a UUID line.
         if grep -qE '^[^[:space:]]+[[:space:]]+/boot([[:space:]]|$)' "${FSTAB}"; then
-            log "  - anchor /boot entry to /dev/armbian-boot"
-            sed -i -E 's@^[^[:space:]]+([[:space:]]+/boot([[:space:]]|$))@/dev/armbian-boot\1@' "${FSTAB}"
+            log "  - drop /boot entry (initramfs mounts /boot anchored)"
+            sed -i -E '\@^[^[:space:]]+[[:space:]]+/boot([[:space:]]|$)@d' "${FSTAB}"
         fi
     else
         log "WARN: ${FSTAB} not found, skip fstab UUID patch"

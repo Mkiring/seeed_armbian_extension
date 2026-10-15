@@ -61,16 +61,9 @@ blkid_match="${ROOT}"
 
 # Device enumeration can still be in flight this early; retry briefly, and
 # never hard-fail: an unresolved anchor must degrade to the stock behavior.
-# NVMe needs the longer window: PCIe link training plus namespace probing
-# has been observed to lag the initramfs by 20+ seconds on rk3588, while
-# mmc partitions appear within ~1s.
-case "${bootdev_type}" in
-    nvme) anchor_retries=30 ;;
-    *) anchor_retries=10 ;;
-esac
 attempt=0
 anchored=""
-while [ "${attempt}" -lt "${anchor_retries}" ]; do
+while [ "${attempt}" -lt 10 ]; do
     for dev in $(blkid -t "${blkid_match}" -o device 2>/dev/null); do
         base="${dev#/dev/}"
         [ -L "/sys/class/block/${base}" ] || continue

@@ -181,7 +181,7 @@ Secure boot recovery (RK_SECURE_UBOOT_ENABLE=yes, BOOT_RAW_MODE=yes):
 [ boot raw FIT ][ security ][ rootfs LUKS+ext4 ][ userdata LUKS+ext4 ]
 ```
 
-The `/boot` partition is **never** overlayed. The runtime fstab mounts it on top of overlayfs, so any process writing to `/boot` (apt kernel upgrades, manual `armbianEnv.txt` edits, OTA tooling) hits the real boot partition — U-Boot reads the same bytes on next boot. `overlayroot` runs with `recurse=0` so the overlay covers `/` only and leaves every non-root fstab mount (including `/boot`) as a direct mount.
+The `/boot` partition is **never** overlayed. The initramfs mounts it on top of overlayfs (`zz-seeed-mount-boot`, anchored to the rootfs disk; there is no `/boot` fstab entry), so any process writing to `/boot` (apt kernel upgrades, manual `armbianEnv.txt` edits, OTA tooling) hits the real boot partition — U-Boot reads the same bytes on next boot. `overlayroot` runs with `recurse=0` so the overlay covers `/` only and leaves the boot mount as a direct mount.
 
 ### How It Works
 
