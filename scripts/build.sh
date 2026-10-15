@@ -24,6 +24,9 @@ BUILD_DESKTOP="yes"
 # Feature flags. Empty OTA_ENABLE means "honor board config default".
 OTA_ENABLE=""
 AB_PART_OTA="no"
+# Empty OTA_PAYLOAD_COMP falls back to the extension's central default (xz).
+# Preserves a pre-exported value so env override works alongside --ota-format.
+OTA_PAYLOAD_COMP="${OTA_PAYLOAD_COMP:-}"
 SECURITY_PROFILE="none"
 
 RK_COMPILE_USBPLUG="yes"
@@ -34,6 +37,7 @@ CRYPTROOT_PASSPHRASE="${CRYPTROOT_PASSPHRASE:-}"
 VALID_BOARDS="recomputer-rk3576-devkit recomputer-rk3588-devkit recomputer-rk3576-module-devkit"
 VALID_DESKTOPS="gnome xfce kde-plasma mate cinnamon"
 VALID_TIERS="minimal mid full"
+VALID_OTA_FORMATS="xz gz zstd"
 
 # ── Usage ───────────────────────────────────────────────────────────────────
 usage() {
@@ -63,6 +67,8 @@ Options:
                               Options: gnome, xfce, kde-plasma, mate, cinnamon
   -t, --tier TIER             Desktop tier (default: mid)
                               Options: minimal, mid, full
+      --ota-format FORMAT     OTA package payload format (default: xz)
+                              Options: xz, gz, zstd
 
   Utilities:
   --no-usbplug                Skip usbplug recompile (use rkbin blob; old SPI flash only)
@@ -276,6 +282,12 @@ while [[ $# -gt 0 ]]; do
             DESKTOP_TIER="$2"
             shift 2
             ;;
+        --ota-format)
+            [[ $# -lt 2 ]] && die "Option '$1' requires a value."
+            validate_option "OTA payload format" "$2" "$VALID_OTA_FORMATS"
+            OTA_PAYLOAD_COMP="$2"
+            shift 2
+            ;;
         # Cache and utilities
         -c|--clear-kernel-cache)
             CLEAR_KERNEL_CACHE="yes"
@@ -458,6 +470,7 @@ else
     fi
 
     [[ -n "$OTA_ENABLE" ]] && BUILD_CMD+=(OTA_ENABLE="$OTA_ENABLE")
+    [[ -n "$OTA_PAYLOAD_COMP" ]] && BUILD_CMD+=(OTA_PAYLOAD_COMP="$OTA_PAYLOAD_COMP")
     [[ "$AB_PART_OTA" == "yes" ]] && BUILD_CMD+=(AB_PART_OTA=yes)
     append_security_args yes
     [[ "$RK_COMPILE_USBPLUG" == "yes" ]] && BUILD_CMD+=(RK_COMPILE_USBPLUG=yes)

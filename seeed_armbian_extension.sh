@@ -35,6 +35,12 @@ if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" || "${RK_OPTEE_BOOT_ENABLE}" == "yes"
 	enable_extension "seeed_armbian_extension/rk_secure-disk-encryption/rk-secure-boot"
 fi
 
+# Central default for the OTA package payload format. Every build path
+# (build.sh wrapper, CI, bare compile.sh) funnels through this file before
+# ota-support sources package-create.sh. Override per build via
+# OTA_PAYLOAD_COMP=gz|zstd in the environment or build.sh --ota-format.
+export OTA_PAYLOAD_COMP="${OTA_PAYLOAD_COMP:-xz}"
+
 if [[ "${OTA_ENABLE}" == "yes" ]]; then
 	display_alert "OTA_ENABLE" "Enable OTA extension ota-support" "info"
 	enable_extension "seeed_armbian_extension/armbian-ota/ota-support"
