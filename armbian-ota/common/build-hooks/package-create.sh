@@ -36,7 +36,7 @@ function ota_payload_compress_archive() {
             (cd "${source_dir}" && tar -cf - "$@" . | zstd -19 -T0 --long=27 -q > "${archive}")
             ;;
         *)
-            (cd "${source_dir}" && tar -czf "${archive}" "$@" .)
+            (cd "${source_dir}" && tar -I "$(ota_gzip_prog)" -cf "${archive}" "$@" .)
             ;;
     esac
 }
@@ -46,7 +46,7 @@ function ota_payload_list_archive() {
     case "${OTA_PAYLOAD_TAR_SUFFIX}" in
         tar.xz)  tar -tJf "$1" ;;
         tar.zst) tar --zstd -tf "$1" ;;
-        *)       tar -tzf "$1" ;;
+        *)       tar -I "$(ota_gzip_prog)" -tf "$1" ;;
     esac
 }
 
@@ -252,7 +252,9 @@ EOF
 function ota_create_final_tarball() {
     local ota_temp_dir="$1"
     local ota_output_path="$2"
-    local tar_compress_flag="-czf"
+    # Legacy gz layout keeps the compressed outer tar; parallel gzip keeps the
+    # second compression pass inside CI step time limits (see f8842fa9).
+    local tar_compress_flag="-I $(ota_gzip_prog) -cf"
 
     # Compressed-payload layouts (xz/zstd) ship an uncompressed outer tar: the
     # payload members are already compressed, so a second compression pass is
