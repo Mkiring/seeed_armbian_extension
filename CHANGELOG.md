@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased] — secure boot, OTA overhaul, boot-disk anchoring, CI
 
 Covers the work against the initial import (merge base `9980aee`,
-2026-07-02 → 2026-09-15).
+2026-07-02 → 2026-10-14).
 
 ### Added
 
@@ -16,7 +16,9 @@ Covers the work against the initial import (merge base `9980aee`,
 
 - **Dedicated `/boot` partition for all Recovery images.** Plain and
   auto-decrypt Recovery builds now reserve a separate ext4 boot partition
-  (label `armbi_boot`) and mount it via fstab on top of overlayfs. This
+  (label `armbi_boot`); the initramfs mounts it on top of overlayfs,
+  anchored to the rootfs disk (no `/boot` fstab entry — an fstab source is
+  unresolvable on multi-disk clones). This
   fixes runtime writes to `/boot` (apt kernel upgrades, `armbianEnv.txt`
   edits, OTA tooling) being swallowed by the overlayfs upper layer on
   userdata and silently ignored by U-Boot on next boot. Secure-boot
@@ -244,7 +246,16 @@ Covers the work against the initial import (merge base `9980aee`,
 - **Multi-disk boot anchoring.** With several disks attached (or a cloned
   image as a second device), every lookup now binds to the disk U-Boot
   actually booted from, so foreign or cloned disks can no longer capture
-  root selection, updates, or key material:
+  root selection, updates, or key material. Follow-ups to the original
+  batch: the init-top anchor install hook wrote to `${MOUNT}` during the
+  rootfs stage (where it is an empty staging dir), so no built image ever
+  carried the anchor or the `pcie_aspm=off` extraargs — both now install
+  into `${SDCARD}`; the overlay upper layer follows the anchored `$ROOT`
+  instead of re-parsing `root=` from the cmdline through udev's
+  duplicate-UUID symlinks; `/boot` is mounted by `zz-seeed-mount-boot` from
+  the same-disk anchor recorded in `/run` (the earlier `/dev/armbian-boot`
+  fstab scheme stalled systemd: hand-made /dev symlinks never satisfy
+  udev-backed device units):
   - A/B boot and rootfs selection anchored to U-Boot's actual boot disk;
     userdata anchored to the boot disk across initramfs and runtime.
   - Recovery userdata lookup anchored to the rootfs disk; recovery

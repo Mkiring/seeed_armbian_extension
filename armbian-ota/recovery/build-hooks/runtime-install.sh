@@ -34,6 +34,7 @@ function ota_install_common_initramfs() {
     local -a common_initramfs_file_list=(
         "hooks/98-seeed-bind-userdata:etc/initramfs-tools/hooks/98-seeed-bind-userdata:0755"
         "scripts/init-bottom/00-seeed-bind-userdata:etc/initramfs-tools/scripts/init-bottom/00-seeed-bind-userdata:0755"
+        "scripts/init-bottom/zz-seeed-mount-boot:etc/initramfs-tools/scripts/init-bottom/zz-seeed-mount-boot:0755"
     )
     local entry source_path destination_path mode
 
@@ -81,6 +82,7 @@ function ota_install_recovery_initramfs() {
             done
             sha256sum "etc/initramfs-tools/hooks/98-seeed-bind-userdata"
             sha256sum "etc/initramfs-tools/scripts/init-bottom/00-seeed-bind-userdata"
+            sha256sum "etc/initramfs-tools/scripts/init-bottom/zz-seeed-mount-boot"
         } | sha256sum | awk '{print $1}'
     )" || {
         display_alert "${title}" "Failed to calculate initramfs cache stamp" "err"
@@ -102,21 +104,21 @@ function pre_update_initramfs__894_install_recovery_ota_hooks() {
     ota_install_recovery_initramfs "${MOUNT}"
 }
 
-# Rewrite the /boot fstab entry to the /dev/armbian-boot symlink created by
-# init-bottom/00-seeed-bind-userdata. The stock entry carries the boot
-# filesystem UUID, which is duplicated across dd-cloned disks: udev's
-# /dev/disk/by-uuid symlink flips between clones and systemd can mount the
-# other disk's boot partition while the root stays anchored. The symlink is
-# recreated each boot on the rootfs's own disk, so the fstab reference is
-# stable. Raw-FIT (secure boot) layouts have no /boot fstab entry and no ext4
-# boot partition, so the grep simply does not match there.
+# Remove the /boot fstab entry: /boot is mounted by the initramfs
+# (zz-seeed-mount-boot, anchored to the rootfs disk) instead. A fstab source
+# is unworkable in multi-disk clone setups -- a UUID flips between clones
+# through udev's duplicate-UUID symlinks, and a hand-made /dev symlink never
+# satisfies systemd's udev-backed device unit (observed as a ~90s stall in
+# "Expecting device dev-armbian-boot.device" and unbootable eMMC images).
+# Raw-FIT (secure boot) layouts never get a /boot entry, so the grep does not
+# match there.
 function pre_update_initramfs__896_recovery_boot_anchor_fstab() {
     local fstab="${MOUNT}/etc/fstab"
 
     [[ -f "${fstab}" ]] || return 0
     if grep -qE '^[^[:space:]]+[[:space:]]+/boot([[:space:]]|$)' "${fstab}"; then
-        sed -i -E 's@^[^[:space:]]+([[:space:]]+/boot([[:space:]]|$))@/dev/armbian-boot\1@' "${fstab}" ||
-            exit_with_error "Recovery OTA" "failed to anchor fstab /boot entry"
-        display_alert "Recovery OTA" "fstab /boot entry anchored to /dev/armbian-boot" "info"
+        sed -i -E '\@^[^[:space:]]+[[:space:]]+/boot([[:space:]]|$)@d' "${fstab}" ||
+            exit_with_error "Recovery OTA" "failed to remove fstab /boot entry"
+        display_alert "Recovery OTA" "removed fstab /boot entry (initramfs mounts /boot anchored)" "info"
     fi
 }
