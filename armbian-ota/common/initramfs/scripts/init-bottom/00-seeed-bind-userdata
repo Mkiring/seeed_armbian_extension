@@ -1,10 +1,10 @@
 #!/bin/sh
-# Initramfs init-bottom script: create stable /dev/armbian-userdata and
-# /dev/armbian-boot symlinks pointing at the userdata/boot partitions that
-# live on the same physical disk as the rootfs. Runs BEFORE the overlayroot
-# init-bottom hook so the overlayroot config can use dev=/dev/armbian-userdata
-# and fstab can mount /boot through /dev/armbian-boot, avoiding the multi-disk
-# duplicate-UUID/LABEL races on udev's /dev/disk/by-* symlinks.
+# Initramfs init-bottom script: create the stable /dev/armbian-userdata
+# symlink pointing at the userdata partition that lives on the same physical
+# disk as the rootfs, and record the same-disk boot partition anchor for
+# zz-seeed-mount-boot. Runs BEFORE the overlayroot init-bottom hook so the
+# overlayroot config can use dev=/dev/armbian-userdata and avoid the
+# multi-disk duplicate-UUID/LABEL races on udev's /dev/disk/by-* symlinks.
 #
 # Behaviour:
 #   * If /dev/mapper/armbian-userdata already exists (encrypted case, unlocked
@@ -13,7 +13,8 @@
 #   * Otherwise (unencrypted), resolve the root from the initramfs ROOT
 #     variable (anchored to the boot disk by init-top/armbian-bootdev-root
 #     when the armbian.bootdev token is present), falling back to root= from
-#     /proc/cmdline; then anchor both partitions to that disk.
+#     /proc/cmdline; then anchor the userdata and boot partitions to that
+#     disk.
 #   * If anything fails, log loudly but do not abort boot: the overlayroot
 #     hook will fall back to its own dev= resolution, preserving current
 #     behaviour.
@@ -44,33 +45,35 @@ LINK=/dev/armbian-userdata
 log() { echo "[seeed-bind-userdata] $*"; }
 warn() { echo "[seeed-bind-userdata] WARN: $*" >&2; }
 
-# Create /dev/armbian-boot for the ext4 boot partition on the same physical
-# disk as $1 (a partition device). fstab mounts /boot through that symlink
-# instead of a UUID, so udev's duplicate-UUID symlink flipping cannot mount
-# the other clone's boot partition. Raw-FIT (secure boot) layouts carry no
-# ext4 boot partition and no /boot fstab entry, so a missing or non-ext4
-# candidate simply leaves the symlink absent.
-link_boot_anchor() {
+# Record the same-disk ext4 boot partition for zz-seeed-mount-boot, which
+# mounts /boot after overlayroot assembled the overlay. The anchor is passed
+# through /run (tmpfs, shared by every initramfs stage). fstab must NOT
+# reference this mount: UUID sources flip between dd-cloned disks through
+# udev's duplicate-UUID symlinks, and hand-made /dev symlinks never satisfy
+# systemd's udev-backed device unit. Raw-FIT (secure boot) layouts carry no
+# ext4 boot partition, so a missing or non-ext4 candidate records nothing.
+record_boot_anchor() {
     anchor_root="$1"
     [ -n "${anchor_root}" ] || return 0
 
     boot_part="$(find_user_data__partlabel_on_root_disk "${anchor_root}" boot 2>/dev/null || true)"
     if [ -n "${boot_part}" ] && [ "$(blkid -s TYPE -o value "${boot_part}" 2>/dev/null)" = "ext4" ]; then
-        ln -sf "${boot_part}" /dev/armbian-boot
-        log "linked /dev/armbian-boot -> ${boot_part}"
+        mkdir -p /run 2>/dev/null || true
+        printf '%s\n' "${boot_part}" > /run/armbian-boot-part
+        log "boot anchor recorded: ${boot_part}"
     fi
 }
 
 # Encrypted case: mapper already set up by 0-decryption-disk in init-top.
 # The userdata mapper's backing partition names the boot disk, so the /boot
-# anchor is derived from it directly -- encrypted layouts also mount /boot
-# through fstab and are exposed to the same duplicate-UUID race.
+# anchor is derived from it directly -- encrypted layouts mount the same
+# ext4 boot partition and are exposed to the same duplicate-UUID race.
 if [ -b /dev/mapper/armbian-userdata ]; then
     ln -sf /dev/mapper/armbian-userdata "${LINK}"
     log "linked ${LINK} -> /dev/mapper/armbian-userdata (encrypted)"
     if command -v dmsetup >/dev/null 2>&1; then
         enc_backing="$(dmsetup deps -o devname armbian-userdata 2>/dev/null | sed -n 's/.*(\([^ )]*\)).*/\1/p' | head -n1)"
-        [ -n "${enc_backing}" ] && link_boot_anchor "/dev/${enc_backing}"
+        [ -n "${enc_backing}" ] && record_boot_anchor "/dev/${enc_backing}"
     fi
     exit 0
 fi
@@ -131,6 +134,6 @@ fi
 ln -sf "${userdata_part}" "${LINK}"
 log "linked ${LINK} -> ${userdata_part} (root=${root_dev})"
 
-link_boot_anchor "${root_dev}"
+record_boot_anchor "${root_dev}"
 
 exit 0
