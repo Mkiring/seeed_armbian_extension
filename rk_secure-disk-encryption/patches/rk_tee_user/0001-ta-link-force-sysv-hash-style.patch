@@ -1,0 +1,42 @@
+From: seeed_armbian_extension build hooks
+Subject: [PATCH] ta: force --hash-style=sysv on every TA link
+
+Debian cross binutils links with --hash-style=gnu by default, leaving the
+TA ELF with DT_GNU_HASH only. The board OP-TEE 3.13 ldelf (rk3576
+bl32-v1.08) requires DT_HASH and rejects such TAs at load time:
+
+    E/LD:  check_range:229 DT_HASH 0x0 out of range
+    E/TC:? 0 ldelf_init_with_ldelf:126 ldelf failed with res: 0xffff0005
+
+Rockchip pairs this dev-kit with gcc-arm-10.3 binutils whose ld defaults
+to sysv. Force the same here so TAs compiled with the Debian toolchains
+resolved by the build hook remain loadable.
+---
+ external/security/rk_tee_user/v2/export-ta_arm32/mk/link.mk | 2 +-
+ external/security/rk_tee_user/v2/export-ta_arm64/mk/link.mk | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/external/security/rk_tee_user/v2/export-ta_arm32/mk/link.mk b/external/security/rk_tee_user/v2/export-ta_arm32/mk/link.mk
+--- a/external/security/rk_tee_user/v2/export-ta_arm32/mk/link.mk
++++ b/external/security/rk_tee_user/v2/export-ta_arm32/mk/link.mk
+@@ -33,7 +33,7 @@ cleanfiles += $(link-out-dir$(sm))/$(user-ta-uuid).stripped.elf
+ cleanfiles += $(link-out-dir$(sm))/$(user-ta-uuid).ta
+ cleanfiles += $(link-script-pp$(sm)) $(link-script-dep$(sm))
+
+-link-ldflags  = -e__ta_entry -pie
++link-ldflags  = -e__ta_entry -pie --hash-style=sysv
+ link-ldflags += -T $(link-script-pp$(sm))
+ link-ldflags += -Map=$(link-out-dir$(sm))/$(user-ta-uuid).map
+ link-ldflags += --sort-section=alignment
+diff --git a/external/security/rk_tee_user/v2/export-ta_arm64/mk/link.mk b/external/security/rk_tee_user/v2/export-ta_arm64/mk/link.mk
+--- a/external/security/rk_tee_user/v2/export-ta_arm64/mk/link.mk
++++ b/external/security/rk_tee_user/v2/export-ta_arm64/mk/link.mk
+@@ -33,7 +33,7 @@ cleanfiles += $(link-out-dir$(sm))/$(user-ta-uuid).stripped.elf
+ cleanfiles += $(link-out-dir$(sm))/$(user-ta-uuid).ta
+ cleanfiles += $(link-script-pp$(sm)) $(link-script-dep$(sm))
+
+-link-ldflags  = -e__ta_entry -pie
++link-ldflags  = -e__ta_entry -pie --hash-style=sysv
+ link-ldflags += -T $(link-script-pp$(sm))
+ link-ldflags += -Map=$(link-out-dir$(sm))/$(user-ta-uuid).map
+ link-ldflags += --sort-section=alignment
