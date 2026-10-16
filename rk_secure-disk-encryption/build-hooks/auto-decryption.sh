@@ -133,6 +133,28 @@ function rk_autodecrypt_resolve_tee_toolchains() {
 	display_alert "optee" "rk_tee_user toolchains: aarch64=${AARCH64_TOOLCHAIN} arm32=${ARM32_TOOLCHAIN}" "info"
 }
 
+# Patches under patches/rk_tee_user/ keep the sdk-tools TA dev-kit buildable
+# with the Debian toolchains resolved above. Restoring the tracked targets
+# first makes the step idempotent and allows the patch files to be updated
+# freely: whatever was applied last time is dropped and the current patch
+# set is applied on the pristine files.
+function rk_autodecrypt_apply_tee_user_patches() {
+    local sdk_tools="$1"
+    local patch_file
+
+    patch_file="$(rk_resolve_extension_dir "patches/rk_tee_user")/patches/rk_tee_user/0001-ta-link-force-sysv-hash-style.patch"
+    [[ -f "${patch_file}" ]] || exit_with_error "rk_tee_user patch file missing" "${patch_file}"
+
+    git -C "${sdk_tools}" checkout -- \
+        external/security/rk_tee_user/v2/export-ta_arm32/mk/link.mk \
+        external/security/rk_tee_user/v2/export-ta_arm64/mk/link.mk 2>/dev/null || true
+
+    git -C "${sdk_tools}" apply "${patch_file}" ||
+        exit_with_error "failed to apply rk_tee_user patch" "${patch_file}"
+
+    display_alert "optee" "Applied rk_tee_user patches (TA sysv hash style)" "info"
+}
+
 function rk_autodecrypt_build_and_install_tee_user() {
     local root_dir="$1"
     local sdk_tools="$2"
@@ -149,6 +171,7 @@ function rk_autodecrypt_build_and_install_tee_user() {
         cd "${rk_tee_build_dir}" || exit 1
         rk_autodecrypt_resolve_tee_toolchains ||
             exit_with_error "no aarch64/arm32 cross toolchains found for rk_tee_user_v2 build"
+        rk_autodecrypt_apply_tee_user_patches "${sdk_tools}"
         ./build.sh 6432
     ) || {
         display_alert "optee" "rk_tee_user_v2 compilation failed" "err"
