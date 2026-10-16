@@ -546,9 +546,14 @@ secondary_signing() {
     sign_cmd="'${signing_mkimage}' -f '${work}/boot-final.its' -k '${keys_work}' -E -p ${fit_padding} -r '${work}/boot.itb'"
 
     if [[ -n "${DOCKER_IMAGE}" ]]; then
-        # Sign inside the armbian build container (explicit override). The
-        # container's OpenSSL signs PSS with salt = max (222 for RSA2048+sha256),
-        # matching the hardcoded expectation in rsa-verify.c padding_pss_verify.
+        # Sign inside the armbian build container. NB: the tree-built mkimage
+        # computes the FIT signature inside its own process via the libcrypto
+        # C API — it never invokes the openssl CLI, so there is no parameter
+        # that can reach it. With OpenSSL >= 3.5 (e.g. current trixie images)
+        # it signs PSS with digest-length salt, which the on-board verifier
+        # (rsa-verify.c, max-salt only) rejects. Prefer the default rkbin
+        # mkimage path, or point --docker-image at an image with OpenSSL < 3.5
+        # (e.g. a bookworm-based tag).
         # UBOOT_DIR is mounted read-only: the tree must not be modified.
         display_alert "repack-fit" "Signing FIT in docker: ${DOCKER_IMAGE}" "info"
         if ! docker run --rm \
@@ -628,12 +633,20 @@ EOF
     [[ -f "${signed_itb}" ]] ||
         exit_with_error "Signed boot.itb missing after signing" "${signed_itb}"
 
-    local uboot_dtb="${UBOOT_DIR}/u-boot.dtb"
-    [[ -f "${uboot_dtb}" ]] ||
-        exit_with_error "u-boot.dtb missing (needed for signature verification)" "${uboot_dtb}"
+    [[ -f "${UBOOT_DIR}/u-boot.dtb" ]] ||
+        exit_with_error "u-boot.dtb missing (needed for signature verification)" "${UBOOT_DIR}/u-boot.dtb"
+
+    # Same EACCES workaround as the docker branch: fit_check_sign opens the key
+    # dtb read-write, and u-boot.dtb in the (root-owned) worktree tree denies a
+    # non-root user. Stage a writable copy in the workdir.
+    local work_dir key_dtb
+    work_dir="$(dirname "${signed_itb}")"
+    key_dtb="${work_dir}/u-boot-key.dtb"
+    cp -f "${UBOOT_DIR}/u-boot.dtb" "${key_dtb}" ||
+        exit_with_error "Failed to stage u-boot.dtb for verification" "${UBOOT_DIR}/u-boot.dtb"
 
     display_alert "repack-fit" "Verifying signature with fit_check_sign" "info"
-    if ! "${check_tool}" -f "${signed_itb}" -k "${uboot_dtb}" 2>&1; then
+    if ! "${check_tool}" -f "${signed_itb}" -k "${key_dtb}" 2>&1; then
         cat >&2 <<EOF
 
 Signature verification failed. Likely causes:
