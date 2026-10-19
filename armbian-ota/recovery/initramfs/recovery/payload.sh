@@ -58,8 +58,9 @@ extract_tar() {
     target="$2"
     label="$3"
     err_file="${LOGDIR}/${label}.tar.stderr.log"
+    dec_status="${LOGDIR}/${label}.dec.status"
 
-    rm -f "${err_file}" 2>/dev/null || true
+    rm -f "${err_file}" "${dec_status}" 2>/dev/null || true
 
     TAR_BIN="$(ota_resolve_tool tar)"
     case "${archive}" in
@@ -78,21 +79,29 @@ extract_tar() {
     fi
 
     log "${label}: ${DEC_BIN} -dc ${archive} | ${TAR_BIN} ${tar_flags} -xf - -C ${target}"
+    # busybox ash has no pipefail; the decompressor exit status travels through
+    # a side file because tar alone can exit 0 on a corrupt stream once it has
+    # seen the archive end marker before the decompressor bailed.
     rc=0
-    (
-        set -o pipefail
-        "${DEC_BIN}" -dc "${archive}" | "${TAR_BIN}" ${tar_flags} -xf - -C "${target}"
-    ) 2>"${err_file}" || rc=$?
-    if [ "${rc}" -eq 0 ]; then
+    dec_rc=1
+    {
+        (
+            "${DEC_BIN}" -dc "${archive}"
+            echo $? >"${dec_status}"
+        ) | "${TAR_BIN}" ${tar_flags} -xf - -C "${target}"
+    } 2>"${err_file}" || rc=$?
+    dec_val="$(cat "${dec_status}" 2>/dev/null)"
+    [ -n "${dec_val}" ] && dec_rc="${dec_val}"
+    if [ "${rc}" -eq 0 ] && [ "${dec_rc}" -eq 0 ]; then
         log "${label}: extract succeeded"
         log_tail "${label}" "${err_file}" 20
-        rm -f "${err_file}" 2>/dev/null || true
+        rm -f "${err_file}" "${dec_status}" 2>/dev/null || true
         return 0
     fi
 
-    log "ERROR: ${label} extract failed (rc=${rc})"
+    log "ERROR: ${label} extract failed (tar rc=${rc}, decompressor rc=${dec_rc})"
     log_tail "${label} stderr" "${err_file}" 80
-    rm -f "${err_file}" 2>/dev/null || true
+    rm -f "${err_file}" "${dec_status}" 2>/dev/null || true
     return 1
 }
 
