@@ -205,8 +205,18 @@ ota_detect_devices() {
     boot_info="$(get_dev_and_uuid_by_label "armbi_boot" "$(recovery_boot_disk || true)" || true)"
 
     if [ "${AUTO_DECRYPT_MODE}" -eq 0 ]; then
-        # Standard mode root detection. Prefer /proc/cmdline root= (always present,
-        # independent of device probe timing), fall back to LABEL=armbi_root.
+        # Standard mode root detection, in anchoring order:
+        #   1. The inherited initramfs ROOT when init-top/armbian-bootdev-root
+        #      already rewrote it (through /conf/param.conf) into the concrete
+        #      partition on the disk U-Boot booted from. Re-resolving
+        #      root=UUID= through an unanchored blkid first-match races on
+        #      dd-cloned disks whose duplicate UUIDs point ROOT_DEV at a disk
+        #      the firmware never booted from -- and this hook mkfs/extracts
+        #      onto ROOT_DEV below.
+        #   2. cmdline root= (always present, independent of device probe
+        #      timing), with UUID resolution restricted to the bootdev token
+        #      disk when the tokens are present.
+        #   3. LABEL=armbi_root fallback, likewise token-anchored.
         root_info=""
         cmdline_root=""
         for _tok in $(cat /proc/cmdline 2>/dev/null); do
@@ -215,7 +225,24 @@ ota_detect_devices() {
             esac
         done
 
-        if [ -n "${cmdline_root}" ]; then
+        case "${ROOT:-}" in
+            /dev/*)
+                if [ -b "${ROOT}" ]; then
+                    _ruuid="$(blkid -s UUID -o value "${ROOT}" 2>/dev/null | head -n1)"
+                    # Distrust a ROOT that disagrees with cmdline root=UUID=:
+                    # only the bootdev anchor may legitimately rewrite it.
+                    case "${cmdline_root}" in
+                        UUID=*) [ "${_ruuid}" = "${cmdline_root#UUID=}" ] || _ruuid="" ;;
+                    esac
+                    if [ -n "${_ruuid}" ]; then
+                        root_info="${ROOT} ${_ruuid}"
+                        log "using initramfs-anchored ROOT=${ROOT}"
+                    fi
+                fi
+                ;;
+        esac
+
+        if [ -z "${root_info}" ] && [ -n "${cmdline_root}" ]; then
             log "cmdline root= detected: ${cmdline_root}"
             case "${cmdline_root}" in
                 UUID=*)
@@ -223,7 +250,8 @@ ota_detect_devices() {
                     _cdev=""
                     _i=0
                     while [ "${_i}" -lt 10 ]; do
-                        _cdev="$(blkid -U "${_cuuid}" 2>/dev/null)" && [ -n "${_cdev}" ] && break
+                        _cdev="$(first_match_on_disk "UUID=${_cuuid}" "$(recovery_boot_disk || true)")"
+                        [ -n "${_cdev}" ] && break
                         sleep 1
                         _i=$((_i + 1))
                     done
