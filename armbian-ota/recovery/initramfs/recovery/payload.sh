@@ -261,6 +261,10 @@ ota_validate_recovery_state() {
     # re-check the plaintext rootfs tar sha256 against it before applying, so a
     # tamper of the transaction store between phase 1 and phase 2 is caught.
     if [ -f "${OTA_DIR}/payload.manifest" ]; then
+        if ! command -v sha256sum >/dev/null 2>&1; then
+            log "ERROR: sha256sum unavailable in initramfs; cannot re-check plaintext rootfs sha; abort"
+            return 1
+        fi
         expected_root_sha="$(sed -n 's/^OTA_PAYLOAD_ROOTFS_SHA256=//p' "${OTA_DIR}/payload.manifest" | head -n1)"
         if [ -n "${expected_root_sha}" ]; then
             actual_root_sha="$(sha256sum "${ROOTFS_TAR}" | awk '{print $1}')"

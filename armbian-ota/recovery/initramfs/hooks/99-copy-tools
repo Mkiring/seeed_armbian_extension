@@ -60,7 +60,7 @@ copy_recovery_initramfs_lib() {
 # payload decode is threaded instead of the single-threaded busybox applet)
 # and let the copy list below install the real binaries in their place.
 # Same pattern as the mke2fs fix further down.
-for bb_applet in tar gzip gunzip xz; do
+for bb_applet in tar gzip gunzip xz sha256sum; do
     rm -f "${DESTDIR}/usr/bin/${bb_applet}" "${DESTDIR}/bin/${bb_applet}"
 done
 
@@ -84,6 +84,7 @@ done <<'EOF'
 /usr/bin /usr/bin/tail /bin/tail
 /usr/bin /usr/bin/date /bin/date
 /usr/bin /usr/bin/sync /bin/sync
+/usr/bin /usr/bin/sha256sum /bin/sha256sum
 /usr/bin /usr/bin/awk /bin/awk
 /usr/bin /usr/bin/wc /bin/wc
 /usr/bin /usr/bin/od /bin/od
