@@ -87,6 +87,7 @@ ab_start_ota() {
 
     temp_work="$(make_ota_work_dir "ab-package")"
     extract_ota_package "${package_path}" "${temp_work}"
+    ota_assert_payload_matches_system "${temp_work}"
     ota_verify_payload "${temp_work}" \
         "${OTA_PAYLOAD_ROOTFS_TAR}" "${OTA_PAYLOAD_ROOTFS_SHA}" \
         "${OTA_PAYLOAD_BOOT_TAR}" "${OTA_PAYLOAD_BOOT_SHA}" "${OTA_PAYLOAD_BOOT_ITB}"
