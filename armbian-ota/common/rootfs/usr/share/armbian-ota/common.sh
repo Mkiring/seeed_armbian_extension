@@ -25,13 +25,17 @@ OTA_PAYLOAD_ROOTFS_ENC="rootfs.tar.gz.enc"
 # Rebind OTA_PAYLOAD_ROOTFS_TAR / OTA_PAYLOAD_BOOT_TAR / OTA_PAYLOAD_ROOTFS_ENC
 # to the payload files actually staged in $1 (an extracted OTA work dir).
 # The xz suffix wins over legacy gz so the layout cannot be mis-detected.
+# For the rootfs an encrypted payload counts too: encrypted packages ship only
+# rootfs.tar.<fmt>.enc (the plaintext is deleted on the build side), so the
+# resolved name is the *decryption target* until ota_process_encrypted_payload
+# materializes it during verify.
 ota_resolve_payload_names() {
     local work_dir="$1" suffix
 
     OTA_PAYLOAD_ROOTFS_TAR=""
     OTA_PAYLOAD_BOOT_TAR=""
     for suffix in tar.xz tar.gz; do
-        if [ -z "${OTA_PAYLOAD_ROOTFS_TAR}" ] && [ -f "${work_dir}/rootfs.${suffix}" ]; then
+        if [ -z "${OTA_PAYLOAD_ROOTFS_TAR}" ] && { [ -f "${work_dir}/rootfs.${suffix}" ] || [ -f "${work_dir}/rootfs.${suffix}.enc" ]; }; then
             OTA_PAYLOAD_ROOTFS_TAR="rootfs.${suffix}"
         fi
         if [ -z "${OTA_PAYLOAD_BOOT_TAR}" ] && [ -f "${work_dir}/boot.${suffix}" ]; then
@@ -42,6 +46,52 @@ ota_resolve_payload_names() {
     [ -n "${OTA_PAYLOAD_ROOTFS_TAR}" ] ||
         error_exit "No rootfs payload in ${work_dir} (expected rootfs.tar.xz or rootfs.tar.gz)"
     OTA_PAYLOAD_ROOTFS_ENC="${OTA_PAYLOAD_ROOTFS_TAR}.enc"
+    return 0
+}
+
+# True when the running system itself boots from a LUKS-encrypted root.
+# Read-only probes only (no keybox/tee side effects); any signal hit counts:
+#   1. the initramfs stashed the unlock passphrase in /run (decryption-disk.sh)
+#   2. the real root mount (overlay lower /media/root-ro first, / fallback)
+#      sources from a device-mapper node
+ota_system_encrypted() {
+    local src
+
+    [ -s /run/armbian-luks-passphrase ] && return 0
+    src="$(findmnt -n -o SOURCE /media/root-ro 2>/dev/null || true)"
+    [ -n "${src}" ] || src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    case "${src}" in
+        /dev/mapper/*|/dev/dm-*) return 0 ;;
+    esac
+    return 1
+}
+
+# Match the package's payload encryption against the running system before
+# verify/decrypt runs: an encrypted payload can only be applied on a system
+# that boots encrypted (its key derives from the LUKS passphrase), and a
+# plaintext payload applied to an encrypted system bricks it -- the plain
+# rootfs carries no unlock hook, so the device would not come back up.
+# Also cross-checks package.env OTA_ENCRYPTED so a packaging bug cannot
+# smuggle a payload past the file-based gate.
+ota_assert_payload_matches_system() {
+    local work_dir="$1"
+    local enc_tar="${work_dir}/${OTA_PAYLOAD_ROOTFS_ENC}"
+    local declared env_val
+
+    if [ -f "${enc_tar}" ]; then
+        ota_system_encrypted ||
+            error_exit "OTA payload is encrypted (${OTA_PAYLOAD_ROOTFS_ENC}) but this system does not boot from an encrypted root; refusing"
+        declared="yes"
+    else
+        ota_system_encrypted &&
+            error_exit "OTA payload is plaintext but this system boots from an encrypted root; a plain update would leave the device unbootable; refusing"
+        declared="no"
+    fi
+
+    env_val="$(package_env_get_value "OTA_ENCRYPTED" || true)"
+    if [ -n "${env_val}" ] && [ "${env_val}" != "${declared}" ]; then
+        error_exit "OTA package metadata inconsistent: OTA_ENCRYPTED=${env_val} but the staged payload says ${declared}"
+    fi
     return 0
 }
 

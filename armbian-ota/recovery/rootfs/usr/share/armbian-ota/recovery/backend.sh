@@ -25,6 +25,7 @@ recovery_start_ota() {
     assert_package_mode_matches "${package_path}" "recovery"
 
     extract_ota_package "${package_path}" "${OTA_WORK_DIR}"
+    ota_assert_payload_matches_system "${OTA_WORK_DIR}"
     ota_verify_payload "${OTA_WORK_DIR}" \
         "${OTA_PAYLOAD_ROOTFS_TAR}" "${OTA_PAYLOAD_ROOTFS_SHA}" \
         "${OTA_PAYLOAD_BOOT_TAR}" "${OTA_PAYLOAD_BOOT_SHA}" "${OTA_PAYLOAD_BOOT_ITB}"
