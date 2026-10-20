@@ -243,6 +243,20 @@ ota_validate_recovery_state() {
         return 1
     fi
 
+    # Payload/system encryption match (phase-2 backstop; phase 1 already
+    # rejects the mismatched pairs before anything is touched). The .enc blob
+    # stays staged after the phase-1 decrypt, so its presence still marks an
+    # encrypted package here.
+    if [ -f "${OTA_DIR}/rootfs.tar.xz.enc" ] || [ -f "${OTA_DIR}/rootfs.tar.gz.enc" ]; then
+        pkg_encrypted=1
+    else
+        pkg_encrypted=0
+    fi
+    if [ "${pkg_encrypted}" != "${AUTO_DECRYPT_MODE:-0}" ]; then
+        log "ERROR: payload/system encryption mismatch (encrypted payload=${pkg_encrypted}, auto-decrypt mode=${AUTO_DECRYPT_MODE:-0}), abort"
+        return 1
+    fi
+
     # If a payload manifest shipped (encrypted payload was decrypted in phase 1),
     # re-check the plaintext rootfs tar sha256 against it before applying, so a
     # tamper of the transaction store between phase 1 and phase 2 is caught.

@@ -241,6 +241,23 @@ Covers the work against the initial import (merge base `9980aee`,
 
 ### Fixed
 
+- **Encrypted-package phase-1 regression and bidirectional encryption
+  gate.** The format-negotiation refactor (`16e43ad8`) made
+  `ota_resolve_payload_names()` require a plaintext `rootfs.tar.<fmt>` to
+  exist, but encrypted packages intentionally ship only
+  `rootfs.tar.<fmt>.enc` (plaintext deleted on the build side), so
+  `armbian-ota start` on an encrypted system aborted with "No rootfs
+  payload" before the decrypt step could ever run. The resolver now counts
+  the encrypted blob too (the resolved name is the decryption target).
+  On top of that fix, payload/system encryption must now match in both
+  directions before verify/decrypt: an encrypted package is refused on a
+  plain system (it cannot derive the payload key), and a plaintext package
+  is refused on an encrypted system — the plain rootfs carries no unlock
+  hook, so the update would apply "successfully" and leave the device
+  unbootable. The check cross-validates `package.env`'s `OTA_ENCRYPTED`
+  against the staged payload, and the recovery initramfs re-checks the
+  pair (`.enc` presence vs `AUTO_DECRYPT_MODE`) as a phase-2 backstop.
+
 - **Multi-disk boot anchoring.** With several disks attached (or a cloned
   image as a second device), every lookup now binds to the disk U-Boot
   actually booted from, so foreign or cloned disks can no longer capture
