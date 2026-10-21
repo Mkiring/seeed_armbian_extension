@@ -217,6 +217,7 @@ write_raw_boot_itb() {
     if ! dd if="${image}" of="${target}" bs=4M conv=fsync 2>>"${LOGFILE}"; then
         stop_heartbeat
         log "ERROR: failed to write boot.itb to ${target}"
+        log_tail "boot.itb dd stderr" "${LOGFILE}" 20
         return 1
     fi
     stop_heartbeat

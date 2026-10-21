@@ -59,8 +59,10 @@ copy_recovery_initramfs_lib() {
 # OTA apply path depends on (GNU tar for -J, gzip, and the real xz so
 # payload decode is threaded instead of the single-threaded busybox applet)
 # and let the copy list below install the real binaries in their place.
-# Same pattern as the mke2fs fix further down.
-for bb_applet in tar gzip gunzip xz sha256sum; do
+# Same pattern as the mke2fs fix further down. dd must be on this list too:
+# busybox dd has no conv=fsync, so the raw boot.itb write bailed out in 2ms
+# with "invalid conv" (observed on the rk3588 encrypted recovery OTA).
+for bb_applet in tar gzip gunzip xz sha256sum dd; do
     rm -f "${DESTDIR}/usr/bin/${bb_applet}" "${DESTDIR}/bin/${bb_applet}"
 done
 
