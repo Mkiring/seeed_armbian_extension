@@ -198,6 +198,12 @@ EOF
     if [[ -n "${OTA_MIN_RUNTIME_VERSION:-}" ]]; then
         echo "MIN_RUNTIME_VERSION=${OTA_MIN_RUNTIME_VERSION}" >> "${ota_mode_file}"
     fi
+    # OTA_BOOT_REFRESH=0 defers the built-in boot-partition refresh to the
+    # package hook (recovery/hooks/boot-atomic-swap.sh); absent or 1 keeps the
+    # legacy built-in extract (docs/10-ota-package-formats.md).
+    if [[ -n "${OTA_BOOT_REFRESH:-}" ]]; then
+        echo "OTA_BOOT_REFRESH=${OTA_BOOT_REFRESH}" >> "${ota_mode_file}"
+    fi
     if [[ -f "${ota_temp_dir}/ota-hook.sh" ]]; then
         echo "OTA_HOOK=ota-hook.sh" >> "${ota_mode_file}"
     fi

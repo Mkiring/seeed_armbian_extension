@@ -282,7 +282,21 @@ ota_validate_recovery_state() {
     HAS_BOOT_ITB=0
     [ -f "${BOOT_ITB}" ] && HAS_BOOT_ITB=1
 
-    log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}"
+    # Package-requested deferral of the built-in boot refresh
+    # (OTA_BOOT_REFRESH=0 in package.env): ota_apply_boot is skipped so the
+    # package hook owns a per-file atomic swap instead
+    # (recovery/hooks/boot-atomic-swap.sh). Absent key keeps legacy behavior.
+    OTA_BOOT_HOOK_MODE=0
+    if [ "${HAS_BOOT_TAR}" -eq 1 ]; then
+        bsw_flag="$(sed -n 's/^OTA_BOOT_REFRESH=//p' "${OTA_DIR}/package.env" 2>/dev/null | head -n1)"
+        if [ "${bsw_flag}" = "0" ]; then
+            OTA_BOOT_HOOK_MODE=1
+            HAS_BOOT_TAR=0
+            log "boot refresh deferred to OTA hook (package.env OTA_BOOT_REFRESH=0)"
+        fi
+    fi
+
+    log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}, hook_mode=${OTA_BOOT_HOOK_MODE}"
     return 0
 }
 
@@ -430,6 +444,19 @@ ota_apply_rootfs() {
 # Returns 1 on boot.itb failure (caller unmounts+aborts). boot.tar.gz extract
 # failure is logged but does not abort (matches legacy behavior).
 ota_apply_boot() {
+    # Hook mode: hook_pre_apply already performed the atomic boot swap and
+    # left BOOT_MNT/DO_BOOT_OTA in place for ota_patch_config. Skip the
+    # built-in extract entirely -- recomputing DO_BOOT_OTA here would clobber
+    # the handoff (OTA_BOOT_HOOK_MODE set in ota_validate_recovery_state).
+    if [ "${OTA_BOOT_HOOK_MODE:-0}" -eq 1 ]; then
+        if [ "${DO_BOOT_OTA:-0}" -eq 1 ] && [ -n "${BOOT_MNT:-}" ]; then
+            log "boot OTA handled by hook (BOOT_MNT=${BOOT_MNT} mounted for config patch)"
+        else
+            log "WARN: boot deferred to hook but no handoff (hook missing or failed); armbianEnv patch falls back to rootfs /boot"
+        fi
+        return 0
+    fi
+
     DO_BOOT_OTA=0
     [ "$HAS_BOOT_PART" -eq 1 ] && [ "$HAS_BOOT_TAR" -eq 1 ] && DO_BOOT_OTA=1
 
