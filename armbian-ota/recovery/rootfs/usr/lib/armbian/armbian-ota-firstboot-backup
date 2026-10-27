@@ -37,6 +37,14 @@ find_userdata_partition() {
     blkid -t PARTLABEL=userdata -o device 2>/dev/null | head -n1
 }
 
+# True when $1 starts with the big-endian FIT magic 0xd00dfeed. Guards the
+# raw dump: on odd layouts (plain image whose /boot failed to mount) the
+# PARTLABEL=boot lookup can surface the ext4 boot partition, and dumping
+# that as boot.itb would stage a worthless net.
+fit_magic_ok() {
+    [ "$(dd if="$1" bs=4 count=4 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "d00dfeed" ]
+}
+
 mkdir -p "${USERDATA_MNT}"
 USERDATA_DEV="$(find_userdata_partition)"
 if [ -z "${USERDATA_DEV}" ] || ! mount -t ext4 "${USERDATA_DEV}" "${USERDATA_MNT}"; then
@@ -67,10 +75,10 @@ if findmnt -n -o FSTYPE /boot 2>/dev/null | grep -q ext; then
 else
     RAW_BOOT_DEV="$(lsblk -no PATH,PARTLABEL 2>/dev/null | awk '$2=="boot"{print $1; exit}')"
     if [ -n "${RAW_BOOT_DEV}" ] && [ -b "${RAW_BOOT_DEV}" ]; then
-        if dd if="${RAW_BOOT_DEV}" of="${BACKUP_DIR}/boot.itb" bs=4M status=none; then
+        if dd if="${RAW_BOOT_DEV}" of="${BACKUP_DIR}/boot.itb" bs=4M status=none && fit_magic_ok "${BACKUP_DIR}/boot.itb"; then
             log "secure backup created: ${BACKUP_DIR}/boot.itb ($(du -h "${BACKUP_DIR}/boot.itb" | cut -f1))"
         else
-            log "ERROR: raw boot dump failed; removing partial"
+            log "ERROR: raw boot dump failed or is not a FIT image; removing partial"
             rm -rf "${BACKUP_DIR}"
             exit 1
         fi

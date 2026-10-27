@@ -202,22 +202,55 @@ ota_run_rollback() {
         exit 0
     fi
 
+    # The staged payload is convicted: this rollback only runs because it
+    # never reached health confirmation. Drop it now -- otherwise the
+    # healthy rolled-back system promotes it into backup/ at mark-success
+    # and silently replaces the known-good net with the bad one.
+    if [ -d "${OTA_DIR}" ]; then
+        rm -rf "${OTA_DIR}" || true
+        log "convicted payload dropped: ${OTA_DIR}"
+    fi
+
     ota_log_init
     log "last apply was never health-confirmed; rolling back from backup (attempt $(state_get_retry_count "${STATE_FILE}")/${OTA_MAX_RETRY})"
 
-    ota_set_payload_dir "${BACKUP_DIR}"
-    if ! ota_validate_payload; then
-        state_mark_failed "${STATE_FILE}" "backup payload invalid"
-        rm -rf "${BACKUP_DIR}" || true
-        log "stop-loss: backup payload failed validation, cleared"
-        unmount_recovery_transaction_store
-        exit 0
-    fi
-    # Rollback runs the built-in apply only; a package hook (and the
-    # OTA_BOOT_REFRESH deferral it implies) must not suppress the boot
-    # restore on the emergency path.
-    OTA_BOOT_HOOK_MODE=0
+    # Deferral (package.env OTA_BOOT_REFRESH=0) and staged hooks only make
+    # sense on the prepared path; the rollback runs the built-in apply and
+    # must restore whatever the backup actually carries.
     OTA_HOOK_PATH=""
+    DO_BOOT_OTA=0
+
+    BACKUP_PARTIAL_VALUE="$(grep -E '^BACKUP_PARTIAL=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+
+    ota_set_payload_dir "${BACKUP_DIR}"
+    if [ "${BACKUP_PARTIAL_VALUE}" = "1" ]; then
+        if ! ota_validate_payload boot-only; then
+            state_mark_failed "${STATE_FILE}" "partial backup payload invalid"
+            rm -rf "${BACKUP_DIR}" || true
+            log "stop-loss: partial backup failed validation, cleared"
+            unmount_recovery_transaction_store
+            exit 0
+        fi
+    else
+        if ! ota_validate_payload; then
+            state_mark_failed "${STATE_FILE}" "backup payload invalid"
+            rm -rf "${BACKUP_DIR}" || true
+            log "stop-loss: backup payload failed validation, cleared"
+            unmount_recovery_transaction_store
+            exit 0
+        fi
+    fi
+    # The deferral gate inside validation sets OTA_BOOT_HOOK_MODE=1 and
+    # zeroes HAS_BOOT_TAR when the package asked for a hook-owned boot
+    # swap; no hook runs here, so force the gate off and recompute the
+    # flags from what the backup really carries. Without this the rollback
+    # would restore the rootfs but keep the broken new boot files --
+    # exactly the version mismatch design 2.2 warns about.
+    OTA_BOOT_HOOK_MODE=0
+    HAS_BOOT_TAR=0
+    [ -f "${BOOT_TAR}" ] && HAS_BOOT_TAR=1
+    HAS_BOOT_ITB=0
+    [ -f "${BOOT_ITB}" ] && HAS_BOOT_ITB=1
 
     mkdir -p "${ROOT_MNT}"
     if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
@@ -226,7 +259,6 @@ ota_run_rollback() {
         exit 0
     fi
 
-    BACKUP_PARTIAL_VALUE="$(grep -E '^BACKUP_PARTIAL=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     start_heartbeat "OTA rollback applying backup"
     if [ "${BACKUP_PARTIAL_VALUE}" = "1" ]; then
         log "BACKUP_PARTIAL=1: boot-only rollback, rootfs untouched"
@@ -267,11 +299,18 @@ ota_run_prepared() {
         exit 0
     fi
 
-    ota_validate_recovery_state || {
+    # rc 1 = idle (state or payload not applicable): the historical bare
+    # skip. rc 2 = payload present but invalid (sha/encryption/FIT): a
+    # retry on the same broken payload would never converge, so it burns
+    # the budget and stop-losses like any other apply failure.
+    ota_validate_recovery_state
+    validate_rc=$?
+    if [ "${validate_rc}" -eq 1 ]; then
         umount "${ROOT_MNT}" 2>/dev/null || true
         unmount_recovery_transaction_store
         exit 0
-    }
+    fi
+    [ "${validate_rc}" -eq 0 ] || ota_apply_failed "payload validation"
 
     # Raise printk only now that an OTA is confirmed to be pending. On a
     # normal boot the early-exit paths above leave console_loglevel
@@ -361,6 +400,12 @@ ota_run_prepared() {
     # health service promotes it to backup/ on confirmation (mark-success),
     # or the next boot rolls back onto it if this system never comes up
     # (design section 3.2).
+    # Fresh rollback budget first: retries burned while getting this
+    # payload applied must not eat the rollback budget. Reset BEFORE the
+    # commit so the carried value (and the rootfs mirror) record 0. The
+    # rollback path's own commit deliberately keeps the count so a
+    # rollback death loop still reaches its stop-loss.
+    state_reset_retry "${STATE_FILE}"
     ota_commit_applied_state
 
     # 9) unmount partitions

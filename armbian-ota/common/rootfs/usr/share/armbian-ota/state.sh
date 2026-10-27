@@ -8,14 +8,26 @@ OTA_STATE_FILE="${OTA_STATE_FILE:-${OTA_STATE_DIR}/ota-state.env}"
 OTA_MAX_RETRY="${OTA_MAX_RETRY:-3}"
 
 ota_state_set_key() {
-    state_file="$1"
-    key="$2"
-    value="$3"
+    local state_file="$1"
+    local key="$2"
+    local value="$3"
+    local tmp_file
 
     if grep -q -E "^${key}=" "${state_file}" 2>/dev/null; then
         sed -i "s|^${key}=.*|${key}=${value}|" "${state_file}"
     else
-        printf '%s=%s\n' "${key}" "${value}" >> "${state_file}"
+        # Atomic append: a bare >> can leave a half-written line on power
+        # loss, and the reader then treats the key as missing (fail-open in
+        # a fail-closed design). Rewrite through a temp file and rename.
+        tmp_file="${state_file}.tmp"
+        if ! { cat "${state_file}" 2>/dev/null; printf '%s=%s\n' "${key}" "${value}"; } > "${tmp_file}"; then
+            rm -f "${tmp_file}" 2>/dev/null
+            return 1
+        fi
+        if ! mv "${tmp_file}" "${state_file}"; then
+            rm -f "${tmp_file}" 2>/dev/null
+            return 1
+        fi
     fi
 }
 
@@ -25,11 +37,17 @@ ota_state_get_key() {
 }
 
 ota_state_write_file() {
-    state_file="$1"
-    state_dir="${state_file%/*}"
+    # local is load-bearing: set_key reuses these names, and a clobbered
+    # state_file would turn the final rename into mv tmp tmp.
+    local state_file="$1"
+    local state_dir="${state_file%/*}"
+    local tmp_file="${state_file}.tmp"
 
     mkdir -p "${state_dir}" || return 1
-    cat > "${state_file}" <<'EOF' || return 1
+    # Write through a temp file and rename: a power cut mid-write must
+    # never leave a truncated state that readers would parse as "no state"
+    # and fail open. The original stays intact until the rename lands.
+    cat > "${tmp_file}" <<'EOF' || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
 # Armbian OTA runtime state
 OTA_MODE=
 STATUS=idle
@@ -43,16 +61,17 @@ ERROR_MSG=
 BACKUP_PARTIAL=0
 EOF
 
-    ota_state_set_key "${state_file}" OTA_MODE "${OTA_STATE_MODE:-}" || return 1
-    ota_state_set_key "${state_file}" STATUS "${OTA_STATE_STATUS:-idle}" || return 1
-    ota_state_set_key "${state_file}" PACKAGE_PATH "${OTA_STATE_PACKAGE_PATH:-}" || return 1
-    ota_state_set_key "${state_file}" CURRENT_SLOT "${OTA_STATE_CURRENT_SLOT:-}" || return 1
-    ota_state_set_key "${state_file}" TARGET_SLOT "${OTA_STATE_TARGET_SLOT:-}" || return 1
-    ota_state_set_key "${state_file}" START_TIME "${OTA_STATE_START_TIME:-}" || return 1
-    ota_state_set_key "${state_file}" COMPLETE_TIME "${OTA_STATE_COMPLETE_TIME:-}" || return 1
-    ota_state_set_key "${state_file}" RETRY_COUNT "${OTA_STATE_RETRY_COUNT:-0}" || return 1
-    ota_state_set_key "${state_file}" ERROR_MSG "${OTA_STATE_ERROR_MSG:-}" || return 1
-    ota_state_set_key "${state_file}" BACKUP_PARTIAL "${OTA_STATE_BACKUP_PARTIAL:-0}" || return 1
+    ota_state_set_key "${tmp_file}" OTA_MODE "${OTA_STATE_MODE:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" STATUS "${OTA_STATE_STATUS:-idle}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" PACKAGE_PATH "${OTA_STATE_PACKAGE_PATH:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" CURRENT_SLOT "${OTA_STATE_CURRENT_SLOT:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" TARGET_SLOT "${OTA_STATE_TARGET_SLOT:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" START_TIME "${OTA_STATE_START_TIME:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" COMPLETE_TIME "${OTA_STATE_COMPLETE_TIME:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" RETRY_COUNT "${OTA_STATE_RETRY_COUNT:-0}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" ERROR_MSG "${OTA_STATE_ERROR_MSG:-}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    ota_state_set_key "${tmp_file}" BACKUP_PARTIAL "${OTA_STATE_BACKUP_PARTIAL:-0}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
+    mv "${tmp_file}" "${state_file}" || { rm -f "${tmp_file}" 2>/dev/null; return 1; }
 }
 
 state_init() {

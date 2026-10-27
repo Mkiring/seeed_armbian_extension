@@ -38,6 +38,12 @@ recovery_ensure_stage_space() {
     fi
 
     if [ -d "${OTA_BACKUP_DIR}" ]; then
+        # Renaming would not free any space: the drop is a real rm. Verify
+        # the incoming package is at least readable first, so a corrupt or
+        # truncated package cannot cost the board its only rollback net.
+        if ! tar -tf "${package_path}" >/dev/null 2>&1; then
+            error_exit "OTA package is not readable; keeping previous backup"
+        fi
         log_info "userdata short on space (${avail_kb}KiB < ${need_kb}KiB), dropping previous backup to make room"
         rm -rf "${OTA_BACKUP_DIR}"
         avail_kb="$(df -Pk "${RECOVERY_OVERLAY_BACKING_DIR}" | awk 'NR==2 {print $4}')"
@@ -65,10 +71,12 @@ recovery_start_ota() {
     ota_check_package_requirements "${OTA_WORK_DIR}"
     ota_run_phase1_hooks "${OTA_WORK_DIR}"
 
-    # prepared resets the retry budget for the incoming transaction
+    # prepared resets the retry budget for the incoming transaction.
+    # BACKUP_PARTIAL is deliberately NOT touched: while the firstboot
+    # boot-only backup exists the flag must stay 1 (design 3.4); only
+    # mark-success clears it after a full payload has been promoted.
     state_mark_prepared "recovery" "prepared" "${package_path}"
     state_set "RETRY_COUNT" "0"
-    state_set "BACKUP_PARTIAL" "0"
 
     log_info "Recovery OTA prepared successfully"
     log_info "Reboot to apply the update in initramfs"
@@ -91,10 +99,22 @@ recovery_mark_success() {
 
     if [ "${OTA_KEEP_BACKUP}" = "yes" ]; then
         if [ -d "${OTA_WORK_DIR}" ]; then
-            rm -rf "${OTA_BACKUP_DIR}"
-            mv "${OTA_WORK_DIR}" "${OTA_BACKUP_DIR}" ||
-                error_exit "failed to promote ota_work/ to backup/"
-            log_info "payload promoted: ota_work/ -> backup/"
+            # Two-step promote: set the old net aside, land the new one,
+            # only then drop the old. A failed promotion restores the old
+            # net instead of leaving the board with neither.
+            retired="${OTA_BACKUP_DIR}.retired"
+            rm -rf "${retired}"
+            if [ -d "${OTA_BACKUP_DIR}" ]; then
+                mv "${OTA_BACKUP_DIR}" "${retired}" ||
+                    error_exit "failed to set aside previous backup/"
+            fi
+            if mv "${OTA_WORK_DIR}" "${OTA_BACKUP_DIR}"; then
+                rm -rf "${retired}"
+                log_info "payload promoted: ota_work/ -> backup/"
+            else
+                [ -d "${retired}" ] && mv "${retired}" "${OTA_BACKUP_DIR}" 2>/dev/null
+                error_exit "failed to promote ota_work/ to backup/ (previous backup restored)"
+            fi
         elif [ ! -d "${OTA_BACKUP_DIR}" ]; then
             log_info "WARN: neither ota_work/ nor backup/ present; keeping state only"
         fi

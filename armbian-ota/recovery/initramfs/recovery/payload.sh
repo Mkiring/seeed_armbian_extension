@@ -238,8 +238,17 @@ ota_validate_recovery_state() {
         return 1
     fi
 
-    # check OTA payload: rootfs.tar.gz is required, boot.tar.gz is optional
-    ota_validate_payload || return 1
+    # check OTA payload: rootfs.tar.gz is required, boot.tar.gz is optional.
+    # rc 2 (payload absent) keeps the historical bare skip; rc 1 (present
+    # but invalid -- sha/encryption/FIT failure) escalates as return 2 so
+    # the caller routes it through the retry budget instead of retrying
+    # the same broken validation on every boot.
+    ota_validate_payload
+    payload_rc=$?
+    if [ "${payload_rc}" -eq 2 ]; then
+        return 1
+    fi
+    [ "${payload_rc}" -eq 0 ] || return 2
 
     log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}, hook_mode=${OTA_BOOT_HOOK_MODE}"
     return 0
@@ -247,13 +256,62 @@ ota_validate_recovery_state() {
 
 # ===== payload validation (shared by the prepared apply and the rollback) =====
 # Checks the payload resolved by the current OTA_DIR/ROOTFS_TAR/BOOT_TAR/
-# BOOT_ITB globals: presence, encryption parity, manifest sha256; sets the
-# HAS_BOOT_* flags and the OTA_BOOT_HOOK_MODE gate. The rollback path forces
-# OTA_BOOT_HOOK_MODE=0 afterwards -- the built-in apply must run there.
+# BOOT_ITB globals; sets the HAS_BOOT_* flags and the OTA_BOOT_HOOK_MODE
+# gate (the deferral only applies to the prepared path -- the rollback
+# recomputes the HAS_BOOT_* flags after forcing the gate off).
+#
+# Optional arg "boot-only": partial-backup mode (BACKUP_PARTIAL=1, design
+# 3.4). A firstboot backup archives the boot artifacts only -- the rootfs
+# is factory-fresh by definition -- so the rootfs presence check and the
+# encryption-parity gate are skipped and only the boot side is validated.
+#
+# rc 0 = valid; rc 1 = present but invalid (caller counts it against the
+# retry budget); rc 2 = absent (idle: nothing staged, bare skip).
 ota_validate_payload() {
+    mode="${1:-full}"
+
+    HAS_BOOT_TAR=0
+    [ -f "${BOOT_TAR}" ] && HAS_BOOT_TAR=1
+    HAS_BOOT_ITB=0
+    [ -f "${BOOT_ITB}" ] && HAS_BOOT_ITB=1
+
+    if [ "${mode}" = "boot-only" ]; then
+        if [ ! -d "${OTA_DIR}" ]; then
+            log "partial backup directory missing at ${OTA_DIR}"
+            return 2
+        fi
+        if [ "${HAS_BOOT_TAR}" -ne 1 ] && [ "${HAS_BOOT_ITB}" -ne 1 ]; then
+            log "ERROR: partial backup at ${OTA_DIR} carries no boot payload"
+            return 1
+        fi
+        if [ "${HAS_BOOT_ITB}" -eq 1 ] && ! is_fit_image "${BOOT_ITB}"; then
+            log "ERROR: partial backup boot.itb is not a FIT image: ${BOOT_ITB}"
+            return 1
+        fi
+        if [ -f "${OTA_DIR}/payload.manifest" ]; then
+            expected_boot_sha="$(sed -n 's/^OTA_PAYLOAD_BOOT_SHA256=//p' "${OTA_DIR}/payload.manifest" | head -n1)"
+            if [ -n "${expected_boot_sha}" ]; then
+                if ! command -v sha256sum >/dev/null 2>&1; then
+                    log "ERROR: sha256sum unavailable in initramfs; cannot re-check backup boot sha; abort"
+                    return 1
+                fi
+                boot_file="${BOOT_TAR}"
+                [ "${HAS_BOOT_TAR}" -eq 1 ] || boot_file="${BOOT_ITB}"
+                actual_boot_sha="$(sha256sum "${boot_file}" | awk '{print $1}')"
+                if [ "${actual_boot_sha}" != "${expected_boot_sha}" ]; then
+                    log "ERROR: backup boot sha256 (${actual_boot_sha}) != manifest (${expected_boot_sha}); abort"
+                    return 1
+                fi
+                log "partial backup boot sha256 matches payload manifest"
+            fi
+        fi
+        log "partial backup validated (boot-only): HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}"
+        return 0
+    fi
+
     if [ ! -d "${OTA_DIR}" ] || [ ! -f "${ROOTFS_TAR}" ]; then
         log "no rootfs OTA payload at ${OTA_DIR}, unmount and skip"
-        return 1
+        return 2
     fi
 
     # Payload/system encryption match (phase-2 backstop; phase 1 already
@@ -288,11 +346,6 @@ ota_validate_payload() {
             log "recovery: plaintext rootfs sha256 matches payload manifest"
         fi
     fi
-
-    HAS_BOOT_TAR=0
-    [ -f "${BOOT_TAR}" ] && HAS_BOOT_TAR=1
-    HAS_BOOT_ITB=0
-    [ -f "${BOOT_ITB}" ] && HAS_BOOT_ITB=1
 
     # Package-requested deferral of the built-in boot refresh
     # (OTA_BOOT_REFRESH=0 in package.env): ota_apply_boot is skipped so the
@@ -738,13 +791,17 @@ ota_patch_config() {
 # ===== commit STATUS=applied (design section 3.2) =====
 # "Written but not yet confirmed": ota_work/ stays on disk so the health
 # service can promote it to backup/ via mark-success, or the next boot can
-# roll back onto it. RETRY_COUNT survives the rewrite (it counts failed
-# apply attempts and is reset only by a confirmed success).
+# roll back onto it. RETRY_COUNT and BACKUP_PARTIAL are carried through the
+# rewrite: the prepared path resets the retry budget right before this
+# commit (fresh budget for the rollback phase), while the rollback path's
+# commit preserves the count so its own budget still exhausts;
+# BACKUP_PARTIAL may only be cleared by mark-success (design 3.4).
 ota_commit_applied_state() {
     mkdir -p "${STATE_DIR}"
     PACKAGE_PATH_VALUE="$(grep -E '^PACKAGE_PATH=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     START_TIME_VALUE="$(grep -E '^START_TIME=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     RETRY_VALUE="$(grep -E '^RETRY_COUNT=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+    BACKUP_PARTIAL_VALUE="$(grep -E '^BACKUP_PARTIAL=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     COMPLETE_TIME_VALUE="$(date -Iseconds)"
     if command -v ota_state_write_file >/dev/null 2>&1; then
         (
@@ -754,6 +811,7 @@ ota_commit_applied_state() {
             OTA_STATE_START_TIME="${START_TIME_VALUE}"
             OTA_STATE_COMPLETE_TIME="${COMPLETE_TIME_VALUE}"
             OTA_STATE_RETRY_COUNT="${RETRY_VALUE:-0}"
+            OTA_STATE_BACKUP_PARTIAL="${BACKUP_PARTIAL_VALUE:-0}"
             ota_state_write_file "${STATE_FILE}"
         ) || log "WARN: failed to write ${STATE_FILE}"
     else
@@ -772,6 +830,7 @@ ota_commit_applied_state() {
             OTA_STATE_START_TIME="${START_TIME_VALUE}"
             OTA_STATE_COMPLETE_TIME="${COMPLETE_TIME_VALUE}"
             OTA_STATE_RETRY_COUNT="${RETRY_VALUE:-0}"
+            OTA_STATE_BACKUP_PARTIAL="${BACKUP_PARTIAL_VALUE:-0}"
             ota_state_write_file "${ROOT_MNT}/var/lib/armbian-ota/ota-state.env"
         ) 2>/dev/null && log "rootfs state mirror seeded (applied)" ||
             log "WARN: failed to seed rootfs state mirror"

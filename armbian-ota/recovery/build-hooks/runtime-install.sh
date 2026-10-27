@@ -26,6 +26,16 @@ function ota_install_recovery_runtime_to_rootfs() {
             return 1
         fi
     done
+
+    # Design section 7 (patch #9): bake the rollback knob into the runtime
+    # defaults so OTA_KEEP_BACKUP is a real build-time option (backend.sh
+    # sources this file) instead of an unreachable shell default.
+    printf 'OTA_KEEP_BACKUP=%s\n' "${OTA_KEEP_BACKUP:-yes}" \
+        >"${root_dir}/etc/default/armbian-ota" || {
+        display_alert "Recovery OTA runtime" "failed to write /etc/default/armbian-ota" "err"
+        return 1
+    }
+    display_alert "Recovery OTA runtime" "OTA_KEEP_BACKUP=${OTA_KEEP_BACKUP:-yes}" "info"
 }
 
 function ota_install_recovery_initramfs_file() {
