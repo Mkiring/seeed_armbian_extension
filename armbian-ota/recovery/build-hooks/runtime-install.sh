@@ -14,10 +14,12 @@ function ota_install_recovery_runtime_to_rootfs() {
         || display_alert "Recovery OTA runtime" "Failed to enable armbian-ota-firstboot-hook.service" "warn"
 
     # Backup/rollback machinery (design: recovery-ota-backup-rollback):
-    # health confirmation promotes applied->success, the firstboot service
-    # seeds the partial backup before any OTA runs.
+    # health confirmation promotes applied->success. The firstboot partial
+    # backup moved to build time (partitions.sh
+    # pre_umount_final_image__905): the runtime service lost the race
+    # against first-login /boot writers and the userdata resize.
     local svc
-    for svc in armbian-ota-health-check.service armbian-ota-firstboot-backup.service; do
+    for svc in armbian-ota-health-check.service; do
         if [ -f "${root_dir}/etc/systemd/system/${svc}" ]; then
             chroot "${root_dir}" systemctl enable "${svc}" \
                 || display_alert "Recovery OTA runtime" "Failed to enable ${svc}" "warn"
