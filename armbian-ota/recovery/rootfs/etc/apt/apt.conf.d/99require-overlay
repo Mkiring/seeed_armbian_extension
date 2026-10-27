@@ -1,0 +1,6 @@
+# Refuse dpkg runs when overlayroot is not active (design section 6.3).
+# With the read-only-root + overlay architecture an apt/dpkg session on a
+# fallback rw root writes the lower layer directly and silently breaks the
+# "OTA replaces the whole system" consistency premise. The check is a
+# no-op whenever / is the expected overlay.
+DPkg::Pre-Invoke { "findmnt -n -o FSTYPE / | grep -q overlay || { echo 'ERROR: overlayroot not active, refusing dpkg (reboot or fix /etc/overlayroot.conf)'; exit 1; }"; };

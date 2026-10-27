@@ -33,7 +33,10 @@ function ota_get_default_partition_sizes() {
     # +20% for ext4 metadata and OTA growth; runtime writes go to userdata.
     OTA_ROOTFS_SIZE=${OTA_ROOTFS_SIZE:-$((((rootfs_size + extra_rootfs_mib) * 120 + 99) / 100))}
     # Pre-resize floor; armbian-resize-userdata expands it on first boot.
-    OTA_USERDATA_SIZE=${OTA_USERDATA_SIZE:-512}
+    # 1024 floor (design section 7): the rollback backup keeps a full
+    # rootfs.tar.gz (400-700MB) + boot payload next to the staged package
+    # on userdata -- 512 overflowed on desktop images.
+    OTA_USERDATA_SIZE=${OTA_USERDATA_SIZE:-1024}
 
     [[ "${OTA_BOOT_SIZE}" =~ ^[0-9]+$ && "${OTA_BOOT_SIZE}" -gt 0 ]] ||
         exit_with_error "Invalid OTA_BOOT_SIZE" "${OTA_BOOT_SIZE}"

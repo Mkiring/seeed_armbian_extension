@@ -239,6 +239,18 @@ ota_validate_recovery_state() {
     fi
 
     # check OTA payload: rootfs.tar.gz is required, boot.tar.gz is optional
+    ota_validate_payload || return 1
+
+    log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}, hook_mode=${OTA_BOOT_HOOK_MODE}"
+    return 0
+}
+
+# ===== payload validation (shared by the prepared apply and the rollback) =====
+# Checks the payload resolved by the current OTA_DIR/ROOTFS_TAR/BOOT_TAR/
+# BOOT_ITB globals: presence, encryption parity, manifest sha256; sets the
+# HAS_BOOT_* flags and the OTA_BOOT_HOOK_MODE gate. The rollback path forces
+# OTA_BOOT_HOOK_MODE=0 afterwards -- the built-in apply must run there.
+ota_validate_payload() {
     if [ ! -d "${OTA_DIR}" ] || [ ! -f "${ROOTFS_TAR}" ]; then
         log "no rootfs OTA payload at ${OTA_DIR}, unmount and skip"
         return 1
@@ -296,7 +308,7 @@ ota_validate_recovery_state() {
         fi
     fi
 
-    log "found rootfs OTA payload, HAS_BOOT_PART=${HAS_BOOT_PART}, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}, hook_mode=${OTA_BOOT_HOOK_MODE}"
+    log "payload validated, HAS_BOOT_TAR=${HAS_BOOT_TAR}, HAS_BOOT_ITB=${HAS_BOOT_ITB}, hook_mode=${OTA_BOOT_HOOK_MODE}"
     return 0
 }
 
@@ -441,8 +453,42 @@ ota_apply_rootfs() {
 }
 
 # ===== boot OTA: mount boot partition, extract boot.tar.gz, write boot.itb =====
-# Returns 1 on boot.itb failure (caller unmounts+aborts). boot.tar.gz extract
-# failure is logged but does not abort (matches legacy behavior).
+# Returns 1 on any boot-side failure (extract ENOSPC, mount failure, raw itb);
+# the caller aborts before STATUS=applied is committed, so the transaction
+# stays prepared and retries/rolls back on the next boot. The legacy
+# "log and continue" semantics died with the ENOSPC incident: a silently
+# truncated initrd was committed as success and bricked the board.
+ota_boot_extract_bytes() { # $1=boot tar -> uncompressed payload size in bytes
+    TAR_BIN="$(ota_resolve_tool tar)"
+    case "$1" in
+        *.tar.xz)  DEC_BIN="$(ota_resolve_tool xz)" ;;
+        *.tar.zst) DEC_BIN="$(ota_resolve_tool zstd)" ;;
+        *)         DEC_BIN="$(ota_resolve_tool gzip)" ;;
+    esac
+    [ -n "${TAR_BIN}" ] && [ -n "${DEC_BIN}" ] || return 1
+    "${DEC_BIN}" -dc "$1" | "${TAR_BIN}" -tvf - 2>/dev/null |
+        awk '{ s += $3 } END { printf "%d\n", s }'
+}
+
+ota_boot_space_check() { # $1=boot tar -> rc 0 when the boot fs can hold it
+    local need avail need_kb avail_kb
+
+    need="$(ota_boot_extract_bytes "$1")"
+    avail_kb="$(df -Pk "${BOOT_MNT}" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [ -n "${need}" ] && [ "${need}" -gt 0 ] && [ -n "${avail_kb}" ]; then
+        avail="$((avail_kb * 1024))"
+        # 16MiB margin for fs metadata and the raw-itb path
+        if [ "$((need + 16 * 1024 * 1024))" -gt "${avail}" ]; then
+            log "ERROR: boot space check failed: need ${need}B +16MiB margin, avail ${avail}B on ${BOOT_MNT}"
+            return 1
+        fi
+        log "boot space check OK: payload ${need}B, avail ${avail}B"
+    else
+        log "WARN: boot space estimate unavailable (need=${need:-?} avail=${avail_kb:-?}KiB), proceeding"
+    fi
+    return 0
+}
+
 ota_apply_boot() {
     # Hook mode: hook_pre_apply already performed the atomic boot swap and
     # left BOOT_MNT/DO_BOOT_OTA in place for ota_patch_config. Skip the
@@ -466,9 +512,9 @@ ota_apply_boot() {
         mkdir -p "${BOOT_MNT}"
         log "mounting ${BOOT_DEV} -> ${BOOT_MNT} ..."
         if ! mount -t ext4 -o rw "${BOOT_DEV}" "${BOOT_MNT}"; then
-            log "ERROR: mount ${BOOT_DEV} failed, skip boot OTA"
+            log "ERROR: mount ${BOOT_DEV} failed, abort OTA (boot refresh required by payload)"
             BOOT_MNT=""
-            DO_BOOT_OTA=0
+            return 1
         fi
     else
         log "boot OTA disabled (no separate boot partition or no boot payload)"
@@ -485,11 +531,16 @@ ota_apply_boot() {
             fi
         fi
 
+        if ! ota_boot_space_check "${BOOT_TAR}"; then
+            return 1
+        fi
+
         log "extracting ${BOOT_TAR} -> ${BOOT_MNT} ..."
         start_heartbeat "extracting ${BOOT_TAR##*/} to ${BOOT_MNT}"
         if ! extract_tar "${BOOT_TAR}" "${BOOT_MNT}" "boot"; then
             stop_heartbeat
-            log "ERROR: extract ${BOOT_TAR##*/} failed, system may be broken"
+            log "ERROR: extract ${BOOT_TAR##*/} failed, abort OTA (transaction stays prepared)"
+            return 1
         fi
         stop_heartbeat
 
@@ -509,6 +560,37 @@ ota_apply_boot() {
     fi
 
     return 0
+}
+
+# ===== overlay upper clean (design section 6.1) =====
+# Same-kernel-release OTAs are shadowed by copy-up'd /lib/modules in the
+# overlay upper: the stale .ko set has matching vermagic and loads silently.
+# Also drop an upper copy-up of /etc/overlayroot.conf so the freshly shipped
+# value wins. Real upper path from on-board evidence: overlayroot mounts
+# upperdir=<userdata>/overlay (NOT overlay/upper); usrmerge puts module
+# copy-ups at usr/lib/modules, so both paths are cleaned.
+ota_clean_overlay_upper() {
+    local upper="${USERDATA_MNT}/overlay"
+
+    [ -d "${upper}" ] || return 0
+
+    rm -rf "${upper}/lib/modules" "${upper}/usr/lib/modules" 2>/dev/null
+    rm -f "${upper}/etc/overlayroot.conf" 2>/dev/null
+    sync
+    log "overlay upper cleaned (modules shadow + overlayroot.conf)"
+    return 0
+}
+
+# ===== payload directory switch (design section 3.5) =====
+# Rollback reuses the whole apply path with the payload directory swapped:
+# ota_set_payload_dir <dir> re-resolves the payload globals, every check
+# (manifest sha256, FIT magic, PARTNAME) keeps running unchanged.
+ota_set_payload_dir() {
+    OTA_DIR="$1"
+    ROOTFS_TAR="$(ota_resolve_payload "${OTA_DIR}" rootfs)"
+    BOOT_TAR="$(ota_resolve_payload "${OTA_DIR}" boot)"
+    BOOT_ITB="${OTA_DIR}/boot.itb"
+    log "payload dir set to ${OTA_DIR}"
 }
 
 # ===== fix UUIDs in armbianEnv.txt and new rootfs /etc/fstab (+ crypttab),
@@ -653,23 +735,46 @@ ota_patch_config() {
     sync
 }
 
-# ===== write success state via state.sh helper =====
-ota_commit_success_state() {
+# ===== commit STATUS=applied (design section 3.2) =====
+# "Written but not yet confirmed": ota_work/ stays on disk so the health
+# service can promote it to backup/ via mark-success, or the next boot can
+# roll back onto it. RETRY_COUNT survives the rewrite (it counts failed
+# apply attempts and is reset only by a confirmed success).
+ota_commit_applied_state() {
     mkdir -p "${STATE_DIR}"
     PACKAGE_PATH_VALUE="$(grep -E '^PACKAGE_PATH=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     START_TIME_VALUE="$(grep -E '^START_TIME=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+    RETRY_VALUE="$(grep -E '^RETRY_COUNT=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     COMPLETE_TIME_VALUE="$(date -Iseconds)"
     if command -v ota_state_write_file >/dev/null 2>&1; then
         (
             OTA_STATE_MODE=recovery
-            OTA_STATE_STATUS=success
+            OTA_STATE_STATUS=applied
             OTA_STATE_PACKAGE_PATH="${PACKAGE_PATH_VALUE}"
             OTA_STATE_START_TIME="${START_TIME_VALUE}"
             OTA_STATE_COMPLETE_TIME="${COMPLETE_TIME_VALUE}"
+            OTA_STATE_RETRY_COUNT="${RETRY_VALUE:-0}"
             ota_state_write_file "${STATE_FILE}"
         ) || log "WARN: failed to write ${STATE_FILE}"
     else
         log "WARN: state helper not available, failed to write ${STATE_FILE}"
+    fi
+    log "STATUS=applied committed; ota_work/ retained until health confirmation"
+
+    # Rootfs-side mirror for the health service (design section 4): the
+    # systemd unit conditions on /var/lib/armbian-ota/ota-state.env holding
+    # STATUS=applied, so the initramfs seeds it before rebooting.
+    if [ -n "${ROOT_MNT:-}" ] && mkdir -p "${ROOT_MNT}/var/lib/armbian-ota" 2>/dev/null; then
+        (
+            OTA_STATE_MODE=recovery
+            OTA_STATE_STATUS=applied
+            OTA_STATE_PACKAGE_PATH="${PACKAGE_PATH_VALUE}"
+            OTA_STATE_START_TIME="${START_TIME_VALUE}"
+            OTA_STATE_COMPLETE_TIME="${COMPLETE_TIME_VALUE}"
+            OTA_STATE_RETRY_COUNT="${RETRY_VALUE:-0}"
+            ota_state_write_file "${ROOT_MNT}/var/lib/armbian-ota/ota-state.env"
+        ) 2>/dev/null && log "rootfs state mirror seeded (applied)" ||
+            log "WARN: failed to seed rootfs state mirror"
     fi
 }
 

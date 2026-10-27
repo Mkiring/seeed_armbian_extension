@@ -3,6 +3,10 @@
 OTA_STATE_DIR="${OTA_STATE_DIR:-/var/lib/armbian-ota}"
 OTA_STATE_FILE="${OTA_STATE_FILE:-${OTA_STATE_DIR}/ota-state.env}"
 
+# Shared retry budget for recovery-mode apply and rollback attempts
+# (design: recovery-ota-backup-rollback-design.md section 6.2).
+OTA_MAX_RETRY="${OTA_MAX_RETRY:-3}"
+
 ota_state_set_key() {
     state_file="$1"
     key="$2"
@@ -13,6 +17,11 @@ ota_state_set_key() {
     else
         printf '%s=%s\n' "${key}" "${value}" >> "${state_file}"
     fi
+}
+
+# Reader companion to ota_state_set_key for an explicit state file.
+ota_state_get_key() {
+    grep -E "^$2=" "$1" 2>/dev/null | tail -n1 | cut -d'=' -f2-
 }
 
 ota_state_write_file() {
@@ -29,6 +38,9 @@ CURRENT_SLOT=
 TARGET_SLOT=
 START_TIME=
 COMPLETE_TIME=
+RETRY_COUNT=0
+ERROR_MSG=
+BACKUP_PARTIAL=0
 EOF
 
     ota_state_set_key "${state_file}" OTA_MODE "${OTA_STATE_MODE:-}" || return 1
@@ -38,6 +50,9 @@ EOF
     ota_state_set_key "${state_file}" TARGET_SLOT "${OTA_STATE_TARGET_SLOT:-}" || return 1
     ota_state_set_key "${state_file}" START_TIME "${OTA_STATE_START_TIME:-}" || return 1
     ota_state_set_key "${state_file}" COMPLETE_TIME "${OTA_STATE_COMPLETE_TIME:-}" || return 1
+    ota_state_set_key "${state_file}" RETRY_COUNT "${OTA_STATE_RETRY_COUNT:-0}" || return 1
+    ota_state_set_key "${state_file}" ERROR_MSG "${OTA_STATE_ERROR_MSG:-}" || return 1
+    ota_state_set_key "${state_file}" BACKUP_PARTIAL "${OTA_STATE_BACKUP_PARTIAL:-0}" || return 1
 }
 
 state_init() {
@@ -103,4 +118,35 @@ state_mark_completed() {
     state_set "CURRENT_SLOT" "${current_slot}" || return 1
     state_set "TARGET_SLOT" "${target_slot}" || return 1
     state_set "COMPLETE_TIME" "$(date -Iseconds)" || return 1
+}
+
+# ===== recovery retry helpers (operate on an explicit state file) =====
+
+state_increment_retry() { # $1=state file
+    local count
+
+    count="$(ota_state_get_key "$1" RETRY_COUNT)"
+    case "${count}" in ''|*[!0-9]*) count=0 ;; esac
+    ota_state_set_key "$1" RETRY_COUNT "$((count + 1))"
+}
+
+state_get_retry_count() { # $1=state file
+    local count
+
+    count="$(ota_state_get_key "$1" RETRY_COUNT)"
+    case "${count}" in ''|*[!0-9]*) echo 0 ;; *) echo "${count}" ;; esac
+}
+
+state_retry_exhausted() { # $1=state file
+    [ "$(state_get_retry_count "$1")" -ge "${OTA_MAX_RETRY}" ]
+}
+
+state_reset_retry() { # $1=state file
+    ota_state_set_key "$1" RETRY_COUNT 0
+}
+
+state_mark_failed() { # $1=state file $2=error message
+    ota_state_set_key "$1" STATUS failed
+    ota_state_set_key "$1" ERROR_MSG "$2"
+    ota_state_set_key "$1" COMPLETE_TIME "$(date -Iseconds)"
 }

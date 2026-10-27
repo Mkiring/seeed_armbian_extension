@@ -20,11 +20,12 @@ case "$1" in
         ;;
 esac
 
-. /usr/share/armbian-ota/state.sh
-. /usr/share/armbian-ota/find-userdata.sh
-. /usr/share/armbian-ota/recovery/log.sh
-. /usr/share/armbian-ota/recovery/device.sh
-. /usr/share/armbian-ota/recovery/payload.sh
+OTA_LIB_DIR="${OTA_LIB_DIR:-/usr/share/armbian-ota}"
+. "${OTA_LIB_DIR}/state.sh"
+. "${OTA_LIB_DIR}/find-userdata.sh"
+. "${OTA_LIB_DIR}/recovery/log.sh"
+. "${OTA_LIB_DIR}/recovery/device.sh"
+. "${OTA_LIB_DIR}/recovery/payload.sh"
 
 # Enable verbose shell tracing only when explicitly requested.
 if [ "${OTA_DEBUG:-no}" = "yes" ]; then
@@ -120,145 +121,260 @@ unmount_recovery_transaction_store() {
     fi
 }
 
-mkdir -p "$LOGDIR"
-log "init-premount ota hook start"
-log "LOGFILE=${LOGFILE}"
-touch "${LOGDIR}/ota_ran.init-premount"
+ota_applier_main() {
+    mkdir -p "$LOGDIR"
+    log "init-premount ota hook start"
+    log "LOGFILE=${LOGFILE}"
+    touch "${LOGDIR}/ota_ran.init-premount"
 
-# 1) probe devices (sets ROOT_DEV, ROOT_UUID, BOOT_DEV, BOOT_UUID,
-#    HAS_BOOT_PART, AUTO_DECRYPT_MODE)
-ota_detect_devices
+    # 1) probe devices (sets ROOT_DEV, ROOT_UUID, BOOT_DEV, BOOT_UUID,
+    #    HAS_BOOT_PART, AUTO_DECRYPT_MODE)
+    ota_detect_devices
 
-# 2) mount root + validate state
-if [ -z "${ROOT_DEV}" ]; then
-    log "ROOT_DEV is empty, skip OTA"
-    exit 0
-fi
+    if [ -z "${ROOT_DEV}" ]; then
+        log "ROOT_DEV is empty, skip OTA"
+        exit 0
+    fi
 
-if ! mount_recovery_transaction_store; then
-    exit 0
-fi
+    if ! mount_recovery_transaction_store; then
+        exit 0
+    fi
 
-mkdir -p "${ROOT_MNT}"
-log "mounting ${ROOT_DEV} -> ${ROOT_MNT} ..."
-if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
-    log "cannot mount ${ROOT_DEV}, skip OTA"
-    unmount_recovery_transaction_store
-    exit 0
-fi
+    BACKUP_DIR="${RECOVERY_TRANSACTION_DIR}/backup"
 
-ota_validate_recovery_state || {
-    umount "${ROOT_MNT}" 2>/dev/null || true
+    # 2) dispatch on the transaction state (design section 5). success /
+    # failed / idle / no state exit before the rootfs is ever mounted, so
+    # normal boots stay as cheap as they were.
+    OTA_STATUS="$(grep -E '^STATUS=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+    OTA_MODE_VALUE="$(grep -E '^OTA_MODE=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+
+    if [ -n "${OTA_STATUS}" ] && [ "${OTA_MODE_VALUE}" != "recovery" ]; then
+        log "OTA_MODE=${OTA_MODE_VALUE:-none} is not recovery, skip"
+        unmount_recovery_transaction_store
+        exit 0
+    fi
+
+    case "${OTA_STATUS}" in
+        prepared) ota_run_prepared ;;
+        applied)  ota_run_rollback ;;
+        *)
+            log "OTA state=${OTA_STATUS:-none}, nothing to do"
+            unmount_recovery_transaction_store
+            exit 0
+            ;;
+    esac
+}
+
+# Failed apply of the prepared payload: count it, stop-loss when the budget
+# is spent, otherwise leave the state prepared so the next boot retries.
+ota_apply_failed() { # $1 = stage description
+    log "OTA apply failed: $1"
+    ota_unmount_all 2>/dev/null || true
+    state_increment_retry "${STATE_FILE}"
+    if state_retry_exhausted "${STATE_FILE}"; then
+        state_mark_failed "${STATE_FILE}" "apply failed: $1"
+        rm -rf "${OTA_DIR}" || true
+        log "stop-loss: retry budget exhausted, payload cleared, STATUS=failed"
+    else
+        log "retry $(state_get_retry_count "${STATE_FILE}")/${OTA_MAX_RETRY} on next boot (STATUS stays prepared)"
+    fi
     unmount_recovery_transaction_store
     exit 0
 }
 
-# Raise printk only now that an OTA is confirmed to be pending. On a normal
-# boot the early-exit paths above leave console_loglevel untouched so the
-# real rootfs stays quiet; the OTA-apply path gets full console visibility
-# for the extract/patch work below.
-ota_log_init
-log "OTA confirmed, applying..."
-log "tools: PATH=${PATH} tar=$(command -v tar 2>/dev/null) xz=$(command -v xz 2>/dev/null) tar-flavor=$(/usr/bin/tar --version 2>/dev/null | head -n1)"
+# STATUS=applied: the previous apply finished but never reached health
+# confirmation (kernel panic, service failure, power cut). Roll back onto
+# the retained backup payload through the very same apply machinery.
+ota_run_rollback() {
+    if [ ! -d "${BACKUP_DIR}" ]; then
+        state_mark_failed "${STATE_FILE}" "applied but no backup"
+        log "stop-loss: applied without backup, STATUS=failed"
+        unmount_recovery_transaction_store
+        exit 0
+    fi
 
-# 3) source the staged OTA hook once (definition-only script), then run the
-# fixed call points around the built-in apply (docs/10-ota-package-formats.md).
-# Mounting, config patching, state commit, unmount and reboot stay here.
-DO_BOOT_OTA="${DO_BOOT_OTA:-0}"
-if ota_source_staged_hook; then
-    OTA_HOOK_MODE="recovery"
-    export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
-else
+    state_increment_retry "${STATE_FILE}"
+    if state_retry_exhausted "${STATE_FILE}"; then
+        state_mark_failed "${STATE_FILE}" "rollback retry exhausted"
+        rm -rf "${BACKUP_DIR}" || true
+        log "stop-loss: rollback budget exhausted, backup cleared"
+        unmount_recovery_transaction_store
+        exit 0
+    fi
+
+    ota_log_init
+    log "last apply was never health-confirmed; rolling back from backup (attempt $(state_get_retry_count "${STATE_FILE}")/${OTA_MAX_RETRY})"
+
+    ota_set_payload_dir "${BACKUP_DIR}"
+    if ! ota_validate_payload; then
+        state_mark_failed "${STATE_FILE}" "backup payload invalid"
+        rm -rf "${BACKUP_DIR}" || true
+        log "stop-loss: backup payload failed validation, cleared"
+        unmount_recovery_transaction_store
+        exit 0
+    fi
+    # Rollback runs the built-in apply only; a package hook (and the
+    # OTA_BOOT_REFRESH deferral it implies) must not suppress the boot
+    # restore on the emergency path.
+    OTA_BOOT_HOOK_MODE=0
     OTA_HOOK_PATH=""
-fi
 
-# hook_pre_apply: old rootfs is still readable/writable, nothing rebuilt yet.
-if ! ota_call_hook hook_pre_apply; then
-    log "ERROR: hook_pre_apply failed, abort OTA"
-    umount "${ROOT_MNT}" 2>/dev/null || true
-    unmount_recovery_transaction_store
-    exit 0
-fi
-
-# hook_apply (optional): replaces the built-in payload application entirely.
-if [ -n "${OTA_HOOK_PATH}" ] && type hook_apply >/dev/null 2>&1; then
-    log "hook_apply takes over payload application"
-    ota_capture_pre_ota_env
-    start_heartbeat "OTA hook hook_apply running"
-    hook_apply
-    hook_rc=$?
-    stop_heartbeat
-    if [ "${hook_rc}" -ne 0 ]; then
-        log "ERROR: hook_apply failed rc=${hook_rc}, abort OTA"
-        umount "${ROOT_MNT}" 2>/dev/null || true
+    mkdir -p "${ROOT_MNT}"
+    if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
+        log "cannot mount ${ROOT_DEV} for rollback; retry next boot"
         unmount_recovery_transaction_store
         exit 0
     fi
-    # Expose the boot partition to the config patcher, mirroring the state
-    # ota_apply_boot would have left behind. BOOT_MNT is pre-initialized to
-    # "/mnt/boot" at the top, so test for an actual mount, not emptiness --
-    # otherwise the armbianEnv patch is silently skipped after hook_apply.
-    if [ "${HAS_BOOT_PART:-0}" -eq 1 ] && ! mountpoint -q "${BOOT_MNT:-/mnt/boot}"; then
-        BOOT_MNT="/mnt/boot"
-        mkdir -p "${BOOT_MNT}"
-        if mount -t ext4 -o rw "${BOOT_DEV}" "${BOOT_MNT}"; then
-            DO_BOOT_OTA=1
-        else
-            BOOT_MNT=""
-            log "WARN: cannot mount ${BOOT_DEV} for config patch after hook"
-        fi
-    fi
-else
-    # built-in apply rootfs (mkfs rebuild or rm -rf clean, then extract)
-    ota_apply_rootfs || {
-        umount "${ROOT_MNT}" 2>/dev/null || true
-        unmount_recovery_transaction_store
-        exit 0
-    }
 
-    # built-in apply boot (mount + extract boot payload, write boot.itb)
+    BACKUP_PARTIAL_VALUE="$(grep -E '^BACKUP_PARTIAL=' "${STATE_FILE}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+    start_heartbeat "OTA rollback applying backup"
+    if [ "${BACKUP_PARTIAL_VALUE}" = "1" ]; then
+        log "BACKUP_PARTIAL=1: boot-only rollback, rootfs untouched"
+    else
+        ota_apply_rootfs || {
+            stop_heartbeat
+            log "rollback rootfs apply failed; retry next boot"
+            ota_unmount_all
+            unmount_recovery_transaction_store
+            exit 0
+        }
+        ota_clean_overlay_upper
+    fi
     ota_apply_boot || {
-        if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
-            umount "${BOOT_MNT}" 2>/dev/null || true
-        fi
-        umount "${ROOT_MNT}" 2>/dev/null || true
+        stop_heartbeat
+        log "rollback boot apply failed; retry next boot"
+        ota_unmount_all
         unmount_recovery_transaction_store
         exit 0
     }
-fi
+    stop_heartbeat
 
-# 7) fix UUIDs in armbianEnv.txt / fstab / crypttab
-ota_patch_config
-
-# 7.5) hook_post_apply: new rootfs is final and still mounted; last chance to
-# inject or migrate. Then carry hook_firstboot into the new system.
-if ! ota_call_hook hook_post_apply; then
-    log "ERROR: hook_post_apply failed, abort OTA"
+    ota_patch_config
+    ota_commit_applied_state
     ota_unmount_all
     unmount_recovery_transaction_store
-    exit 0
-fi
-if [ -n "${OTA_HOOK_PATH}" ] && type hook_firstboot >/dev/null 2>&1; then
-    if mkdir -p "${ROOT_MNT}/usr/share/armbian-ota" && \
-       cp "${OTA_HOOK_PATH}" "${ROOT_MNT}/usr/share/armbian-ota/firstboot-hook.sh"; then
-        log "staged firstboot hook into new rootfs"
-    else
-        log "WARN: failed to stage firstboot hook"
+    sync
+    ota_reboot
+}
+
+# STATUS=prepared: the normal apply pipeline, hooks included.
+ota_run_prepared() {
+    mkdir -p "${ROOT_MNT}"
+    log "mounting ${ROOT_DEV} -> ${ROOT_MNT} ..."
+    if ! mount -t ext4 -o rw "${ROOT_DEV}" "${ROOT_MNT}"; then
+        log "cannot mount ${ROOT_DEV}, skip OTA"
+        unmount_recovery_transaction_store
+        exit 0
     fi
+
+    ota_validate_recovery_state || {
+        umount "${ROOT_MNT}" 2>/dev/null || true
+        unmount_recovery_transaction_store
+        exit 0
+    }
+
+    # Raise printk only now that an OTA is confirmed to be pending. On a
+    # normal boot the early-exit paths above leave console_loglevel
+    # untouched so the real rootfs stays quiet; the OTA-apply path gets full
+    # console visibility for the extract/patch work below.
+    ota_log_init
+    log "OTA confirmed, applying..."
+    log "tools: PATH=${PATH} tar=$(command -v tar 2>/dev/null) xz=$(command -v xz 2>/dev/null) tar-flavor=$(/usr/bin/tar --version 2>/dev/null | head -n1)"
+
+    # 3) source the staged OTA hook once (definition-only script), then run
+    # the fixed call points around the built-in apply
+    # (docs/10-ota-package-formats.md). Mounting, config patching, state
+    # commit, unmount and reboot stay here.
+    DO_BOOT_OTA="${DO_BOOT_OTA:-0}"
+    if ota_source_staged_hook; then
+        OTA_HOOK_MODE="recovery"
+        export OTA_HOOK_API OTA_HOOK_MODE OTA_HOOK_PATH
+    else
+        OTA_HOOK_PATH=""
+    fi
+
+    # hook_pre_apply: old rootfs is still readable/writable, nothing rebuilt
+    # yet.
+    ota_call_hook hook_pre_apply || ota_apply_failed "hook_pre_apply"
+
+    # hook_apply (optional): replaces the built-in payload application
+    # entirely.
+    if [ -n "${OTA_HOOK_PATH}" ] && type hook_apply >/dev/null 2>&1; then
+        log "hook_apply takes over payload application"
+        ota_capture_pre_ota_env
+        start_heartbeat "OTA hook hook_apply running"
+        hook_apply
+        hook_rc=$?
+        stop_heartbeat
+        [ "${hook_rc}" -eq 0 ] || ota_apply_failed "hook_apply rc=${hook_rc}"
+        # Expose the boot partition to the config patcher, mirroring the
+        # state ota_apply_boot would have left behind. BOOT_MNT is
+        # pre-initialized to "/mnt/boot" at the top, so test for an actual
+        # mount, not emptiness -- otherwise the armbianEnv patch is
+        # silently skipped after hook_apply.
+        if [ "${HAS_BOOT_PART:-0}" -eq 1 ] && ! mountpoint -q "${BOOT_MNT:-/mnt/boot}"; then
+            BOOT_MNT="/mnt/boot"
+            mkdir -p "${BOOT_MNT}"
+            if mount -t ext4 -o rw "${BOOT_DEV}" "${BOOT_MNT}"; then
+                DO_BOOT_OTA=1
+            else
+                BOOT_MNT=""
+                log "WARN: cannot mount ${BOOT_DEV} for config patch after hook"
+            fi
+        fi
+        ota_clean_overlay_upper
+    else
+        # built-in apply rootfs (mkfs rebuild or rm -rf clean, then extract)
+        ota_apply_rootfs || ota_apply_failed "rootfs apply"
+
+        # Same-release kernel OTA: stale copy-up'd modules in the overlay
+        # upper would shadow the fresh lower set with matching vermagic
+        # (design section 6.1). Runs after the rootfs rebuild, before boot.
+        ota_clean_overlay_upper
+
+        # built-in apply boot (mount + space-check + extract, write boot.itb)
+        ota_apply_boot || {
+            if [ "$DO_BOOT_OTA" -eq 1 ] && [ -n "${BOOT_MNT}" ]; then
+                umount "${BOOT_MNT}" 2>/dev/null || true
+            fi
+            ota_apply_failed "boot apply"
+        }
+    fi
+
+    # 7) fix UUIDs in armbianEnv.txt / fstab / crypttab
+    ota_patch_config
+
+    # 7.5) hook_post_apply: new rootfs is final and still mounted; last
+    # chance to inject or migrate. Then carry hook_firstboot into the new
+    # system.
+    ota_call_hook hook_post_apply || ota_apply_failed "hook_post_apply"
+    if [ -n "${OTA_HOOK_PATH}" ] && type hook_firstboot >/dev/null 2>&1; then
+        if mkdir -p "${ROOT_MNT}/usr/share/armbian-ota" && \
+           cp "${OTA_HOOK_PATH}" "${ROOT_MNT}/usr/share/armbian-ota/firstboot-hook.sh"; then
+            log "staged firstboot hook into new rootfs"
+        else
+            log "WARN: failed to stage firstboot hook"
+        fi
+    fi
+
+    # 8) commit STATUS=applied. ota_work/ is deliberately retained: the
+    # health service promotes it to backup/ on confirmation (mark-success),
+    # or the next boot rolls back onto it if this system never comes up
+    # (design section 3.2).
+    ota_commit_applied_state
+
+    # 9) unmount partitions
+    ota_unmount_all
+    unmount_recovery_transaction_store
+
+    sync
+
+    # 10) reboot into the freshly applied system for health confirmation
+    ota_reboot
+}
+
+# Library mode gate: the state-machine harness (tests/ota_fsm) sources this
+# file with OTA_APPLIER_AS_LIB=1 to drive ota_applier_main with stubs.
+if [ "${OTA_APPLIER_AS_LIB:-0}" != "1" ]; then
+    ota_applier_main
 fi
-
-# 8) cleanup payload
-log "  delete OTA payload directory ${OTA_DIR} ..."
-rm -rf "${OTA_DIR}" || true
-
-# 9) commit success state
-ota_commit_success_state
-
-# 10) unmount partitions
-ota_unmount_all
-unmount_recovery_transaction_store
-
-sync
-
-# 11) reboot
-ota_reboot

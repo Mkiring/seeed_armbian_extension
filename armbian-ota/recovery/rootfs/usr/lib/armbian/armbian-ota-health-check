@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# Recovery OTA boot health check (design section 4, A/B minimal variant).
+# Deliberately narrow: reaching multi-user.target with these three facts
+# proves the kernel + initramfs + root-mount chain works. Anything higher
+# (network, sshd, applications) belongs to user monitoring, not to the OTA
+# confirm/rollback decision.
+#
+# Fail-closed: the calling systemd unit runs armbian-ota mark-success only
+# when this exits 0. A panic, hang or power cut before this point leaves
+# STATUS=applied on disk, and the next initramfs rolls back onto backup.
+
+OTA_STATE_FILE="${OTA_STATE_FILE:-/var/lib/armbian-ota/ota-state.env}"
+
+fail() {
+    echo "health-check: FAIL: $*" >&2
+    exit 1
+}
+
+[ -r /proc/version ] || fail "/proc/version is not readable"
+
+mountpoint -q /proc || fail "/proc is not mounted"
+mountpoint -q /sys  || fail "/sys is not mounted"
+mountpoint -q /dev  || fail "/dev is not mounted"
+
+root_opts="$(findmnt -n -o OPTIONS / 2>/dev/null || true)"
+case ",${root_opts}," in
+    *,rw,*) ;;
+    *) fail "root filesystem is not writable (overlay not up)" ;;
+esac
+
+echo "health-check: OK (kernel $(uname -r), overlay rw)"
+exit 0

@@ -1,0 +1,17 @@
+[Unit]
+Description=Armbian Recovery OTA First-boot Backup Seed
+# Seeds the rollback safety net on the very first boot (design 3.4):
+# archives /boot (plain) or dumps the raw FIT partition (secure) into
+# userdata/ota-recovery/backup/ and marks BACKUP_PARTIAL=1. No-op once a
+# backup exists.
+DefaultDependencies=no
+After=local-fs.target armbian-resize-userdata.service
+ConditionPathExists=/usr/lib/armbian/armbian-ota-firstboot-backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/armbian/armbian-ota-firstboot-backup
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

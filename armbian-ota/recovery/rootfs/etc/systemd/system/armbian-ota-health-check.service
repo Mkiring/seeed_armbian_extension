@@ -1,0 +1,20 @@
+[Unit]
+Description=Armbian Recovery OTA Boot Health Check
+# Fail-closed confirmation (design section 3.2/3.3): only a boot that
+# reaches multi-user with a healthy root marks the OTA success and promotes
+# ota_work/ to backup/. Every other path (panic, hang, power cut) leaves
+# STATUS=applied and the next initramfs boot rolls back.
+DefaultDependencies=no
+After=local-fs.target
+ConditionPathExists=/var/lib/armbian-ota/ota-state.env
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/grep -qxF OTA_MODE=recovery /var/lib/armbian-ota/ota-state.env
+ExecCondition=/usr/bin/grep -qxF STATUS=applied /var/lib/armbian-ota/ota-state.env
+ExecStart=/usr/lib/armbian/armbian-ota-health-check
+ExecStartPost=/usr/sbin/armbian-ota mark-success
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
