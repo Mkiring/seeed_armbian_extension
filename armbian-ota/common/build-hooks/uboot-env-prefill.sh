@@ -85,9 +85,43 @@ function ota_uboot_env_prefill_compose() {
         printf 'bootcmd=setenv bootargs "${bootargs} armbian.bootdev=${devtype} armbian.bootdevnum=${devnum}"; %s\n' \
             "${bootcmd_value}" > "${override_env}"
     fi
+    if ! ota_raw_boot_enabled; then
+        # Plain images enter recovery through the distro-scan override.
+        # Raw-FIT (secure) images ride the bootcmd's raw-fit branch and
+        # get their recovery entry once that path is board-verified.
+        ota_uboot_env_recovery_scan_override >> "${override_env}"
+    fi
 
     ota_ab_merge_uboot_env_files "${final_env}" "${default_env}" "${override_env}"
     rm -f "${override_env}"
+}
+
+# Recovery-slot entry for plain (ext4 boot) images: intercept the distro
+# scan so ota_recovery=1 boots /boot/recovery/recovery.itb before any
+# boot.scr runs. Board-verified 2026-10-28 (rk3588 NVMe, full auto loop).
+# Design notes baked into this text:
+# - Pure env: OTA packages never rewrite it, so a package boot.tar that
+#   replaces boot.scr/uInitrd cannot strip the recovery net (D22).
+# - Exhaustion is string-compared: vendor hush parses "test -le" operands
+#   decimal-only ("0x2" reads as 0) while setexpr always stores hex
+#   strings, so a numeric compare would exhaust the budget after one
+#   decrement (D25).
+# - The retry decrement sits AFTER ext4load succeeds: boot_targets scans
+#   usb/mmc before nvme, so the override runs once per candidate device
+#   and only the device actually holding the itb may consume a retry.
+# - The FIT loads at 0x20000000, clear of kernel_addr_r/fdt_addr_r/
+#   ramdisk_addr_r, and must be an external layout (-E -p 0x1000) FIT:
+#   the vendor bootm pre-process parses data-offset bookkeeping and dies
+#   silently on embedded FITs (D24).
+# - console args keep the recovery session visible on the serial line:
+#   this branch never runs boot.scr, which is where they normally come
+#   from (observed as a silent 27s recovery session on board).
+# - Every failure mode falls through to the original scan body, so a bad
+#   FIT, a missing file or a broken env can never brick the board.
+function ota_uboot_env_recovery_scan_override() {
+    cat <<'EOF'
+scan_dev_for_boot=if test "${ota_recovery}" = "1"; then if test -z "${ota_recovery_retry}" || test "${ota_recovery_retry}" = "0" || test "${ota_recovery_retry}" = "0x0"; then echo "OTA: retry exhausted, normal boot"; setenv ota_recovery 0; saveenv; else if ext4load ${devtype} ${devnum}:${distro_bootpart} 0x20000000 /recovery/recovery.itb; then setexpr ota_recovery_retry ${ota_recovery_retry} - 1; saveenv; echo "OTA: entering recovery slot (retry left ${ota_recovery_retry})"; setenv bootargs "${bootargs} ota_recovery_boot=1 console=ttyFIQ0,1500000n8"; bootm 0x20000000; echo "OTA: recovery bootm returned, falling back"; fi; fi; fi; echo Scanning ${devtype} ${devnum}:${distro_bootpart}...; for prefix in ${boot_prefixes}; do run scan_dev_for_extlinux; run scan_dev_for_scripts; done
+EOF
 }
 
 # Validate that the env area fits between the u-boot loader blob and
@@ -145,6 +179,10 @@ for entry in blob[4:].split(b"\0"):
 ')" || exit_with_error "Env blob readback failed" "${env_info}"
     grep -q '^bootcmd=.*armbian\.bootdev' <<< "${env_info}" ||
         exit_with_error "Prefilled env lacks bootdev token" "bootcmd not carried into blob"
+    if ! ota_raw_boot_enabled; then
+        grep -q '^scan_dev_for_boot=.*ota_recovery' <<< "${env_info}" ||
+            exit_with_error "Prefilled env lacks recovery scan override" "scan_dev_for_boot not carried into blob"
+    fi
 
     display_alert "OTA U-Boot env prefill" "$(grep '^bootcmd=' <<< "${env_info}")" "info"
 }
