@@ -84,10 +84,10 @@ recovery_start_ota() {
 
 # Design section 6.5: called by the health-check service only after the
 # boot was confirmed healthy. Promotes ota_work/ to backup/ (or deletes it
-# when OTA_KEEP_BACKUP=no), clears the partial flag, syncs the rootfs-side
-# mirror to success.
+# when OTA_KEEP_BACKUP=no), syncs the rootfs-side mirror to success. The
+# partial flag only clears when the surviving backup carries a rootfs payload.
 recovery_mark_success() {
-    local status
+    local status partial_next=0
 
     init_logging
     acquire_lock || error_exit "Cannot acquire OTA lock"
@@ -115,7 +115,20 @@ recovery_mark_success() {
                 [ -d "${retired}" ] && mv "${retired}" "${OTA_BACKUP_DIR}" 2>/dev/null
                 error_exit "failed to promote ota_work/ to backup/ (previous backup restored)"
             fi
-        elif [ ! -d "${OTA_BACKUP_DIR}" ]; then
+        elif [ -d "${OTA_BACKUP_DIR}" ]; then
+            # ota_work vanished under us (observed 2026-10-28: a stale
+            # initramfs convicted the transaction and deleted it). Only
+            # clear PARTIAL when the surviving backup still carries a full
+            # rootfs payload; a boot-only leftover must keep PARTIAL=1 or
+            # the next rollback walks the full-verify path, fails, and
+            # clears the net as "corrupt".
+            if ls "${OTA_BACKUP_DIR}"/rootfs.tar.* >/dev/null 2>&1; then
+                log_info "WARN: ota_work/ gone; backup/ still carries the full payload"
+            else
+                partial_next=1
+                log_info "WARN: ota_work/ gone and backup/ lacks rootfs payload; keeping BACKUP_PARTIAL=1"
+            fi
+        else
             log_info "WARN: neither ota_work/ nor backup/ present; keeping state only"
         fi
     else
@@ -125,14 +138,14 @@ recovery_mark_success() {
 
     state_mark_completed "recovery" "success"
     state_set "RETRY_COUNT" "0"
-    state_set "BACKUP_PARTIAL" "0"
+    state_set "BACKUP_PARTIAL" "${partial_next}"
 
     # keep the rootfs mirror in agreement with the transaction state
     if [ -f "${OTA_ROOTFS_STATE_FILE}" ]; then
         sed -i \
             -e 's/^STATUS=.*/STATUS=success/' \
             -e 's/^RETRY_COUNT=.*/RETRY_COUNT=0/' \
-            -e 's/^BACKUP_PARTIAL=.*/BACKUP_PARTIAL=0/' \
+            -e "s/^BACKUP_PARTIAL=.*/BACKUP_PARTIAL=${partial_next}/" \
             "${OTA_ROOTFS_STATE_FILE}" 2>/dev/null || true
     fi
 
