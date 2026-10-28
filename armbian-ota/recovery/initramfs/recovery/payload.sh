@@ -629,8 +629,13 @@ ota_clean_overlay_upper() {
 
     rm -rf "${upper}/lib/modules" "${upper}/usr/lib/modules" 2>/dev/null
     rm -f "${upper}/etc/overlayroot.conf" 2>/dev/null
+    # A whiteout left in upper for the rootfs-side state mirror permanently
+    # shadows the mirror the recovery seeds into the new lower rootfs
+    # (observed on board 2026-10-28): the health service then never sees
+    # STATUS=applied and the transaction stays unconfirmed forever.
+    rm -f "${upper}/var/lib/armbian-ota/ota-state.env" 2>/dev/null
     sync
-    log "overlay upper cleaned (modules shadow + overlayroot.conf)"
+    log "overlay upper cleaned (modules shadow + overlayroot.conf + state mirror whiteout)"
     return 0
 }
 

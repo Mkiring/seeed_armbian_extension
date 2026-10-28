@@ -100,7 +100,13 @@ done <<'EOF'
 /usr/bin /usr/bin/udevadm /bin/udevadm
 /usr/bin /usr/bin/sleep /bin/sleep
 /usr/sbin /usr/sbin/reboot /sbin/reboot
+/usr/sbin /usr/sbin/fw_setenv /usr/bin/fw_setenv /sbin/fw_setenv /bin/fw_setenv
+/usr/sbin /usr/sbin/fw_printenv /usr/bin/fw_printenv /sbin/fw_printenv /bin/fw_printenv
 EOF
+
+# fw_setenv from u-boot-tools pulls libubootenv (and its libyaml) through
+# copy_exec's ldd walk, so the env-write path (recovery gate, leave-mode)
+# works inside the initramfs without manual library staging.
 
 # e2fsprogs ships mkfs.ext4 as a symlink to mke2fs. The initramfs busybox
 # already installs its own mke2fs applet hardlink at that path, and busybox

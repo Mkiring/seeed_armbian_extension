@@ -121,6 +121,36 @@ unmount_recovery_transaction_store() {
     fi
 }
 
+# /etc/fw_env.config for fw_setenv: the env blob lives in the raw area of
+# the disk U-Boot booted from (0x3f8000/0x8000, vendor CONFIG_ENV_*).
+# Derive the disk from the cmdline anchoring tokens first (the true boot
+# disk under multi-disk clones), then fall back to the parent of the boot
+# partition the applier already resolved.
+ota_fw_env_config_write() {
+    [ -f /etc/fw_env.config ] && return 0
+    disk="$(recovery_boot_disk 2>/dev/null || true)"
+    if [ -z "${disk}" ] && [ -b "${BOOT_DEV:-}" ]; then
+        disk="$(printf '%s' "${BOOT_DEV}" | sed -E 's/p[0-9]+$//')"
+    fi
+    [ -b "${disk}" ] || {
+        log "WARN: cannot derive uboot env disk (BOOT_DEV=${BOOT_DEV:-unset})"
+        return 1
+    }
+    printf '%s 0x3f8000 0x8000\n' "${disk}" > /etc/fw_env.config
+}
+
+# Design 3.4: clear the recovery-entry env after a finished recovery
+# session and arm the first-boot confirm window. Best effort: when
+# fw_setenv fails the U-Boot retry counter is the outer net.
+ota_recovery_leave_mode() {
+    ota_fw_env_config_write || return 1
+    if fw_setenv ota_recovery 0 && fw_setenv ota_confirm_wait 1; then
+        log "recovery mode: ota_recovery=0 cleared, first-boot confirm window armed"
+    else
+        log "WARN: fw_setenv clear failed (env retry counter is the outer net)"
+    fi
+}
+
 ota_applier_main() {
     mkdir -p "$LOGDIR"
     log "init-premount ota hook start"
@@ -158,6 +188,18 @@ ota_applier_main() {
         prepared) ota_run_prepared ;;
         applied)  ota_run_rollback ;;
         *)
+            if grep -q 'ota_recovery_boot=1' /proc/cmdline 2>/dev/null; then
+                # Recovery-slot boot with no pending transaction: leave
+                # recovery mode and reboot into the normal slot. Never hand
+                # off into the real root from the recovery context.
+                if ota_recovery_leave_mode; then
+                    log "recovery gate: ota_recovery=0 cleared, rebooting to normal slot"
+                else
+                    log "recovery gate: env write unavailable; rebooting anyway (retry counter is the outer net)"
+                fi
+                sync
+                reboot -f
+            fi
             log "OTA state=${OTA_STATUS:-none}, nothing to do"
             unmount_recovery_transaction_store
             exit 0
@@ -282,6 +324,10 @@ ota_run_rollback() {
     stop_heartbeat
 
     ota_patch_config
+    # A rolled-back boot must not re-enter recovery on its next boot:
+    # clear the env before the confirm reboot (design 3.4). The rollback
+    # commits applied again, so the health service still confirms it.
+    ota_recovery_leave_mode
     ota_commit_applied_state
     ota_unmount_all
     unmount_recovery_transaction_store
@@ -407,6 +453,11 @@ ota_run_prepared() {
     # rollback death loop still reaches its stop-loss.
     state_reset_retry "${STATE_FILE}"
     ota_commit_applied_state
+
+    # Design 3.4: leave recovery mode before rebooting into the applied
+    # system. The health service confirms on the applied system; if it
+    # never runs, the normal-side hook re-arms this env (design 3.6).
+    ota_recovery_leave_mode
 
     # 9) unmount partitions
     ota_unmount_all
