@@ -128,10 +128,11 @@ function pre_umount_final_image__904_recovery_seed_fit() {
     fi
 
     # populate_dtb reads the dtb from the resource image and matches it by
-    # the rk-kernel.dtb name the vendor toolchain expects.
+    # the rk-kernel.dtb name the vendor toolchain expects. The tool takes
+    # the output via --image=, not as a positional argument.
     mkdir -p "${work}/res"
     cp "${dtb_file}" "${work}/res/rk-kernel.dtb"
-    "${resource_bin}" --pack "${work}/resource.img" "${work}/res/rk-kernel.dtb" >/dev/null ||
+    "${resource_bin}" --pack --image="${work}/resource.img" "${work}/res/rk-kernel.dtb" >/dev/null ||
         {
             display_alert "Recovery FIT" "resource_tool pack failed" "err"
             umount "${boot_mount}"
