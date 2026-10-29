@@ -345,7 +345,12 @@ function ota_find_boot_partition() {
 function ota_resolve_boot_partition() {
     local ota_security_mode="$1"
     local boot_partition_var="$2"
-    local boot_partition=""
+    # NB: deliberately NOT named boot_partition -- printf -v below assigns
+    # the innermost binding of the target name, so an internal local with
+    # the same name callers conventionally pass would swallow the result
+    # and leave the caller's variable empty (broke the FIT seed and the
+    # userdata backup seed hooks on 2026-10-29 builds).
+    local ota_resolved_boot=""
 
     if [[ "${ota_security_mode}" == "secure-boot-encrypted-rootfs" ]]; then
         display_alert "Secure boot mode" "Skipping partition detection" "info"
@@ -353,8 +358,8 @@ function ota_resolve_boot_partition() {
         display_alert "AB partition OTA" "Detecting A-slot partitions" "info"
 
         if [[ -n "${AB_BOOT_A_PART_INDEX:-}" ]]; then
-            boot_partition="${LOOP}p${AB_BOOT_A_PART_INDEX}"
-            display_alert "AB partition OTA" "Using boot_a partition: ${boot_partition}" "info"
+            ota_resolved_boot="${LOOP}p${AB_BOOT_A_PART_INDEX}"
+            display_alert "AB partition OTA" "Using boot_a partition: ${ota_resolved_boot}" "info"
         fi
     else
         local partition_info partition_line partition_name mount_point full_path
@@ -368,8 +373,8 @@ function ota_resolve_boot_partition() {
                 full_path="/dev/${partition_name}"
 
                 if [[ -b "${full_path}" && -n "${mount_point}" ]]; then
-                    if [[ "${mount_point}" == *"/boot" && -z "${boot_partition}" ]]; then
-                        boot_partition="${full_path}"
+                    if [[ "${mount_point}" == *"/boot" && -z "${ota_resolved_boot}" ]]; then
+                        ota_resolved_boot="${full_path}"
                         display_alert "Detected boot partition by mount point" "${full_path} (mounted at ${mount_point})" "info"
                     fi
                 fi
@@ -377,11 +382,11 @@ function ota_resolve_boot_partition() {
         fi
     fi
 
-    if [[ "${ota_security_mode}" != "secure-boot-encrypted-rootfs" && -z "${boot_partition}" ]]; then
+    if [[ "${ota_security_mode}" != "secure-boot-encrypted-rootfs" && -z "${ota_resolved_boot}" ]]; then
         ota_find_boot_partition boot_partition || true
     fi
 
-    printf -v "${boot_partition_var}" '%s' "${boot_partition}"
+    printf -v "${boot_partition_var}" '%s' "${ota_resolved_boot}"
 }
 
 function ota_report_payload_sources() {
