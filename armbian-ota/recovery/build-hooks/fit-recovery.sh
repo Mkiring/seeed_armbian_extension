@@ -5,10 +5,11 @@
 # hook builds that FIT from the image's own kernel, dtb and initramfs and
 # seeds it into the boot partition, so:
 # - the recovery net exists from the very first boot of a fresh image;
-# - every OTA package carries a current copy, because package-create
-#   archives the boot partition after this hook ran (D22 fix: the package
-#   boot.tar used to replace the boot files and strip hand-installed
-#   recovery infrastructure).
+# - every OTA package carries a current copy: this hook runs at 898,
+#   before package-create (901) archives the boot partition (D22 fix:
+#   the package boot.tar used to replace the boot files and strip
+#   hand-installed recovery infrastructure, and old images taking their
+#   first OTA had no way to obtain the FIT at all).
 #
 # FIT shape (all board-mandated, see 中转站 D14/D20/D24):
 # - external layout: mkimage -E -p 0x1000. The vendor bootm pre-process
@@ -73,7 +74,7 @@ function ota_recovery_fit_stage_keys() {
     return 0
 }
 
-function pre_umount_final_image__904_recovery_seed_fit() {
+function pre_umount_final_image__898_recovery_seed_fit() {
     [[ "${OTA_ENABLE:-}" == "yes" && "${AB_PART_OTA:-no}" != "yes" ]] || return 0
     ota_secure_boot_encrypted_rootfs_enabled && {
         # Raw-FIT secure images enter recovery through the bootcmd raw
