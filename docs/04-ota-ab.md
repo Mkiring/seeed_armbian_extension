@@ -28,7 +28,7 @@ CRYPTROOT_PASSPHRASE='<64-char-passphrase>' \
 ```
 
 Update packages are built the same way as for Recovery — every build emits
-`*_AB_PART_OTA.tar.gz` under `output/images/<BOARD>/ota/`.
+`*_AB_PART_OTA.tar.xz` under `output/images/<BOARD>/ota/`.
 
 ## 2. Partition layout
 
@@ -65,7 +65,7 @@ Notes:
 **On device:**
 
 ```bash
-armbian-ota start /path/to/Armbian_..._AB_PART_..._OTA.tar.gz
+armbian-ota start /path/to/Armbian_..._AB_PART_..._OTA.tar.xz
 reboot
 ```
 

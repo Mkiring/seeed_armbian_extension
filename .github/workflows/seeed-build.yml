@@ -717,8 +717,8 @@ jobs:
           sparse-checkout: .github
           fetch-depth: 1
 
-      # Each row pairs an .img.xz with its _OTA.tar.gz (matched by
-      # filename stem) and links both via rclone share links; the Type
+      # Each row pairs an .img.xz with its _OTA.tar.* package (matched by
+      # filename stem, any outer codec suffix) and links both via rclone
       # column comes from the OneDrive directory (rec/ab/sec).
       - name: Generate release document from template + OneDrive listing
         env:
@@ -797,9 +797,15 @@ jobs:
                       var_txt = VARIANT.get(var, var.replace("_desktop", "").title())
                       img_i = ref(link(f"{d}/{name}"))
                       cell = f"[IMAGE][{img_i}]"
-                      ota = stem + "_OTA.tar.gz"
-                      if ota in ota_files:
-                          ota_i = ref(link(f"{d}/ota/{ota}"))
+                      # The outer shell codec follows OTA_PAYLOAD_COMP, so the
+                      # package suffix is .tar.gz / .tar.xz / .tar.zst --
+                      # match the stem, not one hard-coded suffix.
+                      ota_cands = sorted(
+                          o for o in ota_files
+                          if o.startswith(stem + "_OTA.tar.")
+                      )
+                      if ota_cands:
+                          ota_i = ref(link(f"{d}/ota/{ota_cands[0]}"))
                           cell = f"[IMAGE][{img_i}] \\| [OTA][{ota_i}]"
                       rows.append(f'|<img src="{icon}" width="20" height="20"> '
                                   f'<span>{dist}</span>|{var_txt}|{typ}|{human(files[name])}|{cell} |')

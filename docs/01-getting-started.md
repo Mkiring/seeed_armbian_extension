@@ -78,7 +78,7 @@ What happens: the wrapper resolves the profile into environment variables
 | Artifact | Path | Purpose |
 |---|---|---|
 | image | `output/images/Armbian_*.img.xz` | flash-ready GPT, stock name (no `_RECOVERY` suffix) |
-| OTA package | `output/images/<BOARD>/ota/*_OTA.tar.gz` | update payload for the image above |
+| OTA package | `output/images/<BOARD>/ota/*_OTA.tar.*` / `*_OTA.tar.xz` / `*_OTA.tar.zst` | update payload for the image above |
 | checksums | `<artifact>.sha256` / `<image>_OTA.checksums` | verify downloads |
 | U-Boot deb | `output/debs/linux-u-boot-<board>-<branch>[-secure]_*.deb` | signed loaders for hand-flashing (secure-boot builds, [06 §2](06-secure-boot.md)) |
 

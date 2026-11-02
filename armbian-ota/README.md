@@ -201,7 +201,7 @@ Logs land in `/run/initramfs/ota.log` (carried into the running system via `/run
 
 ```bash
 # On target system
-armbian-ota start Armbian_xxx_OTA.tar.gz
+armbian-ota start Armbian_xxx_OTA.tar.zst
 reboot
 ```
 
@@ -302,7 +302,7 @@ At build time `uboot-default-env.sh` extracts U-Boot's compiled default environm
 
 ## OTA Package Contents
 
-The OTA package (`*_OTA.tar.gz`; A/B adds an `_AB_PART` marker, Recovery uses stock image names — the mode lives in `package.env`) contains:
+The OTA package (`*_OTA.tar.gz` / `*_OTA.tar.xz` / `*_OTA.tar.zst` — outer codec follows the build default, zstd for plain recovery and xz for A/B; A/B adds an `_AB_PART` marker, Recovery uses stock image names — the mode lives in `package.env`) contains:
 
 - `rootfs.tar.gz` + `rootfs.sha256` — root filesystem payload (required)
 - `boot.tar.gz` + `boot.sha256` — boot partition payload (plain/auto-decrypt with separate boot partition)

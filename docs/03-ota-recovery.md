@@ -68,7 +68,7 @@ Any later build with the same profile **also** emits an OTA package next to
 the image:
 
 ```text
-output/images/<BOARD>/ota/Armbian_*_OTA.tar.gz
+output/images/<BOARD>/ota/Armbian_*_OTA.tar.*
 ```
 
 Stock image names — no `_RECOVERY` suffix; the OTA mode is recorded in
@@ -92,7 +92,7 @@ Transfer the package to the device any way you like — scp, USB stick,
 download:
 
 ```bash
-scp output/images/<BOARD>/ota/Armbian_*_OTA.tar.gz root@<device>:/root/
+scp output/images/<BOARD>/ota/Armbian_*_OTA.tar.* root@<device>:/root/
 ```
 
 ## 4. Apply an update on the device
@@ -100,7 +100,7 @@ scp output/images/<BOARD>/ota/Armbian_*_OTA.tar.gz root@<device>:/root/
 **On device:**
 
 ```bash
-armbian-ota start /path/to/Armbian_..._OTA.tar.gz
+armbian-ota start /path/to/Armbian_..._OTA.tar.zst
 reboot
 ```
 
