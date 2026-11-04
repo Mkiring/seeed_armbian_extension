@@ -1,0 +1,82 @@
+From: mingzq <north_sea@qq.com>
+Date: Tue, 4 Nov 2026 09:30:00 +0000
+Subject: [PATCH] rk3572: fail-safe default environment for OTA rescue routing
+
+The single-copy U-Boot env blob (0x3f8000, no redundant copy) can lose
+its CRC when saveenv hits a power cut mid-write. In that state U-Boot
+falls back to the compiled default environment, which must fail SAFE:
+route into the independent OTA Rescue assets in boot/recovery/
+(Image/uInitrd/board.dtb) instead of the vendor bootcmd chain.
+
+This is the v2025.04 (rockchip-linux v5 branch) counterpart of the
+rk3576/rk3588 patch, adapted to the tree's structure:
+
+- embed the p1-anchored ota_rescue_boot script in the default env via
+  CFG_EXTRA_ENV_SETTINGS (the tree dropped config_distro_bootcmd.h and
+  BOOTENV); its distro_bootcmd fallback resolves to the hand-rolled
+  scan chain the armbian framework patch 0001 adds to this header, so
+  plain and A/B builds, which carry no /recovery/ assets, boot as if
+  this patch were absent (self-routing);
+- redefine the default bootcmd to "run ota_rescue_boot". The vendor
+  tree composes its own chain (boot_android/boot_fit/bootflow scan)
+  in rockchip-common.h through #undef/#define CONFIG_BOOTCOMMAND --
+  the same idiom is used once more here, after that include, so it
+  wins over both rockchip-common.h and the Kconfig default;
+- devtype/devnum are set by env_import_board() (bootdev.c, following
+  the SPL-atags boot device) during initr_env, before bootcmd runs, so
+  the p1-anchored ext4loads are always anchored -- this tree's
+  equivalent of the radxa trees' RKIMG_DET_BOOTDEV/rkimg_bootdev.
+
+Only ota_rescue_boot lives here -- the default bootcmd is its sole
+consumer. The transactional keys (ota_in_progress/ota_boot_next/
+ota_normal_boot) ride in the prefilled env blob, and fw_env tools read
+that blob, never this compiled default. console is hardcoded to the
+rk35xx serial line like the other two copies (build-time prefill,
+fwenv re-injection) so the three cannot drift.
+
+---
+--- a/include/configs/rk3572_common.h
++++ b/include/configs/rk3572_common.h
+@@ -62,6 +62,22 @@
+ 	"kernel_comp_addr_r=0x45480000\0"	\
+ 	"kernel_comp_size=0x2000000\0"
+ 
++/*
++ * Seeed OTA rescue routing (v0.8 design section 3.4): the single-copy env
++ * blob at 0x3f8000 can lose its CRC when saveenv hits a power cut. The
++ * compiled default environment must fail SAFE in that case -- boot the
++ * independent Rescue in boot/recovery/, or the hand-rolled distro scan
++ * chain below without it. Only ota_rescue_boot lives here (the default
++ * bootcmd is its sole consumer); console is hardcoded to the rk35xx
++ * serial line like the other two copies -- build-time prefill and fwenv
++ * re-injection -- so the three cannot drift: an env-script ${console}
++ * evaluates empty and blinds the rescue console. devtype/devnum are set
++ * by env_import_board() from the SPL-atags boot device before bootcmd
++ * runs, so the p1-anchored ext4loads are always anchored.
++ */
++#define OTA_RESCUE_ENV_SETTINGS \
++	"ota_rescue_boot=ext4load ${devtype} ${devnum}:1 ${kernel_addr_r} /recovery/Image && ext4load ${devtype} ${devnum}:1 ${ramdisk_addr_r} /recovery/uInitrd && ext4load ${devtype} ${devnum}:1 ${fdt_addr_r} /recovery/board.dtb && setenv bootargs \"root=LABEL=armbi_root rootwait rootfstype=ext4 console=ttyFIQ0,1500000n8 armbian.bootdev=${devtype} armbian.bootdevnum=${devnum} armbian.ota_role=recovery\" && booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r} || run distro_bootcmd\0"
++
+ #define CFG_EXTRA_ENV_SETTINGS		\
+ 	"fdtfile=" CONFIG_DEFAULT_FDT_FILE "\0"	\
+ 	"partitions=" PARTS_DEFAULT	\
+@@ -74,6 +90,18 @@
+ 	"boot_scsi=if scsi scan; then setenv devtype scsi; setenv devnum 0; run scan_dev_for_boot_part; fi\0"	\
+ 	"boot_usb=usb start; setenv devtype usb; setenv devnum 0; run scan_dev_for_boot_part\0"	\
+ 	"scan_dev_for_boot_part=part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; for distro_bootpart in ${devplist}; do run scan_dev_for_boot; done\0"	\
+-	"scan_dev_for_boot=if load ${devtype} ${devnum}:${distro_bootpart} ${scriptaddr} /boot/boot.scr; then source ${scriptaddr}; fi; if load ${devtype} ${devnum}:${distro_bootpart} ${scriptaddr} boot.scr; then source ${scriptaddr}; fi\0"
++	"scan_dev_for_boot=if load ${devtype} ${devnum}:${distro_bootpart} ${scriptaddr} /boot/boot.scr; then source ${scriptaddr}; fi; if load ${devtype} ${devnum}:${distro_bootpart} ${scriptaddr} boot.scr; then source ${scriptaddr}; fi\0"	\
++	OTA_RESCUE_ENV_SETTINGS
++
++/*
++ * Seeed OTA rescue routing: rockchip-common.h composes the vendor bootcmd
++ * chain (boot_android/boot_fit/bootflow scan) via the same #undef/#define
++ * idiom -- redefine it once more AFTER that include so "run
++ * ota_rescue_boot" wins. ota_rescue_boot falls through to distro_bootcmd
++ * (the hand-rolled scan chain above) when /recovery/ assets are absent,
++ * so plain and A/B builds boot as if this patch were absent.
++ */
++#undef CONFIG_BOOTCOMMAND
++#define CONFIG_BOOTCOMMAND "run ota_rescue_boot"
+ 
+ #endif /* __CONFIG_RK3538_COMMON_H */
