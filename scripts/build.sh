@@ -36,8 +36,10 @@ EXTRA_PASSTHROUGH=()
 
 CRYPTROOT_PASSPHRASE="${CRYPTROOT_PASSPHRASE:-}"
 
-# Valid option values
-VALID_BOARDS="recomputer-rk3576-devkit recomputer-rk3588-devkit recomputer-rk3576-industrial recomputer-rk3576-module-devkit"
+# Valid option values. Boards are matched by prefix instead of a fixed list:
+# any recomputer-* board defined in the build tree is accepted, so adding a
+# new board needs no build.sh change (compile.sh owns the existence check).
+VALID_BOARD_PREFIX="recomputer-"
 VALID_DESKTOPS="gnome xfce kde-plasma mate cinnamon"
 VALID_TIERS="minimal mid full"
 VALID_OTA_FORMATS="xz gz zstd"
@@ -61,8 +63,7 @@ Options:
 
   Build config:
   -b, --board BOARD           Board name (default: recomputer-rk3576-devkit)
-                              Options: recomputer-rk3576-devkit, recomputer-rk3588-devkit,
-                                       recomputer-rk3576-industrial, recomputer-rk3576-module-devkit
+                              Any recomputer-* board known to the build tree
   -R, --release RELEASE       Release/distro (default: bookworm)
                               Debian:  trixie, bookworm, bullseye, buster, sid, forky, resolute
                               Ubuntu:  plucky, oracular, noble, jammy, focal, questing
@@ -267,7 +268,9 @@ while [[ $# -gt 0 ]]; do
         # Build config
         -b|--board)
             [[ $# -lt 2 ]] && die "Option '$1' requires a value."
-            validate_option "board" "$2" "$VALID_BOARDS"
+            if [[ "$2" != ${VALID_BOARD_PREFIX}* ]]; then
+                die "Invalid board '$2'. Expected a '${VALID_BOARD_PREFIX}*' board name (compile.sh validates it exists)."
+            fi
             BOARD="$2"
             shift 2
             ;;
