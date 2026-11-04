@@ -10,9 +10,10 @@ source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-default-env
 # Rescue-default-env U-Boot patch staging (recovery OTA v0.8 design 3.4):
 # staged for every flavor -- the default bootcmd self-routes (rescue assets
 # present -> Rescue, absent -> distro boot), so the patch is inert on plain
-# and A/B builds.
+# and A/B builds. The hook picks the patch per U-Boot tree (radxa rk3576/88
+# vs rockchip v2025.04 rk3572).
 # shellcheck source=/dev/null
-# source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-rescue-default-env.sh"
+source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-rescue-default-env.sh"
 
 if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
 	exit_with_error "RK_SECURE_UBOOT_ENABLE and RK_OPTEE_BOOT_ENABLE are mutually exclusive" "use secure-boot or secure-rootfs, not both"

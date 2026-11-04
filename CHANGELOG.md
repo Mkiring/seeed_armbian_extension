@@ -14,6 +14,17 @@ Covers the work against the initial import (merge base `9980aee`,
 
 #### Recovery OTA
 
+- **Fail-safe default environment on every U-Boot tree.** The
+  rescue-default-env patch (env-CRC-loss fallback: default `bootcmd` runs
+  `ota_rescue_boot`, which boots `/recovery/` assets or falls through to
+  `distro_bootcmd`) is staged again for every build flavor, now picking a
+  per-tree patch: the radxa rk3576/rk3588 patch as before, plus a new
+  rockchip v2025.04 variant for the rk3572 (`CFG_EXTRA_ENV_SETTINGS` in
+  `rk3572_common.h`; the default `bootcmd` is redefined after
+  `rockchip-common.h` composes its vendor chain, same `#undef/#define`
+  idiom). Staging was retired when the radxa patch failed to apply to the
+  v2025.04 tree — which silently dropped the CRC-failure fallback for
+  rk3576/rk3588 as well; per-tree selection restores both.
 - **Dedicated `/boot` partition for all Recovery images.** Plain and
   auto-decrypt Recovery builds now reserve a separate ext4 boot partition
   (label `armbi_boot`); the initramfs mounts it on top of overlayfs,
