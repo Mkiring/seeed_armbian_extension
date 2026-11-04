@@ -12,7 +12,7 @@ source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-default-env
 # present -> Rescue, absent -> distro boot), so the patch is inert on plain
 # and A/B builds.
 # shellcheck source=/dev/null
-source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-rescue-default-env.sh"
+# source "${SEEED_EXTENSION_ROOT}/armbian-ota/common/build-hooks/uboot-rescue-default-env.sh"
 
 if [[ "${RK_SECURE_UBOOT_ENABLE}" == "yes" && "${RK_OPTEE_BOOT_ENABLE}" == "yes" ]]; then
 	exit_with_error "RK_SECURE_UBOOT_ENABLE and RK_OPTEE_BOOT_ENABLE are mutually exclusive" "use secure-boot or secure-rootfs, not both"
