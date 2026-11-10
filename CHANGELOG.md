@@ -12,6 +12,30 @@ Covers the work against the initial import (merge base `9980aee`,
 
 ### Added
 
+#### Secure boot / auto-decryption on RK3572 (rockchip v2025.04 tree)
+
+- **The full secure-boot chain now covers the rk3572**, whose U-Boot comes
+  from the rockchip-linux v5 (v2025.04) tree and packs its FIT through the
+  SDK flow (`scripts/fit.sh` + rkbin `RK3572TRUST.ini`) instead of the
+  radxa trees' Makefile generator. Platform detection, the BL32 mapping
+  (`bin/rk35/rk3572_bl32_v1.06.bin`, upstream rkbin layout), a
+  `rk3572-secure-autodecrypt.config` fragment (FIT/SPL FIT signature, PSS;
+  earlycon on rk3572 UART0 `0x2c130000`; deliberately no
+  `SPL_FIT_GENERATOR`) and an `rk3572_fit_kernel.its` (load addresses
+  identical to rk3576) extend the existing per-platform tables. Full
+  secure boot dispatches to a v2025.04 signing path: fit-core.sh flips
+  into signing mode on its own when the fragment sets
+  `CONFIG_FIT_SIGNATURE=y`, so re-running the board's fit.sh postprocess
+  signs `uboot.img`, injects the key into the U-Boot/SPL DTBs, repacks the
+  loader with the signed SPL and host-verifies — after swapping the
+  tree-built `tools/mkimage` for the statically linked rkbin one (the
+  OpenSSL ≥ 3.5 PSS digest-length-salt pitfall). The chip-level idblock
+  signing and SPL key assertions are shared with the radxa path. The FIT
+  content check now also covers `uboot.img`. The `boot_fit_part`
+  environment-selected partition patch this tree needs (and the board
+  `CMD_BOOT_FIT` enable) land in the armbian-build tree's
+  `rk3572-vendor-v2025.04` patch dir / board hook.
+
 #### Production loaders (maskrom / SPI flash)
 
 - **Board u-boot production artifacts exported to the OneDrive

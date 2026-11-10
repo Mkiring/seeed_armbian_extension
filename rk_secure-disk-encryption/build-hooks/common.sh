@@ -57,6 +57,7 @@ function rk_platform_from_name() {
     case "${name}" in
         *rk3576*|*3576*) echo "rk3576" ;;
         *rk3588*|*3588*) echo "rk3588" ;;
+        *rk3572*|*3572*) echo "rk3572" ;;
         *) echo "unknown" ;;
     esac
 }
@@ -66,6 +67,7 @@ function rk_default_vendor_board() {
 
     case "${platform}" in
         rk3576|rk3588) echo "recomputer-${platform}-devkit" ;;
+        rk3572) echo "recomputer-zero" ;;
         *) echo "unknown" ;;
     esac
 }

@@ -46,8 +46,12 @@ function resolve_platform_bl32_blob() {
     local platform="$1"
 
     case "${platform}" in
+        # Blob paths carry their rkbin layout prefix: the radxa boards fetch a
+        # fork with a root-level rk35/, rk3572 fetches upstream rockchip-linux
+        # rkbin (bin/rk35/) per its board config.
         rk3576) echo "rk35/rk3576_bl32_v1.08.bin" ;;
         rk3588) echo "rk35/rk3588_bl32_v1.20.bin" ;;
+        rk3572) echo "bin/rk35/rk3572_bl32_v1.06.bin" ;;
         *) echo "" ;;
     esac
 }
@@ -200,7 +204,11 @@ function rk_secure_boot_check_produced_fit_image() {
         return 0
     fi
 
-    [[ "${base_binfile}" == "u-boot.itb" ]] || return 0
+    # u-boot.itb: radxa make-flow artifact; uboot.img: v2025.04 fit.sh flow.
+    case "${base_binfile}" in
+        u-boot.itb|uboot.img) ;;
+        *) return 0 ;;
+    esac
     rk_secure_boot_verify_fit_images "${binfile}"
 }
 
@@ -317,13 +325,77 @@ function rk_secure_boot_repack_signed_spl() {
     cat "${spl_dtb}" >> "${spl_bin}" || exit_with_error "Failed to append signed SPL DTB" "${spl_bin}"
 }
 
+function rk_secure_boot_uses_sdk_fit_flow() {
+    # The rockchip v2025.04 tree (rk3572) packs its U-Boot FIT through the SDK
+    # flow (scripts/fit.sh + rkbin inis via the board postprocess), not the
+    # Makefile SPL_FIT_GENERATOR path the radxa trees use.
+    [[ "$(rk_detect_platform)" == "rk3572" ]]
+}
+
+function rk_secure_boot_sign_uboot_fit_v2025_04() {
+    # Signed-flow counterpart for the v2025.04 tree. fit-core.sh flips into
+    # signing mode on its own when .config carries CONFIG_FIT_SIGNATURE=y (set
+    # by the rk3572 fragment), so re-running the board's fit.sh postprocess
+    # signs u-boot.its into fit/uboot.itb -> uboot.img, injects the key into
+    # u-boot.dtb and spl/u-boot-spl.dtb, repacks the loader with the signed
+    # SPL (--spl-new) and host-verifies via tree-built fit_check_sign.
+    #
+    # make.sh --raw-compile (fit.sh's first step under ARG_SIGN=y) does relink
+    # u-boot/SPL after clean_files, but from the same .config with the same
+    # toolchain (.cc, written by the board hook), so the result matches the
+    # Armbian build.
+    local platform keys_dir rk_sign_tool
+
+    platform="$(rk_detect_platform)"
+    keys_dir="${UBOOT_FIT_KEYS_DIR:-${PWD}/keys}"
+    rk_sign_tool="$(command -v rk_sign_tool 2>/dev/null || true)"
+    [[ -n "${rk_sign_tool}" ]] || rk_sign_tool="$(resolve_platform_rkbin_dir)/tools/rk_sign_tool"
+
+    [[ -f .config && -f spl/u-boot-spl.dtb ]] ||
+        exit_with_error "U-Boot signing inputs missing" "${PWD}"
+    [[ -x "${rk_sign_tool}" ]] || exit_with_error "rk_sign_tool missing for secure U-Boot build" "${rk_sign_tool}"
+    [[ -f "${keys_dir}/dev.key" && -f "${keys_dir}/dev.pubkey" && -f "${keys_dir}/dev.crt" ]] ||
+        exit_with_error "FIT signing key material missing" "${keys_dir}"
+    grep -qx 'CONFIG_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_FIT_SIGNATURE must be enabled for full secure boot" ".config"
+    grep -qx 'CONFIG_SPL_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_SPL_FIT_SIGNATURE must be enabled for full secure boot" ".config"
+    declare -F board_uboot_spl_blobs_postprocess >/dev/null ||
+        exit_with_error "v2025.04 secure U-Boot signing requires the board fit.sh postprocess" "board_uboot_spl_blobs_postprocess"
+
+    # fit-core.sh signs with ./tools/mkimage, a tree-built binary linked
+    # against the container's OpenSSL >= 3.5 (digest-length PSS salt, rejected
+    # by SPL). Swap in the statically linked rkbin mkimage -- the same fix as
+    # the radxa path. `make all` inside the re-run keeps it: an up-to-date
+    # binary is newer than its sources, so make does not rebuild over it.
+    # fit_check_sign stays tree-built on purpose: it runs the same verify code
+    # as SPL, so any salt drift fails the build instead of the boot.
+    rk_secure_boot_resolve_mkimage
+    install -m 0755 "${RK_SECURE_BOOT_MKIMAGE}" tools/mkimage ||
+        exit_with_error "Failed to stage the signing-capable mkimage" "tools/mkimage"
+
+    board_uboot_spl_blobs_postprocess "${BOOT_SOC}" "${RKBIN_DIR}/${DDR_BLOB}" "./spl/u-boot-spl.bin"
+
+    [[ -f uboot.img ]] || exit_with_error "Signed U-Boot FIT missing after fit.sh" "uboot.img"
+    [[ -f idbloader.img ]] || exit_with_error "Signed idbloader missing after fit.sh" "idbloader.img"
+    rk_secure_boot_minimize_spl_fit_key
+    rk_secure_boot_verify_fit_images uboot.img
+
+    rk_secure_boot_sign_loader_artifacts "${rk_sign_tool}" "${platform}" "${keys_dir}"
+    display_alert "secure-uboot" "Signed U-Boot FIT and loader artifacts via SDK fit.sh flow" "info"
+}
+
 function rk_secure_boot_sign_uboot_fit() {
     # Sign the Armbian-built ITS directly. Do not call Rockchip scripts/fit.sh:
     # with CONFIG_FIT_SIGNATURE it invokes make.sh --raw-compile and silently
     # rebuilds the already-built Armbian U-Boot with the vendor toolchain.
     # This hook instead injects the public key into the existing SPL DTB,
     # repacks the existing SPL, and host-verifies the resulting FIT.
+    # (The v2025.04/rk3572 tree dispatches to the SDK-flow variant instead.)
     rk_full_secure_boot_enabled || return 0
+
+    if rk_secure_boot_uses_sdk_fit_flow; then
+        rk_secure_boot_sign_uboot_fit_v2025_04
+        return 0
+    fi
 
     local platform keys_dir rk_sign_tool signed_fit fit_padding
     platform="$(rk_detect_platform)"
