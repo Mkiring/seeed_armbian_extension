@@ -33,7 +33,9 @@ Covers the work against the initial import (merge base `9980aee`,
   The signing mkimage must stay the tree-built one: the statically linked
   rockchip-linux rkbin prebuilt is a 2017.09 build whose external-FIT
   layout this tree's verifier rejects ("Failed to verify required
-  signature 'key-dev'"); the in-fit.sh fit_check_sign gate catches any
+  signature 'key-dev'"); the mkimage resolver now prefers the U-Boot
+  tree's `tools/mkimage` on this flow (covering the kernel boot.itb
+  signing as well) and the in-fit.sh fit_check_sign gate catches any
   signing-tool drift at build time. The FIT content check now also covers
   `uboot.img`. The `boot_fit_part` environment-selected partition patch
   and the `CMD_BOOT_FIT` defconfig enable land in the armbian-build

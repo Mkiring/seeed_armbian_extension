@@ -179,7 +179,19 @@ function rk_secure_boot_resolve_mkimage() {
     # mkimage is a host tool and FIT signing is SoC-agnostic, so any
     # signing-capable prebuilt serves both platforms.
     rkbin_dir="$(resolve_platform_rkbin_dir)"
-    local candidates=(
+    local candidates=()
+    # v2025.04 SDK-fit-flow (rk3572): the target tree's verifier (SPL and the
+    # tree-built fit_check_sign) rejects the rkbin prebuilt mkimage's 2017.09
+    # external-FIT layout ("Failed to verify required signature 'key-dev'").
+    # The tree's own tools/mkimage -- the one that signed uboot.img inside
+    # fit.sh -- is the only compatible signer for the kernel boot.itb too, so
+    # it takes precedence over every rkbin prebuilt on this flow.
+    # RK_SECURE_BOOT_UBOOT_DIR is resolved before the first resolve call.
+    if rk_secure_boot_uses_sdk_fit_flow &&
+        [[ -x "${RK_SECURE_BOOT_UBOOT_DIR:-}/tools/mkimage" ]]; then
+        candidates+=("${RK_SECURE_BOOT_UBOOT_DIR}/tools/mkimage")
+    fi
+    candidates+=(
         "${rkbin_dir}/tools/mkimage"
         "$(rk_sdk_rkbin_root)/rk3576_rkbin/tools/mkimage"
         "$(rk_sdk_rkbin_root)/rk3588_rkbin/tools/mkimage"
@@ -546,11 +558,11 @@ function rk_secure_boot_package_final_fit() {
     [[ -f "${kernel_img_path}" ]] || exit_with_error "FIT packaging failed: kernel image missing" "${kernel_img_path}"
     [[ -f "${dtb_path}" ]] || exit_with_error "FIT packaging failed: DTB missing" "${dtb_path}"
 
+    rk_secure_boot_resolve_uboot_dir
     rk_secure_boot_resolve_mkimage
     rk_secure_boot_prepare_fit_workdir "${fit_work}" "${kernel_img_path}" "${dtb_path}" "${resource_path}" "${RK_SECURE_BOOT_RAMDISK_PATH}"
     rk_secure_boot_apply_fit_template "${fit_work}"
     rk_secure_boot_generate_initial_fit "${fit_work}" "${RK_SECURE_BOOT_MKIMAGE}"
-    rk_secure_boot_resolve_uboot_dir
     rk_secure_boot_run_secondary_fit_signing "${fit_work}" "${RK_SECURE_BOOT_UBOOT_DIR}"
     rk_secure_boot_stage_final_fit "${fit_work}" "${RK_SECURE_BOOT_UBOOT_DIR}"
 
