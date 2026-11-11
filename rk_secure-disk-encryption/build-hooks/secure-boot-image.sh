@@ -6,6 +6,11 @@ function rk_secure_boot_kernel_bootargs() {
         rk3588)
             console_args="earlycon=uart8250,mmio32,0xfeb50000 console=ttyFIQ0 irqchip.gicv3_pseudo_nmi=0"
             ;;
+        rk3572)
+            # UART0 (fiq-debugger serial-id 0) is at 0x2c130000 on rk3572 --
+            # NOT the rk3576 address the fallback below carries.
+            console_args="earlycon=uart8250,mmio32,0x2c130000 console=ttyFIQ0"
+            ;;
         rk3576|*)
             console_args="earlycon=uart8250,mmio32,0x2ad40000 console=ttyFIQ0"
             ;;

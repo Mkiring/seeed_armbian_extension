@@ -452,6 +452,19 @@ Covers the work against the initial import (merge base `9980aee`,
 
 ### Fixed
 
+- **rk3572 kernel console silent after "Starting kernel ...".** Two gaps
+  stacked up: the DTB `/chosen/bootargs` injection fell through to the
+  rk3576 catch-all in `rk_secure_boot_kernel_bootargs()`, baking rk3576's
+  earlycon address `0x2ad40000` into the signed FIT (rk3572 UART0 is
+  `0x2c130000`), and on the env-driven fit flow the prefilled
+  `ota_normal_boot_fit`/`ota_rescue_boot_fit` bootargs — the ones bootm
+  actually passes — carried no earlycon, leaving the pre-console window
+  unobservable on secure-boot images whose U-Boot cannot be interrupted.
+  rk3572 now has its own console_args case, and its prefilled fit
+  bootargs prepend `earlycon=uart8250,mmio32,0x2c130000
+  ignore_loglevel`. Other platforms replay the full buffered log via
+  ttyFIQ0 once fiq-debugger registers and stay unchanged.
+
 - **Refresh after manual history-tree deletion.** The images page now omits
   expired history downloads when their OneDrive manifest is absent or
   unreadable, while keeping the GitHub Release metadata. Stable/pre-release manifests still require a
