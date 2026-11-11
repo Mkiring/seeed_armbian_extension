@@ -25,16 +25,19 @@ Covers the work against the initial import (merge base `9980aee`,
   identical to rk3576) extend the existing per-platform tables. Full
   secure boot dispatches to a v2025.04 signing path: fit-core.sh flips
   into signing mode on its own when the fragment sets
-  `CONFIG_FIT_SIGNATURE=y`, so re-running the board's fit.sh postprocess
-  signs `uboot.img`, injects the key into the U-Boot/SPL DTBs, repacks the
-  loader with the signed SPL and host-verifies — after swapping the
-  tree-built `tools/mkimage` for the statically linked rkbin one (the
-  OpenSSL ≥ 3.5 PSS digest-length-salt pitfall). The chip-level idblock
-  signing and SPL key assertions are shared with the radxa path. The FIT
-  content check now also covers `uboot.img`. The `boot_fit_part`
-  environment-selected partition patch this tree needs (and the board
-  `CMD_BOOT_FIT` enable) land in the armbian-build tree's
-  `rk3572-vendor-v2025.04` patch dir / board hook.
+  `CONFIG_FIT_SIGNATURE=y` before the build, so the framework's own
+  fit.sh packing call already signs `uboot.img` with `keys/`, injects the
+  key into the U-Boot/SPL DTBs, repacks the loader with the signed SPL,
+  signs the idblock via rk_sign_tool and host-verifies through the
+  tree-built fit_check_sign — the extension only asserts the artifacts.
+  The signing mkimage must stay the tree-built one: the statically linked
+  rockchip-linux rkbin prebuilt is a 2017.09 build whose external-FIT
+  layout this tree's verifier rejects ("Failed to verify required
+  signature 'key-dev'"); the in-fit.sh fit_check_sign gate catches any
+  signing-tool drift at build time. The FIT content check now also covers
+  `uboot.img`. The `boot_fit_part` environment-selected partition patch
+  and the `CMD_BOOT_FIT` defconfig enable land in the armbian-build
+  tree's `rk3572-vendor-v2025.04` patch dir (0003 / 0002).
 
 #### Production loaders (maskrom / SPI flash)
 

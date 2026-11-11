@@ -333,54 +333,34 @@ function rk_secure_boot_uses_sdk_fit_flow() {
 }
 
 function rk_secure_boot_sign_uboot_fit_v2025_04() {
-    # Signed-flow counterpart for the v2025.04 tree. fit-core.sh flips into
-    # signing mode on its own when .config carries CONFIG_FIT_SIGNATURE=y (set
-    # by the rk3572 fragment), so re-running the board's fit.sh postprocess
-    # signs u-boot.its into fit/uboot.itb -> uboot.img, injects the key into
-    # u-boot.dtb and spl/u-boot-spl.dtb, repacks the loader with the signed
-    # SPL (--spl-new) and host-verifies via tree-built fit_check_sign.
+    # Assertion-only counterpart for the v2025.04 tree. fit-core.sh flips
+    # into signing mode on its own when .config carries
+    # CONFIG_FIT_SIGNATURE=y (set by the rk3572 fragment BEFORE the build),
+    # so the framework's own packing call of the board postprocess already
+    # ran the complete signed flow: u-boot.its signed into fit/uboot.itb ->
+    # uboot.img with keys/, the public key injected into u-boot.dtb and
+    # spl/u-boot-spl.dtb, the loader repacked with the signed SPL
+    # (--spl-new), the idblock signed by rk_sign_tool inside make.sh, and
+    # the FIT host-verified by the tree-built fit_check_sign inside fit.sh.
     #
-    # make.sh --raw-compile (fit.sh's first step under ARG_SIGN=y) does relink
-    # u-boot/SPL after clean_files, but from the same .config with the same
-    # toolchain (.cc, written by the board hook), so the result matches the
-    # Armbian build.
-    local platform keys_dir rk_sign_tool
-
-    platform="$(rk_detect_platform)"
-    keys_dir="${UBOOT_FIT_KEYS_DIR:-${PWD}/keys}"
-    rk_sign_tool="$(command -v rk_sign_tool 2>/dev/null || true)"
-    [[ -n "${rk_sign_tool}" ]] || rk_sign_tool="$(resolve_platform_rkbin_dir)/tools/rk_sign_tool"
-
-    [[ -f .config && -f spl/u-boot-spl.dtb ]] ||
-        exit_with_error "U-Boot signing inputs missing" "${PWD}"
-    [[ -x "${rk_sign_tool}" ]] || exit_with_error "rk_sign_tool missing for secure U-Boot build" "${rk_sign_tool}"
-    [[ -f "${keys_dir}/dev.key" && -f "${keys_dir}/dev.pubkey" && -f "${keys_dir}/dev.crt" ]] ||
-        exit_with_error "FIT signing key material missing" "${keys_dir}"
+    # Deliberately NO mkimage swap and NO re-run of fit.sh here: the tree's
+    # own tools/mkimage is the only signer this tree's verifier (and SPL)
+    # accepts. The statically linked rockchip-linux rkbin mkimage is a
+    # 2017.09 build whose external-FIT (-E) layout predates this tree --
+    # it writes a conf signature the v2025.04 fit_check_sign rejects with
+    # "Failed to verify required signature 'key-dev'" (unlike the newer
+    # Seeed sdk_tools prebuilts the radxa path uses). The in-fit.sh
+    # fit_check_sign gate is the oracle: any signing-tool drift (e.g. a
+    # container OpenSSL >= 3.5 switching PSS to digest-length salt) fails
+    # the build instead of the boot.
+    [[ -f .config && -f uboot.img && -f idbloader.img ]] ||
+        exit_with_error "Signed U-Boot artifacts missing after the fit.sh packing call" "${PWD}"
     grep -qx 'CONFIG_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_FIT_SIGNATURE must be enabled for full secure boot" ".config"
     grep -qx 'CONFIG_SPL_FIT_SIGNATURE=y' .config || exit_with_error "CONFIG_SPL_FIT_SIGNATURE must be enabled for full secure boot" ".config"
-    declare -F board_uboot_spl_blobs_postprocess >/dev/null ||
-        exit_with_error "v2025.04 secure U-Boot signing requires the board fit.sh postprocess" "board_uboot_spl_blobs_postprocess"
 
-    # fit-core.sh signs with ./tools/mkimage, a tree-built binary linked
-    # against the container's OpenSSL >= 3.5 (digest-length PSS salt, rejected
-    # by SPL). Swap in the statically linked rkbin mkimage -- the same fix as
-    # the radxa path. `make all` inside the re-run keeps it: an up-to-date
-    # binary is newer than its sources, so make does not rebuild over it.
-    # fit_check_sign stays tree-built on purpose: it runs the same verify code
-    # as SPL, so any salt drift fails the build instead of the boot.
-    rk_secure_boot_resolve_mkimage
-    install -m 0755 "${RK_SECURE_BOOT_MKIMAGE}" tools/mkimage ||
-        exit_with_error "Failed to stage the signing-capable mkimage" "tools/mkimage"
-
-    board_uboot_spl_blobs_postprocess "${BOOT_SOC}" "${RKBIN_DIR}/${DDR_BLOB}" "./spl/u-boot-spl.bin"
-
-    [[ -f uboot.img ]] || exit_with_error "Signed U-Boot FIT missing after fit.sh" "uboot.img"
-    [[ -f idbloader.img ]] || exit_with_error "Signed idbloader missing after fit.sh" "idbloader.img"
     rk_secure_boot_minimize_spl_fit_key
     rk_secure_boot_verify_fit_images uboot.img
-
-    rk_secure_boot_sign_loader_artifacts "${rk_sign_tool}" "${platform}" "${keys_dir}"
-    display_alert "secure-uboot" "Signed U-Boot FIT and loader artifacts via SDK fit.sh flow" "info"
+    display_alert "secure-uboot" "SDK fit.sh signed-flow artifacts verified (tree-built mkimage)" "info"
 }
 
 function rk_secure_boot_sign_uboot_fit() {
